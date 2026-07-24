@@ -10,15 +10,15 @@
  * Battle          → tmux send‑keys + socket (interactive sessions only)
  */
 
-import { spawn, execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
-import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 
 // ─── Common ──────────────────────────────────────────────────────
 
@@ -93,7 +93,11 @@ function ensureSharedServer(): Promise<net.Server> {
 	if (serverReady) return serverReady;
 
 	serverReady = (async () => {
-		try { fs.unlinkSync(SHARED_SOCKET_PATH); } catch { /* ok */ }
+		try {
+			fs.unlinkSync(SHARED_SOCKET_PATH);
+		} catch {
+			/* ok */
+		}
 
 		const srv = net.createServer((socket) => {
 			/* Read exactly one length‑prefixed message and route by session */
@@ -138,11 +142,7 @@ function ensureSharedServer(): Promise<net.Server> {
 }
 
 /** Wait for a result message from a specific interactive sub‑agent. */
-function waitForResult(
-	sessionName: string,
-	signal?: AbortSignal,
-	timeoutMs = 600_000,
-): Promise<string> {
+function waitForResult(sessionName: string, signal?: AbortSignal, timeoutMs = 600_000): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => {
 			pendingWaiters.delete(sessionName);
@@ -154,7 +154,10 @@ function waitForResult(
 			pendingWaiters.delete(sessionName);
 			reject(new Error("Aborted"));
 		};
-		if (signal?.aborted) { onAbort(); return; }
+		if (signal?.aborted) {
+			onAbort();
+			return;
+		}
 		signal?.addEventListener("abort", onAbort, { once: true });
 
 		pendingWaiters.set(sessionName, { resolve, reject, timer });
@@ -163,13 +166,7 @@ function waitForResult(
 
 // ─── Non‑interactive: pi --print ────────────────────────────────
 
-function printRun(
-	task: string,
-	cwd: string,
-	model?: string,
-	tools?: string,
-	signal?: AbortSignal,
-): Promise<string> {
+function printRun(task: string, cwd: string, model?: string, tools?: string, signal?: AbortSignal): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const args = ["--print", "--no-session"];
 		if (model) args.push("--model", model);
@@ -189,9 +186,19 @@ function printRun(
 		proc.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
 		proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
 
-		const timeout = setTimeout(() => { proc.kill("SIGTERM"); reject(new Error("Sub‑agent timed out")); }, 600_000);
-		const abort = () => { clearTimeout(timeout); proc.kill("SIGTERM"); };
-		if (signal?.aborted) { abort(); reject(new Error("Aborted")); return; }
+		const timeout = setTimeout(() => {
+			proc.kill("SIGTERM");
+			reject(new Error("Sub‑agent timed out"));
+		}, 600_000);
+		const abort = () => {
+			clearTimeout(timeout);
+			proc.kill("SIGTERM");
+		};
+		if (signal?.aborted) {
+			abort();
+			reject(new Error("Aborted"));
+			return;
+		}
 		signal?.addEventListener("abort", abort, { once: true });
 
 		proc.on("close", (code) => {
@@ -204,6 +211,8 @@ function printRun(
 	});
 }
 
+type ContentPart = { type: string; text?: string };
+
 // ─── Extract last assistant text from a session ─────────────────
 
 function lastAssistantText(ctx: ExtensionContext): string {
@@ -212,8 +221,8 @@ function lastAssistantText(ctx: ExtensionContext): string {
 		const e = entries[i];
 		if (e.type === "message" && e.message.role === "assistant") {
 			const parts = (e.message.content ?? [])
-				.filter((c: any) => c.type === "text")
-				.map((c: any) => c.text);
+				.filter((c: ContentPart) => c.type === "text")
+				.map((c: ContentPart) => c.text);
 			const text = parts.join("\n").trim();
 			if (text) return text;
 		}
@@ -291,9 +300,7 @@ const SubagentParams = Type.Object({
 	close: Type.Optional(Type.Boolean({ description: "Close a session" })),
 	model: Type.Optional(Type.String({ description: "Model for single mode" })),
 	tools: Type.Optional(Type.String({ description: "Tools for single mode" })),
-	interactive: Type.Optional(
-		Type.Boolean({ description: "Spawn in tmux (attachable)", default: false }),
-	),
+	interactive: Type.Optional(Type.Boolean({ description: "Spawn in tmux (attachable)", default: false })),
 });
 
 // ─── Extension entry ─────────────────────────────────────────────
@@ -361,10 +368,12 @@ export default function (pi: ExtensionAPI) {
 				const s = sessions.get(params.session);
 				if (!s) {
 					return {
-						content: [{
-							type: "text",
-							text: `Session "${params.session}" not found. Active: ${Array.from(sessions.keys()).join(", ") || "none"}`,
-						}],
+						content: [
+							{
+								type: "text",
+								text: `Session "${params.session}" not found. Active: ${Array.from(sessions.keys()).join(", ") || "none"}`,
+							},
+						],
 						details: {},
 						isError: true,
 					};
@@ -431,7 +440,8 @@ export default function (pi: ExtensionAPI) {
 					theme.fg("toolTitle", theme.bold("subagent ")) +
 						theme.fg("accent", `parallel (${args.tasks.length}) `) +
 						theme.fg("muted", args.interactive ? "[tmux]" : "[print]"),
-					0, 0,
+					0,
+					0,
 				);
 			}
 			if (args.session) {
@@ -439,7 +449,8 @@ export default function (pi: ExtensionAPI) {
 					theme.fg("toolTitle", theme.bold("subagent ")) +
 						theme.fg("accent", "battle ") +
 						theme.fg("dim", args.session),
-					0, 0,
+					0,
+					0,
 				);
 			}
 			if (args.close) {
@@ -447,15 +458,17 @@ export default function (pi: ExtensionAPI) {
 					theme.fg("toolTitle", theme.bold("subagent ")) +
 						theme.fg("muted", "close ") +
 						theme.fg("dim", args.session ?? ""),
-					0, 0,
+					0,
+					0,
 				);
 			}
-			const preview = args.task?.length > 50 ? args.task.slice(0, 50) + "…" : args.task ?? "…";
+			const preview = args.task ? (args.task.length > 50 ? `${args.task.slice(0, 50)}…` : args.task) : "…";
 			return new Text(
 				theme.fg("toolTitle", theme.bold("subagent ")) +
 					theme.fg("muted", args.interactive ? "[tmux] " : "[print] ") +
 					theme.fg("dim", preview),
-				0, 0,
+				0,
+				0,
 			);
 		},
 
@@ -470,13 +483,11 @@ export default function (pi: ExtensionAPI) {
 						theme.fg("accent", details.session as string) +
 						"\n" +
 						theme.fg("toolOutput", text.slice(0, expanded ? undefined : 500)),
-					0, 0,
+					0,
+					0,
 				);
 			}
-			return new Text(
-				theme.fg("toolOutput", text.slice(0, expanded ? undefined : 1000)),
-				0, 0,
-			);
+			return new Text(theme.fg("toolOutput", text.slice(0, expanded ? undefined : 1000)), 0, 0);
 		},
 	});
 
@@ -484,7 +495,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event, ctx) => {
 		// Clean up temp dir when parent quits
 		if (event.reason === "quit") {
-			try { fs.rmSync(TMPDIR, { recursive: true, force: true }); } catch { /* ok */ }
+			try {
+				fs.rmSync(TMPDIR, { recursive: true, force: true });
+			} catch {
+				/* ok */
+			}
 		}
 
 		if (event.reason !== "quit") return;
@@ -507,7 +522,11 @@ export default function (pi: ExtensionAPI) {
 
 		// Close shared server
 		if (sharedServer) {
-			try { sharedServer.close(); } catch { /* ok */ }
+			try {
+				sharedServer.close();
+			} catch {
+				/* ok */
+			}
 			sharedServer = null;
 			serverReady = null;
 		}
