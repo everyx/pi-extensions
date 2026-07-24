@@ -1,0 +1,9 @@
+{
+	"name": "pi-subagent",
+	"description": "Sub‑agent tool for pi – delegate tasks to isolated pi instances via tmux",
+	"keywords": ["pi-package"],
+	"license": "MIT",
+	"pi": {
+		"extensions": ["./index.ts"]
+	}
+}
