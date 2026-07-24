@@ -74,6 +74,98 @@ function tmuxKill(name: string): void {
 
 const SHARED_SOCKET_PATH = path.join(TMPDIR, "child.sock");
 
+export interface PrefixedParse {
+	sessionName: string;
+	text: string;
+}
+
+/**
+ * Read one length‑prefixed message from a socket.
+ *
+ * Protocol: `[4B big‑endian payload length][payload]`.
+ * Payload is `sessionName\0text` (sessionName may be empty).
+ */
+export function readLengthPrefixed(socket: net.Socket, signal?: AbortSignal): Promise<PrefixedParse> {
+	return new Promise((resolve, reject) => {
+		let buf = Buffer.alloc(0);
+
+		const onAbort = () => {
+			cleanup();
+			reject(new Error("Aborted"));
+		};
+		if (signal?.aborted) {
+			onAbort();
+			return;
+		}
+		signal?.addEventListener("abort", onAbort, { once: true });
+
+		const timeout = setTimeout(() => {
+			cleanup();
+			reject(new Error("Timeout reading from socket"));
+		}, 10_000);
+
+		const onData = (chunk: Buffer) => {
+			buf = Buffer.concat([buf, chunk]);
+			if (buf.length < 4) return;
+			const len = buf.readUInt32BE(0);
+			if (buf.length < 4 + len) return;
+
+			cleanup();
+
+			const payload = buf.subarray(4, 4 + len);
+			const nullIdx = payload.indexOf(0);
+			const sessionName = nullIdx >= 0 ? payload.subarray(0, nullIdx).toString("utf8") : "";
+			const text = nullIdx >= 0 ? payload.subarray(nullIdx + 1).toString("utf8") : payload.toString("utf8");
+
+			resolve({ sessionName, text });
+		};
+
+		const onError = (err: Error) => {
+			cleanup();
+			reject(err);
+		};
+
+		const onClose = () => {
+			cleanup();
+			reject(new Error("Socket closed before full message"));
+		};
+
+		const cleanup = () => {
+			clearTimeout(timeout);
+			signal?.removeEventListener("abort", onAbort);
+			socket.removeListener("data", onData);
+			socket.removeListener("error", onError);
+			socket.removeListener("close", onClose);
+			socket.removeListener("end", onClose);
+		};
+
+		socket.on("data", onData);
+		socket.on("error", onError);
+		socket.on("close", onClose);
+		socket.on("end", onClose);
+	});
+}
+
+/**
+ * Write one length‑prefixed message to a socket.
+ *
+ * Protocol: `[4B big‑endian payload length][payload]`.
+ * Payload is `sessionName\0text` (sessionName may be empty).
+ */
+export function writeLengthPrefixed(socket: net.Socket, sessionName: string, text: string): Promise<void> {
+	const combined = sessionName ? `${sessionName}\0${text}` : text;
+	const payload = Buffer.from(combined, "utf8");
+	const hdr = Buffer.alloc(4);
+	hdr.writeUInt32BE(payload.length);
+
+	return new Promise((resolve, reject) => {
+		socket.write(Buffer.concat([hdr, payload]), (err) => {
+			if (err) reject(err);
+			else resolve();
+		});
+	});
+}
+
 /**
  * Pending result waiters, keyed by session name.
  * A child connects, sends `[4B len][sessionName\0text]`, and the router
@@ -99,19 +191,9 @@ function ensureSharedServer(): Promise<net.Server> {
 			/* ok */
 		}
 
-		const srv = net.createServer((socket) => {
-			/* Read exactly one length‑prefixed message and route by session */
-			let buf = Buffer.alloc(0);
-
-			const done = () => {
-				if (buf.length < 4) return;
-				const len = buf.readUInt32BE(0);
-				if (buf.length < 4 + len) return;
-
-				const payload = buf.subarray(4, 4 + len);
-				const nullIdx = payload.indexOf(0);
-				const sessionName = nullIdx >= 0 ? payload.subarray(0, nullIdx).toString("utf8") : "";
-				const text = nullIdx >= 0 ? payload.subarray(nullIdx + 1).toString("utf8") : payload.toString("utf8");
+		const srv = net.createServer(async (socket) => {
+			try {
+				const { sessionName, text } = await readLengthPrefixed(socket);
 
 				const w = pendingWaiters.get(sessionName);
 				if (w) {
@@ -120,13 +202,9 @@ function ensureSharedServer(): Promise<net.Server> {
 					w.resolve(text);
 				}
 				socket.end();
-			};
-
-			socket.on("data", (chunk: Buffer) => {
-				buf = Buffer.concat([buf, chunk]);
-				done();
-			});
-			socket.on("error", () => {});
+			} catch {
+				/* connection error or timeout – ignore */
+			}
 		});
 
 		await new Promise<void>((resolve, reject) => {
@@ -315,19 +393,13 @@ export default function (pi: ExtensionAPI) {
 			const text = lastAssistantText(ctx);
 			if (!text) return;
 
-			// Format: [4B len][sessionName\0text]
-			const combined = childSessionName ? `${childSessionName}\0${text}` : text;
-			const buf = Buffer.from(combined, "utf8");
-			const hdr = Buffer.alloc(4);
-			hdr.writeUInt32BE(buf.length);
-
 			try {
 				const socket = net.createConnection(parentSocket);
 				await new Promise<void>((resolve, reject) => {
 					socket.on("connect", resolve);
 					socket.on("error", reject);
 				});
-				socket.write(Buffer.concat([hdr, buf]));
+				await writeLengthPrefixed(socket, childSessionName, text);
 				socket.end();
 			} catch {
 				/* best effort */
