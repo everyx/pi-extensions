@@ -70,55 +70,94 @@ function tmuxKill(name: string): void {
 	}
 }
 
-// ─── Unix socket – length‑prefixed framing ───────────────────────
+// ─── Shared Unix socket – length‑prefixed framing ────────────────
 
-function createServer(socketPath: string): Promise<net.Server> {
-	return new Promise((resolve, reject) => {
-		try { fs.unlinkSync(socketPath); } catch { /* ok */ }
-		const srv = net.createServer();
-		srv.on("error", reject);
-		srv.listen(socketPath, () => resolve(srv));
-	});
+const SHARED_SOCKET_PATH = path.join(TMPDIR, "child.sock");
+
+/**
+ * Pending result waiters, keyed by session name.
+ * A child connects, sends `[4B len][sessionName\0text]`, and the router
+ * dispatches to the matching waiter.
+ */
+const pendingWaiters = new Map<
+	string,
+	{ resolve: (text: string) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
+>();
+
+/* Lazy singleton – created on first interactive use */
+let sharedServer: net.Server | null = null;
+let serverReady: Promise<net.Server> | null = null;
+
+function ensureSharedServer(): Promise<net.Server> {
+	if (sharedServer) return Promise.resolve(sharedServer);
+	if (serverReady) return serverReady;
+
+	serverReady = (async () => {
+		try { fs.unlinkSync(SHARED_SOCKET_PATH); } catch { /* ok */ }
+
+		const srv = net.createServer((socket) => {
+			/* Read exactly one length‑prefixed message and route by session */
+			let buf = Buffer.alloc(0);
+
+			const done = () => {
+				if (buf.length < 4) return;
+				const len = buf.readUInt32BE(0);
+				if (buf.length < 4 + len) return;
+
+				const payload = buf.subarray(4, 4 + len);
+				const nullIdx = payload.indexOf(0);
+				const sessionName = nullIdx >= 0 ? payload.subarray(0, nullIdx).toString("utf8") : "";
+				const text = nullIdx >= 0 ? payload.subarray(nullIdx + 1).toString("utf8") : payload.toString("utf8");
+
+				const w = pendingWaiters.get(sessionName);
+				if (w) {
+					clearTimeout(w.timer);
+					pendingWaiters.delete(sessionName);
+					w.resolve(text);
+				}
+				socket.end();
+			};
+
+			socket.on("data", (chunk: Buffer) => {
+				buf = Buffer.concat([buf, chunk]);
+				done();
+			});
+			socket.on("error", () => {});
+		});
+
+		await new Promise<void>((resolve, reject) => {
+			srv.on("error", reject);
+			srv.listen(SHARED_SOCKET_PATH, () => resolve());
+		});
+
+		sharedServer = srv;
+		return srv;
+	})();
+
+	return serverReady;
 }
 
-function closeServer(server: net.Server): Promise<void> {
-	return new Promise((resolve) => {
-		try { server.close(() => resolve()); } catch { resolve(); }
-	});
-}
-
-/** Wait for child to connect and send exactly one length‑prefixed message. */
-function readOnce(
-	server: net.Server,
+/** Wait for a result message from a specific interactive sub‑agent. */
+function waitForResult(
+	sessionName: string,
 	signal?: AbortSignal,
 	timeoutMs = 600_000,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error("Timeout")), timeoutMs);
-		const clean = () => {
+		const timer = setTimeout(() => {
+			pendingWaiters.delete(sessionName);
+			reject(new Error(`Timeout waiting for ${sessionName}`));
+		}, timeoutMs);
+
+		const onAbort = () => {
 			clearTimeout(timer);
-			signal?.removeEventListener("abort", onAbort);
-			try { server.close(); } catch { /* ok */ }
+			pendingWaiters.delete(sessionName);
+			reject(new Error("Aborted"));
 		};
-		const onAbort = () => { clean(); reject(new Error("Aborted")); };
 		if (signal?.aborted) { onAbort(); return; }
 		signal?.addEventListener("abort", onAbort, { once: true });
 
-		server.on("connection", (socket) => {
-			let buf = Buffer.alloc(0);
-			socket.on("data", (chunk: Buffer) => {
-				buf = Buffer.concat([buf, chunk]);
-				if (buf.length < 4) return;
-				const len = buf.readUInt32BE(0);
-				if (buf.length < 4 + len) return;
-				clean();
-				resolve(buf.slice(4, 4 + len).toString("utf8"));
-			});
-			socket.on("error", reject);
-			socket.on("end", () => {
-				if (!buf.length) { clean(); reject(new Error("Connection closed empty")); }
-			});
-		});
+		pendingWaiters.set(sessionName, { resolve, reject, timer });
 	});
 }
 
@@ -187,8 +226,6 @@ function lastAssistantText(ctx: ExtensionContext): string {
 interface SessionState {
 	id: string;
 	sessionName: string;
-	socketPath: string;
-	server: net.Server;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -204,9 +241,9 @@ async function runInteractive(
 ): Promise<{ output: string; sessionName: string }> {
 	const sid = id();
 	const sessionName = safeName(sid);
-	const sp = path.join(TMPDIR, `${sessionName}.sock`);
 
-	const server = await createServer(sp);
+	// Ensure the shared socket server is running
+	await ensureSharedServer();
 
 	// Start tmux session
 	tmuxNew(sessionName, cwd);
@@ -221,7 +258,8 @@ async function runInteractive(
 
 	const script = [
 		"#!/bin/sh",
-		`export PI_SUBAGENT_PARENT_SOCKET='${sp}'`,
+		`export PI_SUBAGENT_PARENT_SOCKET='${SHARED_SOCKET_PATH}'`,
+		`export PI_SUBAGENT_SESSION_NAME='${sessionName}'`,
 		`cd ${squote(cwd)}`,
 		`exec ${piArgs.join(" ")}`,
 	].join("\n");
@@ -229,10 +267,10 @@ async function runInteractive(
 	tmuxRun(sessionName, script);
 
 	// Wait for the child to settle and send its result
-	const output = await readOnce(server, signal);
+	const output = await waitForResult(sessionName, signal);
 
 	// Track session for battle / cleanup
-	sessions.set(sessionName, { id: sid, sessionName, socketPath: sp, server });
+	sessions.set(sessionName, { id: sid, sessionName });
 
 	return { output, sessionName };
 }
@@ -264,9 +302,17 @@ export default function (pi: ExtensionAPI) {
 	// ── Child mode ────────────────────────────────────────
 	const parentSocket = process.env.PI_SUBAGENT_PARENT_SOCKET;
 	if (parentSocket) {
+		const childSessionName = process.env.PI_SUBAGENT_SESSION_NAME ?? "";
+
 		pi.on("agent_settled", async (_event, ctx) => {
 			const text = lastAssistantText(ctx);
 			if (!text) return;
+
+			// Format: [4B len][sessionName\0text]
+			const combined = childSessionName ? `${childSessionName}\0${text}` : text;
+			const buf = Buffer.from(combined, "utf8");
+			const hdr = Buffer.alloc(4);
+			hdr.writeUInt32BE(buf.length);
 
 			try {
 				const socket = net.createConnection(parentSocket);
@@ -274,9 +320,6 @@ export default function (pi: ExtensionAPI) {
 					socket.on("connect", resolve);
 					socket.on("error", reject);
 				});
-				const buf = Buffer.from(text, "utf8");
-				const hdr = Buffer.alloc(4);
-				hdr.writeUInt32BE(buf.length);
 				socket.write(Buffer.concat([hdr, buf]));
 				socket.end();
 			} catch {
@@ -304,8 +347,8 @@ export default function (pi: ExtensionAPI) {
 				const s = sessions.get(params.session);
 				if (s) {
 					tmuxKill(s.sessionName);
-					try { s.server.close(); } catch { /* ok */ }
 					sessions.delete(params.session);
+					// Pending waitForResult will timeout — acceptable
 				}
 				return {
 					content: [{ type: "text", text: `Closed sub‑agent session ${params.session}` }],
@@ -327,14 +370,10 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
-				// Close old server, then create a new one for this round
-				await closeServer(s.server);
-				s.server = await createServer(s.socketPath);
-
-				// Type the follow‑up prompt into the running pi editor
+				// Shared socket handles routing — no need to close/recreate
 				tmuxPaste(s.sessionName, params.task);
 
-				const output = await readOnce(s.server, signal);
+				const output = await waitForResult(s.sessionName, signal);
 				return {
 					content: [{ type: "text", text: output }],
 					details: { session: params.session },
@@ -463,8 +502,14 @@ export default function (pi: ExtensionAPI) {
 
 		for (const s of sessions.values()) {
 			tmuxKill(s.sessionName);
-			await closeServer(s.server);
 		}
 		sessions.clear();
+
+		// Close shared server
+		if (sharedServer) {
+			try { sharedServer.close(); } catch { /* ok */ }
+			sharedServer = null;
+			serverReady = null;
+		}
 	});
 }
