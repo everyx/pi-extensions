@@ -1,124 +1,119 @@
 # pi-subagent
 
-Sub‑agent extension for [pi](https://pi.dev). Delegates tasks to isolated pi instances via tmux.
+[English](README.md) | [中文](README.zh.md)
 
-## How it works
+Spawn isolated sub‑agents from pi. Each runs in its own context and streams results back.
 
-Two‑mode extension that runs inside both the **parent** and the **child** pi process:
+```
+You:  Research this project's database schema for me
+  → pi calls subagent, spins up a child agent
+  → Child works independently, sends results back
+  → You keep chatting
+```
 
-1. **Parent mode** (default) – registers the `subagent` tool
-2. **Child mode** (env var `PI_SUBAGENT_PARENT_SOCKET`) – listens for `agent_settled` and reports the result back via Unix socket
+> Only works on Linux/macOS (requires Unix socket + tmux).
 
-### Execution modes
+## Why?
 
-| Mode | Backend | tmux | Attachable |
-|------|---------|------|------------|
-| `interactive: false` (default) | `pi --print --no-session` | ❌ | ❌ |
-| `interactive: true` | tmux + pi interactive | ✅ | ✅ `tmux attach -t pi-sub-xxx` |
-
-### Battle
-
-When a sub‑agent runs interactively, the parent can send follow‑up prompts by calling `subagent` again with the same `session` name. The new prompt is pasted into the child's pi editor via tmux paste‑buffer, and the child reports its next result when `agent_settled` fires.
-
-The parent agent can go back‑and‑forth with a sub‑agent programmatically, or you can `tmux attach` and join the conversation yourself.
+Pi doesn't have built‑in sub‑agents. When you want to split work across multiple agents running in parallel, or send a long‑running task to the background without blocking your main conversation — that's what `subagent` is for.
 
 ## Install
 
 ```bash
-# From git repo
 pi install git:github.com/everyx/pi-subagent
-
-# Or clone and symlink for development
-git clone https://github.com/everyx/pi-subagent ~/.pi/agent/git/pi-subagent
-pi config  # enable the extension
 ```
 
-Or manually symlink:
+Or manually:
 
 ```bash
-mkdir -p ~/.pi/agent/extensions
+mkdir -p ~/.pi/agent/extensions/subagent
 ln -sf "$(pwd)/index.ts" ~/.pi/agent/extensions/subagent/index.ts
 ```
 
-The extension is auto‑loaded in every pi session. In child mode it detects the env var and only reports results – no tool registered.
+Restart pi and just tell it "ask a sub‑agent to…".
 
 ## Usage
 
-### Single task (non‑interactive)
+### Kick off a task
 
-The main agent calls:
-
-```
-subagent({ task: "Find all auth‑related code and summarize the architecture" })
-```
-
-Result is captured stdout from `pi --print`.
-
-### Single task (interactive, attachable)
+Tell pi:
 
 ```
-subagent({ task: "Refactor the database layer", interactive: true })
+Ask a sub‑agent to analyze the auth logic under src/
 ```
 
-A tmux session `pi-sub-<id>` is created. The session name appears in the tool result so you can:
+Pi calls `subagent`, a child agent runs in isolation, and the result comes back — you continue from there.
+
+### Run several at once
+
+```
+Spawn three sub‑agents to look at the auth module, the database layer, and the API routes
+```
+
+Pi runs all three in parallel and returns the combined results.
+
+### Interactive — watch it work
+
+```
+Start an interactive sub‑agent to refactor the data layer with repository pattern, I want to watch
+```
+
+Pi creates a tmux session. The result includes its name (e.g. `pi-sub-a1b2c`), so you can attach:
 
 ```bash
-tmux attach -t pi-sub-abc123
+tmux attach -t pi-sub-a1b2c
 ```
 
-The child pi runs in that tmux. Detach (Ctrl+B D) to let it continue autonomously.
+Detach (Ctrl+B D) and the child keeps running. Results come back automatically.
 
-### Battle (follow‑up with a running sub‑agent)
-
-```
-subagent({ session: "pi-sub-abc123", task: "I don't like that approach, try using composition instead" })
-```
-
-The new prompt is pasted into the child's editor. The parent waits for the child to settle, then reads the new result.
-
-### Parallel tasks
+### Send a follow‑up (battle)
 
 ```
-subagent({
-  tasks: [
-    { id: "auth", task: "Analyze the auth module" },
-    { id: "db",   task: "Analyze the database layer" },
-  ]
-})
+That data‑layer sub‑agent — the approach won't work, rewrite it with composition instead
 ```
 
-Each runs in parallel (or sequentially for now – concurrency coming). Results are combined into one response.
+Pi pastes the new prompt into the child's editor. The child continues and its new result comes back.
 
 ### Close a session
 
 ```
-subagent({ session: "pi-sub-abc123", close: true })
+Kill pi-sub-a1b2c
 ```
 
-Kills the tmux session and cleans up the socket.
+## Two modes
 
-## Parameters
+| | Non‑interactive | Interactive |
+|---|---|---|
+| Backend | `pi --print --no-session`, zero overhead | Full pi in tmux |
+| Attachable | ❌ | ✅ `tmux attach -t pi-sub-xxx` |
+| Follow‑ups | ❌ | ✅ |
+| Best for | Quick queries, one‑offs | Complex work, exploration, iteration |
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `task` | `string` | — | Task prompt (single mode) |
-| `tasks` | `array` | — | Parallel tasks `[{id?, task, model?, tools?}]` |
-| `session` | `string` | — | Existing session name (battle or close) |
-| `close` | `boolean` | — | Close the session |
-| `model` | `string` | — | Model override (single mode) |
-| `tools` | `string` | — | Tool allowlist (single mode) |
-| `interactive` | `boolean` | `false` | Spawn in tmux for attachability |
+Non‑interactive is the default — fast and lightweight. Reach for interactive when you need to watch or iterate.
+
+## Advanced
+
+### Pick a model
+
+```
+Spawn a sub‑agent with claude-sonnet to analyze the database design
+```
+
+No model specified → inherits your current session's model.
+Model specified but not found in the registry → falls back to the parent model with a warning.
+
+### Restrict tools
+
+```
+Ask a sub‑agent to research the project structure, but only let it use bash and read
+```
+
+Sub‑agent won't see any other tools.
 
 ## Cleanup
 
-On exit (Ctrl+C, Ctrl+D, SIGHUP, SIGTERM), the extension checks for active sub‑agent sessions. In interactive (TUI) mode it asks whether to kill them; in headless mode it kills them silently.
+When pi exits, if sub‑agents are still running:
+- **TUI mode** — asks whether to kill them
+- **Headless mode** — kills silently
 
-## Protocol
-
-Child → Parent (Unix socket):
-
-```
-[4 bytes: BE uint32 length][UTF-8 text]
-```
-
-The child connects, sends one packet, disconnects. Each round uses a fresh connection.
+You can also tell pi "kill that sub‑agent" any time.
