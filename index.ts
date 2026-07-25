@@ -256,6 +256,14 @@ function escapeXml(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function sessionNotFoundError(sessionName: string) {
+	return {
+		content: [{ type: "text" as const, text: `Session "${sessionName}" not found.` }],
+		details: {} as const,
+		isError: true as const,
+	};
+}
+
 export default function (pi: ExtensionAPI) {
 	// ── Child mode ────────────────────────────────────────
 	const parentSocket = process.env.PI_SUBAGENT_PARENT_SOCKET;
@@ -307,18 +315,7 @@ export default function (pi: ExtensionAPI) {
 			// ── Close ──────────────────────────────────
 			if (params.close && params.session) {
 				const s = tmuxRunner.getSession(params.session);
-				if (!s) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Session "${params.session}" not found.`,
-							},
-						],
-						details: {},
-						isError: true,
-					};
-				}
+				if (!s) return sessionNotFoundError(params.session);
 				tmuxRunner.killSession(params.session);
 				return {
 					content: [{ type: "text", text: `Closed sub‑agent session ${params.session}` }],
@@ -329,18 +326,7 @@ export default function (pi: ExtensionAPI) {
 			// ── Battle ──────────────────────────────────
 			if (params.session && params.task) {
 				const s = tmuxRunner.getSession(params.session);
-				if (!s) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Session "${params.session}" not found.`,
-							},
-						],
-						details: {},
-						isError: true,
-					};
-				}
+				if (!s) return sessionNotFoundError(params.session);
 
 				const startedAt = Date.now();
 
