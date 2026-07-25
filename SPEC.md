@@ -91,6 +91,9 @@ subagent
 - 发送后续提示后立即进入 `[~]` 状态并开始计时，完成后转入 `[✓]`，耗时定格。布局复用任务列表项的风格。
 - 通过 `tmux paste-buffer` 将 `>` 后的 prompt 键入子 agent 终端。
 - 模型继承自原 session（SessionState.model），在状态行显示。不经过 registry 解析，因此无模型降级 warning。
+- 错误信息遵循 Token Economy：返回给 LLM 的 `content` 只说明问题本身
+  （如 `Session "xxx" not found.`），不附带活跃 session 列表。活跃 session
+  对 LLM 无实际帮助，且可能暴露上下文无关信息。
 
 ### Close 模式
 

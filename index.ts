@@ -334,7 +334,7 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Session "${params.session}" not found. Active: ${tmuxRunner.activeSessionNames().join(", ") || "none"}`,
+								text: `Session "${params.session}" not found.`,
 							},
 						],
 						details: {},
