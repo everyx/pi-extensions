@@ -20,15 +20,17 @@ Pi doesn't have built‑in sub‑agents. When you want to split work across mult
 ## Install
 
 ```bash
+# npm (recommended)
+pi install npm:@everyx/pi-subagent
+
+# git
 pi install git:github.com/everyx/pi-subagent
 ```
 
-Or manually:
+Or symlink for development:
 
 ```bash
-mkdir -p ~/.pi/agent/extensions/subagent
-ln -sf "$(pwd)/index.ts" ~/.pi/agent/extensions/subagent/index.ts
-ln -sf "$(pwd)/runner.ts" ~/.pi/agent/extensions/subagent/runner.ts
+ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 ```
 
 Restart pi and just tell it "ask a sub‑agent to…".

@@ -19,15 +19,17 @@ pi 不内置子 agent。遇到复杂问题你想分拆给多个 agent 并行探�
 ## 安装
 
 ```bash
+# npm（推荐）
+pi install npm:@everyx/pi-subagent
+
+# git
 pi install git:github.com/everyx/pi-subagent
 ```
 
-或者手动：
+或者手动 symlink（开发用）：
 
 ```bash
-mkdir -p ~/.pi/agent/extensions/subagent
-ln -sf "$(pwd)/index.ts" ~/.pi/agent/extensions/subagent/index.ts
-ln -sf "$(pwd)/runner.ts" ~/.pi/agent/extensions/subagent/runner.ts
+ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 ```
 
 装好后重启 pi，直接跟它说"让子 agent 做 X"就行了。
