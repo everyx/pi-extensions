@@ -888,14 +888,11 @@ export default function (pi: ExtensionAPI) {
 							0,
 						),
 					);
+					cmp.addChild(new Spacer(1));
 				}
 
 				for (let i = 0; i < tasks.length; i++) {
-					const isLast = i === tasks.length - 1;
 					renderTaskItem(cmp, tasks[i], isPartial, expanded, theme);
-					if (!isLast) {
-						cmp.addChild(new Spacer(1));
-					}
 				}
 
 				// Overall duration

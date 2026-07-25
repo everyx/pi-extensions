@@ -57,10 +57,9 @@ subagent (0/2)
 
 - [✓] ⚡ 认证扫描 (claude-sonnet-4) | ⏱️ 1.2s
   Model "haiku" not available, using "claude-sonnet-4"
+  ... (3 earlier lines, [keyHint])
   > 查找项目中所有认证相关的代码...
   正在扫描 src/ 目录下的认证逻辑...
-  ... (3 earlier lines, [keyHint])
-
 - [~] 💬 数据库模式 (claude-sonnet-4) | pi-sub-c3d | ⏱️ 2.3s
   > 查找所有数据库表和模式定义...
   发现 3 个表：users, orders, products
@@ -74,7 +73,6 @@ Took 4.0s
 - 状态行各字段用 `|` 分隔：`(模型)`、`[| session]`、`| ⏱️ 耗时`。进行中的耗时实时刷新（0.1s 精度），完成后定格。末尾显示所有任务的总耗时。
 - 若模型降级，紧接状态行下方以 `model` 色显示 warning 信息，然后跟上 prompt。
 - prompt（`>` 开头）与 output 均为 dim 样式，之间无空行，紧接排列。合并为一个可折叠块（`renderExpandableOutput`），折叠时最多 5 行，超出显示 `keyHint`。
-- 任务项之间使用 `Spacer(1)` 分隔。
 - 单任务与并行复用同一套渲染逻辑，仅列表项数量不同。
 - `execute` 返回双格式：`content` 给 LLM 阅读（XML：`<result id="...">...output...</result>`），`details.tasks` 给 TUI 渲染（含完整状态信息）。
 - LLM 输出采用 XML 而非 markdown 代码块，因为子 agent 的 output 本身可能包含三反引号导致解析歧义。XML tag 提供无歧义的边界。
@@ -86,7 +84,6 @@ subagent
 
 - [~] 💬 深入分析 (claude-sonnet-4) | pi-sub-a1b | ⏱️ 0.8s
   > 继续深入分析认证模块...
-
   分析结果：...
 ```
 
