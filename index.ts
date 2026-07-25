@@ -21,7 +21,22 @@ import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent"
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-// ─── Expandable output helper ──────────────────────────
+// ─── Task display type ──────────────────────────────────────────
+
+interface TaskDisplay {
+	id: string;
+	output: string;
+	sessionName?: string;
+	prompt: string;
+	model: string;
+	done: boolean;
+	startedAt?: number;
+	endedAt?: number;
+	warning?: string;
+}
+
+// ─── Expandable output helper ──────────────────────────────────
+
 function renderExpandableOutput(
 	styledOutput: string,
 	theme: { fg: (color: any, text: string) => string },
@@ -30,8 +45,6 @@ function renderExpandableOutput(
 ): string[] {
 	const preview = truncateToVisualLines(styledOutput, 5, w, indent);
 
-	// pad() 仅用于 hint 行：truncateToVisualLines 内部已通过 Text(paddingX=indent)
-	// 为 visualLines 添加了缩进，因此 visualLines 不需要再 pad。
 	const pad = (line: string) => " ".repeat(indent) + line;
 
 	if (preview.skippedCount > 0) {
@@ -539,6 +552,121 @@ const SubagentParams = Type.Object({
 	close: Type.Optional(Type.Boolean({ description: "Close a session" })),
 });
 
+// ─── Rendering helpers ──────────────────────────────────────────
+
+/**
+ * Render a single task item: status line + collapsible body.
+ * Shared between tasks/parallel and battle modes.
+ */
+function renderTaskItem(
+	cmp: Container,
+	t: TaskDisplay,
+	isPartial: boolean,
+	expanded: boolean,
+	theme: { fg: (color: any, text: string) => string },
+): void {
+	const isInteractive = !!t.sessionName;
+	const emoji = isInteractive ? "💬" : "⚡";
+
+	// Status
+	let statusColor: "success" | "accent" | "muted";
+	let checkChar: string;
+	if (t.done) {
+		statusColor = "success";
+		checkChar = "[✓]";
+	} else if (isPartial) {
+		statusColor = "accent";
+		checkChar = "[~]";
+	} else {
+		statusColor = "muted";
+		checkChar = "[ ]";
+	}
+
+	// Model tag (dim)
+	const modelTag = t.model ? theme.fg("dim", `(${t.model})`) : "";
+
+	// Session tag (dim, with | separator)
+	const sessionTag = t.sessionName ? theme.fg("dim", `| ${t.sessionName}`) : "";
+
+	// Timing tag (dim, with | separator)
+	let timingTag = "";
+	if (t.startedAt) {
+		const endTime = t.endedAt ?? Date.now();
+		const dur = ((endTime - t.startedAt) / 1000).toFixed(1);
+		timingTag = theme.fg("dim", `| ⏱️ ${dur}s`);
+	}
+
+	// Assemble status line: - [✓] ⚡ task (model) [| session] [| ⏱️ x.xs]
+	const statusLine = [
+		`${theme.fg(statusColor, `- ${checkChar}`)} ${theme.fg(statusColor, emoji)} ${theme.fg(statusColor, t.id)}`,
+		modelTag,
+		sessionTag,
+		timingTag,
+	]
+		.filter(Boolean)
+		.join(" ");
+
+	cmp.addChild(new Text(statusLine, 0, 0));
+
+	// Body: warning + prompt (with >) + output
+	if (t.warning || t.prompt || t.output) {
+		const lines: string[] = [];
+		if (t.warning) {
+			lines.push(theme.fg("warning", t.warning));
+		}
+		if (t.prompt) {
+			const promptDisplay = (t.prompt.length > 78 ? `${t.prompt.slice(0, 78)}...` : t.prompt).replace(/\n/g, " ");
+			lines.push(theme.fg("dim", `> ${promptDisplay}`));
+		}
+		if (t.output) {
+			const cleaned = t.output.replace(/\n+$/, "");
+			const outputLines = cleaned.split("\n").map((line) => theme.fg("dim", line));
+			lines.push(...outputLines);
+		}
+		const combined = lines.join("\n");
+		const indent = 2; // aligns with [ of - [✓]
+		if (expanded) {
+			cmp.addChild(new Text(combined, indent, 0));
+		} else {
+			cmp.addChild({
+				invalidate: () => {},
+				render: (w: number) => renderExpandableOutput(combined, theme, w, indent),
+			});
+		}
+	}
+}
+
+/** Serialize task results as XML for LLM consumption.
+ *
+ * XML is chosen over markdown code blocks because the output may itself
+ * contain triple backticks. XML tags provide unambiguous boundaries.
+ * Token-economy: only task id and output — no checkmarks, emoji, timing,
+ * or original prompt. Those decorations are for TUI only.
+ */
+function tasksToLlmXml(tasks: TaskDisplay[]): string {
+	return tasks.map((v) => `<result id="${escapeXml(v.id)}">\n${escapeXml(v.output)}\n</result>`).join("\n");
+}
+
+/** Minimal XML escaping — only what's needed for element content safety. */
+function escapeXml(s: string): string {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ─── Live timer helper ────────────────────────────────────────────
+
+/** Start a 1-second interval that calls onUpdate with the current payload.
+ * Returns [tick, stop] — call tick() for a final update, stop() to clean up.
+ */
+function startTimer(
+	onUpdate: ((update: any) => void) | undefined,
+	getPayload: () => any,
+): [() => void, () => void] {
+	const tick = () => onUpdate?.(getPayload());
+	const timer = setInterval(tick, 100);
+	return [tick, () => clearInterval(timer)];
+}
+
+
 // ─── Extension entry ─────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -585,7 +713,6 @@ export default function (pi: ExtensionAPI) {
 				if (s) {
 					tmuxKill(s.sessionName);
 					sessions.delete(params.session);
-					// Pending waitForResult will timeout — acceptable
 				}
 				return {
 					content: [{ type: "text", text: `Closed sub‑agent session ${params.session}` }],
@@ -609,28 +736,49 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
-				// Shared socket handles routing — no need to close/recreate
-				tmuxPaste(s.sessionName, params.task);
+				const startedAt = Date.now();
 
-				const output = await waitForResult(s.sessionName, signal);
-				return {
-					content: [{ type: "text", text: output }],
-					details: { session: params.session },
+				// Show task in-progress immediately
+				const taskDisplay: TaskDisplay = {
+					id: params.task.slice(0, 40),
+					output: "",
+					prompt: params.task,
+					model: "",
+					sessionName: params.session,
+					done: false,
+					startedAt,
 				};
+				onUpdate?.({
+					content: [],
+					details: { tasks: [taskDisplay] },
+				});
+
+				// Live timer: refresh every second
+				const [, stopTimer] = startTimer(onUpdate, () => ({
+					content: [],
+					details: { tasks: [{ ...taskDisplay }] },
+				}));
+
+				try {
+					tmuxPaste(s.sessionName, params.task);
+					const output = await waitForResult(s.sessionName, signal);
+					const endedAt = Date.now();
+
+					taskDisplay.output = output;
+					taskDisplay.done = true;
+					taskDisplay.endedAt = endedAt;
+
+					return {
+						content: [{ type: "text", text: output }],
+						details: { tasks: [taskDisplay] },
+					};
+				} finally {
+					stopTimer();
+				}
 			}
 
 			// ── Tasks (single or parallel) ─────────────────
 			if (params.tasks && params.tasks.length > 0) {
-				// Pre-populate display list so all tasks are visible immediately
-				interface TaskDisplay {
-					id: string;
-					output: string;
-					sessionName?: string;
-					prompt: string;
-					model: string;
-					done: boolean;
-				}
-
 				const taskDisplays: TaskDisplay[] = params.tasks.map((t) => ({
 					id: t.id ?? t.task.slice(0, 40),
 					output: "",
@@ -639,60 +787,58 @@ export default function (pi: ExtensionAPI) {
 					done: false,
 				}));
 
-				function tasksToBody(tasks: TaskDisplay[]): string {
-					return tasks
-						.map((v) => {
-							const emoji = v.sessionName ? "💬" : "⚡";
-							return `- [x] ${emoji} **${v.id}**\n\`\`\`\n${v.output}\n\`\`\``;
-						})
-						.join("\n\n---\n\n");
-				}
-
 				// Toast: show all tasks in pending state
 				onUpdate?.({ content: [], details: { tasks: [...taskDisplays] } });
 
 				await Promise.all(
 					params.tasks.map(async (t, i) => {
-						const { model } = tryResolveModel(ctx.modelRegistry, ctx.model, t.model);
+						const resolved = tryResolveModel(ctx.modelRegistry, ctx.model, t.model);
+						const model = resolved.model;
 						const interactive = t.interactive ?? false;
 
-						// Update model in display
-						taskDisplays[i].model = model ?? "";
+						taskDisplays[i].model = resolved.model ?? "";
+						taskDisplays[i].warning = resolved.warning;
+						taskDisplays[i].startedAt = Date.now();
 
-						let output: string;
-						let sessionName: string | undefined;
-
-						if (interactive) {
-							const r = await runInteractive(ctx.cwd, t.task, model, t.tools, signal);
-							output = r.output;
-							sessionName = r.sessionName;
-						} else {
-							output = await printRun(t.task, ctx.cwd, model, t.tools, signal, (chunk) => {
-								taskDisplays[i].output = chunk;
-								onUpdate?.({
-									content: [{ type: "text", text: tasksToBody([...taskDisplays]) }],
-									details: { tasks: [...taskDisplays] },
-								});
-							});
-						}
-
-						taskDisplays[i].output = output;
-						taskDisplays[i].sessionName = sessionName;
-						taskDisplays[i].done = true;
-
-						// Yield to event loop so TUI can render partial state
-						await new Promise((resolve) => setTimeout(resolve, 10));
-
-						// Send accumulated results so far
-						onUpdate?.({
-							content: [{ type: "text", text: tasksToBody([...taskDisplays]) }],
+						// Live timer: refresh every second
+						const [tick, stopTimer] = startTimer(onUpdate, () => ({
+							content: [{ type: "text", text: tasksToLlmXml([...taskDisplays]) }],
 							details: { tasks: [...taskDisplays] },
-						});
+						}));
+
+						try {
+							let output: string;
+							let sessionName: string | undefined;
+
+							if (interactive) {
+								const r = await runInteractive(ctx.cwd, t.task, model, t.tools, signal);
+								output = r.output;
+								sessionName = r.sessionName;
+							} else {
+								output = await printRun(t.task, ctx.cwd, model, t.tools, signal, (chunk) => {
+									taskDisplays[i].output = chunk;
+									tick();
+								});
+							}
+
+							taskDisplays[i].output = output;
+							taskDisplays[i].sessionName = sessionName;
+							taskDisplays[i].done = true;
+							taskDisplays[i].endedAt = Date.now();
+
+							// Yield to event loop so TUI can render partial state
+							await new Promise((resolve) => setTimeout(resolve, 10));
+
+							// Send accumulated results so far
+							return tick();
+						} finally {
+							stopTimer();
+						}
 					}),
 				);
 
 				return {
-					content: [{ type: "text", text: tasksToBody(taskDisplays) }],
+					content: [{ type: "text", text: tasksToLlmXml(taskDisplays) }],
 					details: {
 						tasks: taskDisplays,
 						type: "parallel",
@@ -738,7 +884,7 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, { expanded, isPartial }, theme, ctx) {
 			const state = ctx.state as { startedAt?: number; endedAt?: number };
 
-			// Track timing
+			// Track overall timing
 			if (state.startedAt === undefined && isPartial) {
 				state.startedAt = Date.now();
 			}
@@ -746,19 +892,10 @@ export default function (pi: ExtensionAPI) {
 				state.endedAt ??= Date.now();
 			}
 
-			interface TaskDisplay {
-				id: string;
-				output: string;
-				sessionName?: string;
-				prompt: string;
-				model: string;
-				done: boolean;
-			}
-
 			const details = result.details as Record<string, unknown> | undefined;
 			const warningLine = details?.warning ? `${theme.fg("warning", details.warning as string)}\n` : "";
 
-			// ── Task list ──────────────────────────────────
+			// ── Task list (tasks/parallel + battle both use this) ──
 			const tasks = details?.tasks as TaskDisplay[] | undefined;
 			if (tasks) {
 				const cmp: Container = (ctx.lastComponent as Container | undefined) ?? new Container();
@@ -769,74 +906,14 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				for (let i = 0; i < tasks.length; i++) {
-					const t = tasks[i];
 					const isLast = i === tasks.length - 1;
-					const isInteractive = !!t.sessionName;
-					const emoji = isInteractive ? "💬" : "⚡";
-
-					// Determine status color
-					let statusColor: "success" | "accent" | "muted";
-					let checkChar: string;
-					if (t.done) {
-						statusColor = "success";
-						checkChar = "[x]";
-					} else if (isPartial) {
-						statusColor = "accent";
-						checkChar = "[~]";
-					} else {
-						statusColor = "muted";
-						checkChar = "[ ]";
-					}
-
-					// Model + session info — dim to match output style
-					const modelTag = t.model ? theme.fg("dim", `(${t.model})`) : "";
-					const sessionTag = t.sessionName ? theme.fg("dim", `| ${t.sessionName}`) : "";
-
-					// Task status line — same color covers -, checkbox, emoji, and task name
-					cmp.addChild(
-						new Text(
-							`${theme.fg(statusColor, `- ${checkChar}`)} ${theme.fg(statusColor, emoji)} ${theme.fg(statusColor, t.id)} ${modelTag} ${sessionTag}`,
-							0,
-							0,
-						),
-					);
-
-					// Combined prompt + output (collapsible, x=2 aligns with [ of - [x])
-					if (t.prompt || t.output) {
-						const lines: string[] = [];
-						if (t.prompt) {
-							const promptDisplay = (t.prompt.length > 80 ? `${t.prompt.slice(0, 80)}...` : t.prompt).replace(
-								/\n/g,
-								" ",
-							);
-							lines.push(theme.fg("dim", promptDisplay));
-						}
-						if (t.prompt && t.output) {
-							lines.push(""); // blank line to separate prompt from output
-						}
-						if (t.output) {
-							const cleaned = t.output.replace(/\n+$/, "");
-							const outputLines = cleaned.split("\n").map((line) => theme.fg("dim", line));
-							lines.push(...outputLines);
-						}
-						const combined = lines.join("\n");
-						const indent = 2; // aligns with [ of - [x]
-						if (expanded) {
-							cmp.addChild(new Text(combined, indent, 0));
-						} else {
-							cmp.addChild({
-								invalidate: () => {},
-								render: (w: number) => renderExpandableOutput(combined, theme, w, indent),
-							});
-						}
-					}
-
+					renderTaskItem(cmp, tasks[i], isPartial, expanded, theme);
 					if (!isLast) {
 						cmp.addChild(new Spacer(1));
 					}
 				}
 
-				// Duration
+				// Overall duration
 				if (state.startedAt !== undefined) {
 					const label = isPartial ? "Elapsed" : "Took";
 					const endTime = state.endedAt ?? Date.now();
@@ -847,95 +924,54 @@ export default function (pi: ExtensionAPI) {
 				return cmp;
 			}
 
-			// ── Battle mode ────────────────────────────────
-			if (details?.session) {
-				const sessionName = details.session as string;
-				const cmp: Container = (ctx.lastComponent as Container | undefined) ?? new Container();
-				cmp.clear();
-
-				cmp.addChild(
-					new Text(`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", sessionName)}`, 0, 0),
-				);
-
-				if (warningLine) {
-					cmp.addChild(new Text(warningLine, 0, 0));
-				}
-
-				const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-				if (text) {
-					const styledOutput = text
-						.split("\n")
-						.map((line) => theme.fg("dim", line))
-						.join("\n");
-
-					if (expanded) {
-						cmp.addChild(new Text(styledOutput, 4, 0));
-					} else {
-						cmp.addChild({
-							invalidate: () => {},
-							render: (w: number) => renderExpandableOutput(styledOutput, theme, w),
-						});
-					}
-				}
-
-				// Duration
-				if (state.startedAt !== undefined) {
-					const label = isPartial ? "Elapsed" : "Took";
-					const endTime = state.endedAt ?? Date.now();
-					const dur = ((endTime - state.startedAt) / 1000).toFixed(1);
-					cmp.addChild(new Text(`\n${theme.fg("muted", `${label} ${dur}s`)}`, 2, 0));
-				}
-
-				return cmp;
-			}
-
+			// ── Fallback (close mode, errors, etc.) ──
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			if (!text && !isPartial) {
 				return new Text("", 0, 0);
 			}
-
 			return new Text(theme.fg("dim", text), 0, 0);
 		},
 	});
 
 	// ── Cleanup on exit ───────────────────────────────
 	pi.on("session_shutdown", async (event, ctx) => {
-		// Clean up temp dir when parent quits
-		if (event.reason === "quit") {
-			try {
-				fs.rmSync(TMPDIR, { recursive: true, force: true });
-			} catch {
-				/* ok */
-			}
-		}
-
 		if (event.reason !== "quit") return;
-		if (sessions.size === 0) return;
 
-		const names = Array.from(sessions.keys());
+		// Kill active sessions and close server first
+		if (sessions.size > 0) {
+			const names = Array.from(sessions.keys());
 
-		if (ctx.hasUI) {
-			const ok = await ctx.ui.confirm(
-				"Sub‑agents still running",
-				`${names.length} active: ${names.join(", ")}\nClose them?`,
-			);
-			if (!ok) return;
-		}
-
-		for (const s of sessions.values()) {
-			tmuxKill(s.sessionName);
-		}
-		sessions.clear();
-
-		// Close shared server
-		if (sharedServer) {
-			try {
-				sharedServer.close();
-			} catch {
-				/* ok */
+			if (ctx.hasUI) {
+				const ok = await ctx.ui.confirm(
+					"Sub‑agents still running",
+					`${names.length} active: ${names.join(", ")}
+Close them?`,
+				);
+				if (!ok) return;
 			}
-			sharedServer = null;
-			serverReady = null;
+
+			for (const s of sessions.values()) {
+				tmuxKill(s.sessionName);
+			}
+			sessions.clear();
+
+			// Close shared server
+			if (sharedServer) {
+				try {
+					sharedServer.close();
+				} catch {
+					/* ok */
+				}
+				sharedServer = null;
+				serverReady = null;
+			}
+		}
+
+		// Then clean up temp dir
+		try {
+			fs.rmSync(TMPDIR, { recursive: true, force: true });
+		} catch {
+			/* ok */
 		}
 	});
 }
