@@ -28,6 +28,7 @@ Or manually:
 ```bash
 mkdir -p ~/.pi/agent/extensions/subagent
 ln -sf "$(pwd)/index.ts" ~/.pi/agent/extensions/subagent/index.ts
+ln -sf "$(pwd)/runner.ts" ~/.pi/agent/extensions/subagent/runner.ts
 ```
 
 Restart pi and just tell it "ask a sub‑agent to…".

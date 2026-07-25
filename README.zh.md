@@ -27,6 +27,7 @@ pi install git:github.com/everyx/pi-subagent
 ```bash
 mkdir -p ~/.pi/agent/extensions/subagent
 ln -sf "$(pwd)/index.ts" ~/.pi/agent/extensions/subagent/index.ts
+ln -sf "$(pwd)/runner.ts" ~/.pi/agent/extensions/subagent/runner.ts
 ```
 
 装好后重启 pi，直接跟它说"让子 agent 做 X"就行了。

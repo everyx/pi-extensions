@@ -13,14 +13,14 @@ Pi 不支持内置子 agent。官方推荐的 `pi --print` 模式存在不足：
 
 ## 解决方案
 
-一个 pi 扩展，注册 `subagent` 工具，支持四种模式：
+一个 pi 扩展（两文件：`index.ts` 编排层 + `runner.ts` 执行后端），注册 `subagent` 工具，支持四种模式：
 
 - **非交互**（默认）：`spawn` + `pi --print --no-session`，零 tmux 开销。
 - **交互**（`interactive: true`）：命名 tmux 会话（`pi-sub-<id>`），可 `tmux attach`。
 - **Battle**（`session + task`）：`tmux paste-buffer` 向运行中的子 agent 发后续提示，结果通过 Unix socket 推回。
 - **并行**（`tasks[]`）：`Promise.all` 并发运行多个子 agent 并聚合结果。
 
-同一扩展单文件双模式：主 agent 调用时作为父级注册工具；被子 agent 启动的子实例自动感知父级存在并切换为子角色（不注册工具），将输出推回父级。
+同一扩展按 seam 拆分为两个模块：`index.ts`（编排层）通过 `SubagentRunner` seam 委托给 `runner.ts`（执行后端）。
 
 ## 设计原则
 
@@ -71,7 +71,7 @@ Took 4.0s
 - 模式 emoji：`⚡` 非交互、`💬` 交互。
 - 非交互模式不显示 session 名（`| pi-sub-xxx`），交互模式显示。
 - 状态行各字段用 `|` 分隔：`(模型)`、`[| session]`、`| ⏱️ 耗时`。进行中的耗时实时刷新（0.1s 精度），完成后定格。末尾显示所有任务的总耗时。
-- 若模型降级，紧接状态行下方以 `model` 色显示 warning 信息，然后跟上 prompt。
+- 若模型降级，紧接状态行下方以 `warning` 色显示 warning 信息，然后跟上 prompt。
 - prompt（`>` 开头）与 output 均为 dim 样式，之间无空行，紧接排列。合并为一个可折叠块（`renderExpandableOutput`），折叠时最多 5 行，超出显示 `keyHint`。
 - 单任务与并行复用同一套渲染逻辑，仅列表项数量不同。
 - `execute` 返回双格式：`content` 给 LLM 阅读（XML：`<result id="...">...output...</result>`），`details.tasks` 给 TUI 渲染（含完整状态信息）。
@@ -106,12 +106,14 @@ Closed sub‑agent session pi-sub-a1b
 
 ### 架构
 
-单文件双模式，通过父子通信通道自动识别角色：
+两文件双模式：
 
-- **父模式**：注册 `subagent` 工具，管理子 agent 生命周期。
-- **子模式**：在子 pi 实例中运行，将最后一条助手输出推回父级，不注册工具。
+- `index.ts` — 编排层。注册 `subagent` 工具，管理子 agent 生命周期（`sessions` 注册表、清理），通过 `SubagentRunner` seam 委托执行。
+- `runner.ts` — 执行后端。定义 `SubagentRunner` 接口和两个 adapter：
+  - `PrintRunner`：非交互模式，`spawn pi --print --no-session`，无状态单例。
+  - `TmuxRunner`：交互模式，持有 socket server 和 tmux 辅助，有状态（每个实例一个 socket server）。
 
-父级持有活跃会话注册表和 socket server，子级无状态。
+子模式通过 `activateChildMode()` 封装在 `runner.ts` 中，父级 `index.ts` 检测环境变量后调用。
 
 ### 通信协议
 
