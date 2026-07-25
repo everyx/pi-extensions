@@ -93,7 +93,7 @@ subagent
 - header 无任务数量（battle 为单步操作，不显示计数）。
 - 发送后续提示后立即进入 `[~]` 状态并开始计时，完成后转入 `[✓]`，耗时定格。布局复用任务列表项的风格。
 - 通过 `tmux paste-buffer` 将 `>` 后的 prompt 键入子 agent 终端。
-- 模型继承自原 session，不经过 model 解析，因此无模型降级 warning。
+- 模型继承自原 session（SessionState.model），在状态行显示。不经过 registry 解析，因此无模型降级 warning。
 
 ### Close 模式
 
@@ -164,7 +164,7 @@ Unix socket + 长度前缀帧（4 字节大端 uint32 长度 + UTF-8 载荷）�
 所有 UI 渲染使用 pi 的原生组件（`Spacer`、`Box`、`Text` 等），不引入第三方 UI 库。
 
 ### 样式驱动排版
-不使用空格进行对齐和排版，布局通过样式属性（`dim`、颜色、`padding` 等）实现。
+使用 pi 原生 `Text` 组件的 `paddingX` 参数控制缩进，需多行缩进时配合 `truncateToVisualLines`（内部创建 `Text` 组件）实现。避免手写 `" ".repeat()` 广告字符串拼接。
 
 ## 测试决策
 

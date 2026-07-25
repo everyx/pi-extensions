@@ -17,7 +17,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
+import { keyHint, type Theme, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -37,22 +37,17 @@ interface TaskDisplay {
 
 // ─── Expandable output helper ──────────────────────────────────
 
-function renderExpandableOutput(
-	styledOutput: string,
-	theme: { fg: (color: any, text: string) => string },
-	w: number,
-	indent = 0,
-): string[] {
+function renderExpandableOutput(styledOutput: string, theme: Theme, w: number, indent = 0): string[] {
 	const preview = truncateToVisualLines(styledOutput, 5, w, indent);
-
-	const pad = (line: string) => " ".repeat(indent) + line;
 
 	if (preview.skippedCount > 0) {
 		const hint =
-			`${pad(theme.fg("muted", `... (${preview.skippedCount} earlier lines, `))}` +
+			theme.fg("muted", `... (${preview.skippedCount} earlier lines, `) +
 			keyHint("app.tools.expand", "to expand") +
 			theme.fg("muted", ")");
-		return [hint, ...preview.visualLines];
+		// Use Text paddingX for indentation
+		const hintLine = new Text(hint, indent, 0).render(w)[0];
+		return [hintLine, ...preview.visualLines];
 	}
 	return preview.visualLines;
 }
@@ -474,6 +469,7 @@ function lastAssistantText(ctx: ExtensionContext): string {
 interface SessionState {
 	id: string;
 	sessionName: string;
+	model: string;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -518,7 +514,7 @@ async function runInteractive(
 	const output = await waitForResult(sessionName, signal);
 
 	// Track session for battle / cleanup
-	sessions.set(sessionName, { id: sid, sessionName });
+	sessions.set(sessionName, { id: sid, sessionName, model: model ?? "" });
 
 	return { output, sessionName };
 }
@@ -558,13 +554,7 @@ const SubagentParams = Type.Object({
  * Render a single task item: status line + collapsible body.
  * Shared between tasks/parallel and battle modes.
  */
-function renderTaskItem(
-	cmp: Container,
-	t: TaskDisplay,
-	isPartial: boolean,
-	expanded: boolean,
-	theme: { fg: (color: any, text: string) => string },
-): void {
+function renderTaskItem(cmp: Container, t: TaskDisplay, isPartial: boolean, expanded: boolean, theme: Theme): void {
 	const isInteractive = !!t.sessionName;
 	const emoji = isInteractive ? "💬" : "⚡";
 
@@ -652,23 +642,6 @@ function escapeXml(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// ─── Live timer helper ────────────────────────────────────────────
-
-/** Start a 1-second interval that calls onUpdate with the current payload.
- * Returns [tick, stop] — call tick() for a final update, stop() to clean up.
- */
-function startTimer(
-	onUpdate: ((update: any) => void) | undefined,
-	getPayload: () => any,
-): [() => void, () => void] {
-	const tick = () => onUpdate?.(getPayload());
-	const timer = setInterval(tick, 100);
-	return [tick, () => clearInterval(timer)];
-}
-
-
-// ─── Extension entry ─────────────────────────────────────────────
-
 export default function (pi: ExtensionAPI) {
 	// ── Child mode ────────────────────────────────────────
 	const parentSocket = process.env.PI_SUBAGENT_PARENT_SOCKET;
@@ -743,7 +716,7 @@ export default function (pi: ExtensionAPI) {
 					id: params.task.slice(0, 40),
 					output: "",
 					prompt: params.task,
-					model: "",
+					model: s.model,
 					sessionName: params.session,
 					done: false,
 					startedAt,
@@ -754,10 +727,15 @@ export default function (pi: ExtensionAPI) {
 				});
 
 				// Live timer: refresh every second
-				const [, stopTimer] = startTimer(onUpdate, () => ({
-					content: [],
-					details: { tasks: [{ ...taskDisplay }] },
-				}));
+				const timer = setInterval(
+					() =>
+						onUpdate?.({
+							content: [],
+							details: { tasks: [{ ...taskDisplay }] },
+						}),
+					100,
+				);
+				const stopTimer = () => clearInterval(timer);
 
 				try {
 					tmuxPaste(s.sessionName, params.task);
@@ -765,11 +743,12 @@ export default function (pi: ExtensionAPI) {
 					const endedAt = Date.now();
 
 					taskDisplay.output = output;
+					taskDisplay.model = s.model;
 					taskDisplay.done = true;
 					taskDisplay.endedAt = endedAt;
 
 					return {
-						content: [{ type: "text", text: output }],
+						content: [{ type: "text", text: tasksToLlmXml([taskDisplay]) }],
 						details: { tasks: [taskDisplay] },
 					};
 				} finally {
@@ -787,8 +766,9 @@ export default function (pi: ExtensionAPI) {
 					done: false,
 				}));
 
-				// Toast: show all tasks in pending state
-				onUpdate?.({ content: [], details: { tasks: [...taskDisplays] } });
+				// Toast: show all tasks in pending state (header + tasks atomically)
+				const header = `subagent (0/${params.tasks.length})`;
+				onUpdate?.({ content: [], details: { header, tasks: [...taskDisplays] } });
 
 				await Promise.all(
 					params.tasks.map(async (t, i) => {
@@ -801,10 +781,16 @@ export default function (pi: ExtensionAPI) {
 						taskDisplays[i].startedAt = Date.now();
 
 						// Live timer: refresh every second
-						const [tick, stopTimer] = startTimer(onUpdate, () => ({
-							content: [{ type: "text", text: tasksToLlmXml([...taskDisplays]) }],
-							details: { tasks: [...taskDisplays] },
-						}));
+						const timer = setInterval(
+							() =>
+								onUpdate?.({
+									content: [{ type: "text", text: tasksToLlmXml([...taskDisplays]) }],
+									details: { header, tasks: [...taskDisplays] },
+								}),
+							100,
+						);
+						const stopTimer = () => clearInterval(timer);
+						const tick = stopTimer;
 
 						try {
 							let output: string;
@@ -840,6 +826,7 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: tasksToLlmXml(taskDisplays) }],
 					details: {
+						header,
 						tasks: taskDisplays,
 						type: "parallel",
 						sessions: taskDisplays.filter((d) => d.sessionName).map((d) => d.sessionName as string),
@@ -857,19 +844,12 @@ export default function (pi: ExtensionAPI) {
 		// ── Rendering ───────────────────────────────
 		renderCall(args, theme, _ctx) {
 			if (args.tasks && args.tasks.length > 0) {
-				const count = args.tasks.length;
-				const cmp = new Container();
-				cmp.addChild(
-					new Text(`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", `(0/${count})`)}`, 0, 0),
-				);
-				return cmp;
+				// Header is rendered inside renderResult alongside task items,
+				// so they appear atomically — no visual gap.
+				return new Text("", 0, 0);
 			}
 			if (args.session && args.task) {
-				return new Text(
-					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "battle")} ${theme.fg("dim", args.session)}`,
-					0,
-					0,
-				);
+				return new Text(`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("dim", args.session)}`, 0, 0);
 			}
 			if (args.close) {
 				return new Text(
@@ -893,16 +873,21 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const details = result.details as Record<string, unknown> | undefined;
-			const warningLine = details?.warning ? `${theme.fg("warning", details.warning as string)}\n` : "";
-
 			// ── Task list (tasks/parallel + battle both use this) ──
 			const tasks = details?.tasks as TaskDisplay[] | undefined;
 			if (tasks) {
 				const cmp: Container = (ctx.lastComponent as Container | undefined) ?? new Container();
 				cmp.clear();
 
-				if (warningLine) {
-					cmp.addChild(new Text(warningLine, 0, 0));
+				// Render header if provided (tasks mode)
+				if (details?.header) {
+					cmp.addChild(
+						new Text(
+							`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", details.header as string)}`,
+							0,
+							0,
+						),
+					);
 				}
 
 				for (let i = 0; i < tasks.length; i++) {
