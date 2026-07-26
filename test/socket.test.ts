@@ -5,7 +5,7 @@ import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { readLengthPrefixed, writeLengthPrefixed } from "../runner.ts";
+import { readLengthPrefixed, writeLengthPrefixed } from "../src/protocol.ts";
 
 /** Create a temporary socket path. */
 function tmpSocket(): string {

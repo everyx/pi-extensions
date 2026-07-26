@@ -16,9 +16,9 @@ Pi 不支持内置子 agent。官方推荐的 `pi --print` 模式存在不足：
 
 一个 pi 扩展，注册 `subagent` 工具，支持三种模式：
 
-- **非交互**（默认）：`spawn` + `pi --print --no-session`，零 tmux 开销。
-- **交互**（`interactive: true`）：命名 tmux 会话（`pi-sub-<id>`），可 `tmux attach`。
-- **Battle**（`session + task`）：`tmux paste-buffer` 向运行中的子 agent 发后续提示，结果通过 Unix socket 推回。
+- **非交互**（默认）：spawn 子 pi 进程，零 tmux 开销。
+- **交互**（`interactive: true`）：命名 tmux 会话，可 `tmux attach` 观测。
+- **Battle**（`session + task`）：向运行中的交互式子 agent 发后续 prompt，结果通过 Unix socket 推回。
 
 ## 设计原则
 
@@ -26,14 +26,15 @@ Pi 不支持内置子 agent。官方推荐的 `pi --print` 模式存在不足：
 用户使用本插件的感觉应与使用 pi 内置工具一致统一：
 
 - **一致的调用方式**：参数 schema、命名风格与 pi 内置工具（`bash`、`read`、`edit` 等）保持一致。
-- **一致的输出质感**：渲染复用 pi 原生 TUI 组件（`Box`、`Text`、`Spacer`），排版、颜色、交互反馈与内置工具一致。
+- **一致的输出质感**：渲染复用 pi 原生 TUI 组件（`Text`、`Container`），排版、颜色、交互反馈与内置工具一致。输出截断、折叠展开等细节由 pi 框架统一控制，折叠展开行数阈值与 pi 内置工具一致。
 - **一致的行为体感**：错误处理、进度反馈、清理逻辑等遵循 pi 生态惯例。
 - **依赖原生能力**：多 task 并行由 pi 的 tool call 批量执行机制实现，subagent 不内置聚合逻辑。
 
-### LLM Friendly
+### LLM + Token Friendly
 LLM 上下文窗口是宝贵资源。
 
-- **Token Economy**：返回给 LLM 的 `content` 仅包含完成任务所需的最小信息——子 agent 的输出文本。装饰性元素（状态标记、emoji、计时、原始 prompt）仅在 TUI 渲染中呈现，不出现在 LLM 可见的文本中。
+- **Token Economy**：返回给 LLM 的 `content` 仅包含完成任务所需的最小信息——子 agent 的输出文本。装饰性元素（状态标记、emoji、原始 prompt）仅在 TUI 渲染中呈现，不出现在 LLM 可见的文本中。
+- **纯函数隔热层**：参数校验、model 解析、事件流解析都是无副作用的纯函数，可独立单测、不占用运行时上下文窗口。
 
 ### 提供能力而非方案
 
@@ -56,105 +57,105 @@ LLM 上下文窗口是宝贵资源。
 
 ### 渲染状态
 
-`renderCall` 展示 header（工具名 + task + 可选的 model/session），`renderResult` 追加 body + timer。header 由 renderCall 独占，renderResult 不自含 header。
+`renderCall` 展示 header（工具名 + emoji + prompt 首行 + metadata），`renderResult` 追加 output + footer（计时器）。
+
+计时器行为：
+- **执行中**：显示 `Elapsed X.Xs`，每秒刷新
+- **完成后**：定格为 `Took X.Xs`
 
 ### 执行中（renderCall）
 
 ```
-subagent ⚡ 认证扫描
+subagent ⚡ 认证扫描 (opencode/ling-3.0-flash-free | pi-sub-c3d)
+subagent ⚡ 深度分析系统架构… (opencode/ling-3.0-flash-free)
 ```
 
-- `subagent` 以 header 样式渲染
-- ⚡ 非交互 / 💬 交互
-- 任务描述（`args.task`）
-- model 和 session 初始时不显示，renderResult 写入 state 后在下一个 timer tick 可见
+- model 和 session 作为 muted 后缀跟随在 header 末尾（对齐 bash 的 ` (timeout 10s)`）
+- 多行 prompt 在首行后加 `…`，一目可见是摘要
+- 非交互模式无 session，仅显示 model
 
 ### 完成（renderResult）
 
 ```
-> 查找项目中所有认证相关的代码...
-正在扫描 src/ 目录下的认证逻辑...
+subagent ⚡ 查找所有数据库... (opencode/ling-3.0-flash-free | pi-sub-c3d)
 
-Took 1.2s
+查找所有数据库表和模式定义...
+
+正在扫描 src/ 目录下的认证逻辑..
+分析完成，共发现 5 个问题...
+
+Took 4.0s
 ```
 
-- header 由 renderCall 独占，renderResult 仅展示 body + timer
-- 主体内容：样式同 bash output。prompt 行以 `>` 前缀开头，紧接 output 内容，之间无空行
-- 空一行（`\n`）分隔主体和底部
-- 底部：`Took X.Xs`（muted 色，精确到 0.1s）
-- 进行中 timer 跳动时 label 为 `Elapsed`，完成后定格为 `Took`
-- 背景色由 pi 框架根据执行状态自动切换
+- header 由 renderCall 独占，renderResult 展示 body（prompt + output）+ footer
+- body：全量内容（prompt + 分隔空行 + output）整体使用 `toolOutput` 样式
+- footer：`Took X.Xs` / `Elapsed X.Xs`，muted 样式
 
 ### Battle 模式
 
 ```
-> 继续深入分析认证模块...
+subagent 💬 继续深入分析认证模块 (opencode/ling-3.0-flash-free | pi-sub-c3d)
+
 分析结果：...
 
 Took 0.8s
 ```
 
-- header 在 renderCall 中显示 session 名（继承自原 session）
-- 模型继承自原 session，无降级 warning
-- 布局与单任务一致
+- header 与单任务一致，emoji + prompt 首行 + model/session muted 后缀
+- footer 仅展示计时器
 
 ### Close 模式
 
 ```
-subagent ✕ close pi-sub-a1b
+subagent close pi-sub-a1b
 Closed sub‑agent session pi-sub-a1b
 ```
 
-- renderCall：`subagent ✕ close <session>`
+- renderCall：`subagent close <session>`，全部 toolTitle 样式
 - renderResult：dim 样式确认文本
-- 无 timer、无主体内容
-
-### 背景色与状态
-
-| 状态 | 背景色 | 说明 |
-|------|--------|------|
-| 执行中 | 默认 pending 色 | renderCall 渲染中，还没有 result |
-| 完成（成功） | 默认 success 色 | 最终 renderResult |
-| 错误 | 默认 error 色 | `result.isError === true` |
-
-背景色由 pi 框架根据 `isPartial` 和 `isError` 自动切换，subagent 的 `renderResult` 不需要关心背景色逻辑。
+- 无主体内容
 
 ## 实现决策
 
 ### 架构
 
-编排层与执行后端分离，使不同执行环境（spawn / tmux）可互换而不影响工具注册逻辑。
+参数校验从 `execute` 中抽出为纯函数 `parseMode()`，返回判别联合类型，`execute` 以此为 switch 进入四个干净分支：print / interactive / battle / close。非交互（PrintRunner）和交互（InteractiveRunner）两种后端直连 dispatch，无抽象 seam。
 
 ### 通信协议
 
 Unix socket + 长度前缀帧。短连接，每轮新连接写一个包即断开。
+协议格式：`[4B big‑endian payload length][payload]`，payload 为 `sessionName\0text`（sessionName 可为空）。
+
+### 子模式结果上报
+
+子 pi 实例通过环境变量激活子模式。挂钩 `agent_end` + `agent_settled` 两个事件，取最后一条 assistant 消息回传。
+即使无输出也发送空字符串 sentinel，避免父进程 socket 超时。
 
 ### tmux 生命周期
 
 | | 非交互模式 | 交互模式 |
 |---|---|---|
 | tmux 会话 | 不创建 | `pi-sub-<random>` |
-| pi 调用 | `pi --print --no-session`（spawn） | tmux shell 脚本（`pi -n`） |
-| 结果捕获 | stdout 管道 | Unix socket |
-| Battle | ❌ | ✅ `tmux paste-buffer` + socket |
+| pi 调用 | `pi --print --no-session`（spawn） | per‑session launcher 脚本（`pi -n`） |
+| Battle 灌入 | ❌ | 通过临时文件灌入（`load-buffer -t <session> <file>`） |
+| 结果捕获 | stdout 管道（JSON lines 事件流） | Unix socket |
 | 退出清理 | 不适用 | 确认提示（TUI）或静默杀死（headless） |
 
-### 工具参数 schema
+### 工具参数设计
 
-```typescript
-{ task: string, model?: string, tools?: string[], interactive?: boolean }
+三组互斥参数对应三种模式：
+- **print**：`{ task, model?, tools? }`（默认）
+- **interactive**：`{ task, model?, tools?, interactive: true }`
+- **battle**：`{ session, task }`
+- **close**：`{ session, close: true }`
 
-// Battle（向运行中的 session 发后续 prompt）
-{ session: string, task: string }
-
-// 关闭 session
-{ session: string, close: true }
-```
+`parseMode()` 负责将这组参数分类为判别联合，不依赖调用者手动组合条件。
 
 ### Model 解析
 
-- 未指定 → 使用父会话模型（`ctx.model`），不经过 registry。
-- 指定 → 匹配 registry（支持 `provider/name` 或 `name` 简写），找不到则降级父模型 + warning。
+- 未指定 → 使用父会话模型，不经过 registry。
+- 指定 → 匹配 registry（支持 `provider/name` 或 `name` 简写，大小写不敏感，`.` `:` `_` 等价），找不到则直接报错退出——用户明确指定的模型不可用时不降级。
+- 解析结果在 TUI footer 中展示：`(provider/id) | session | Took X.Xs`。
 
 ### 父级退出时的清理
 
@@ -163,15 +164,11 @@ Unix socket + 长度前缀帧。短连接，每轮新连接写一个包即断开
 ## 开发约束
 
 ### 使用原生组件
-所有 UI 渲染使用 pi 的原生组件（`Spacer`、`Box`、`Text` 等），不引入第三方 UI 库。
-
-
+所有 UI 渲染使用 pi 的原生组件（`Text`、`Container` 等），不引入第三方 UI 库。
 
 ## 测试决策
 
-只测协议 seam（长度前缀 socket 往返），不测基础设施编排。
-
-pi mono 仓库不为其扩展提供测试，本仓库遵循相同约定。
+纯函数全面单测（parseMode / resolveModel / 事件流解析 / 协议 framing），基础设施编排（spawn/tmux 进程管理等）不测——它们依赖外部环境且在不注入大量 mock 时不可测。
 
 ## 不在此范围
 
@@ -183,4 +180,4 @@ pi mono 仓库不为其扩展提供测试，本仓库遵循相同约定。
 
 ## 其它说明
 
-- 扩展必须支持子模式自动加载（`~/.pi/agent/extensions/` 或 `pi install`），子 pi 实例启动时自动激活子模式行为。
+扩展必须支持子模式自动加载（`~/.pi/agent/extensions/` 或 `pi install`），子 pi 实例启动时自动激活子模式行为。

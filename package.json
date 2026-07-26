@@ -16,17 +16,16 @@
 		"format": "biome format --write .",
 		"lint": "biome lint .",
 		"typecheck": "tsc --noEmit",
-		"test": "tsx --test test/socket.test.ts"
+		"test": "tsx --test test/*.test.ts"
 	},
 	"files": [
-		"index.ts",
-		"runner.ts",
+		"src/",
 		"README.md",
 		"LICENSE"
 	],
 	"pi": {
 		"extensions": [
-			"./index.ts"
+			"./src/index.ts"
 		]
 	},
 	"peerDependencies": {
