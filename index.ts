@@ -32,6 +32,8 @@ const tmuxRunner = new TmuxRunner(getTmpDir());
 
 // ─── Task display type ──────────────────────────────────────────
 
+type TaskErrorType = "cancelled" | "execution_error";
+
 interface TaskDisplay {
 	id: string;
 	output: string;
@@ -42,6 +44,7 @@ interface TaskDisplay {
 	startedAt?: number;
 	endedAt?: number;
 	warning?: string;
+	error?: TaskErrorType;
 }
 
 // ─── Expandable output helper ──────────────────────────────────
@@ -173,11 +176,16 @@ function renderTaskItem(cmp: Container, t: TaskDisplay, isPartial: boolean, expa
 	const emoji = isInteractive ? "💬" : "⚡";
 
 	// Status
-	let statusColor: "success" | "accent" | "muted";
+	let statusColor: "error" | "success" | "accent" | "muted";
 	let checkChar: string;
 	if (t.done) {
-		statusColor = "success";
-		checkChar = "[✓]";
+		if (t.error) {
+			statusColor = "error";
+			checkChar = "[✗]";
+		} else {
+			statusColor = "success";
+			checkChar = "[✓]";
+		}
 	} else if (isPartial) {
 		statusColor = "accent";
 		checkChar = "[~]";
@@ -240,20 +248,22 @@ function renderTaskItem(cmp: Container, t: TaskDisplay, isPartial: boolean, expa
 	}
 }
 
-/** Serialize task results as XML for LLM consumption.
- *
- * XML is chosen over markdown code blocks because the output may itself
- * contain triple backticks. XML tags provide unambiguous boundaries.
- * Token-economy: only task id and output — no checkmarks, emoji, timing,
- * or original prompt. Those decorations are for TUI only.
- */
-function tasksToLlmXml(tasks: TaskDisplay[]): string {
-	return tasks.map((v) => `<result id="${escapeXml(v.id)}">\n${escapeXml(v.output)}\n</result>`).join("\n");
+function tasksToNdjson(tasks: TaskDisplay[]): string {
+	return tasks
+		.map((v) => {
+			if (v.error) {
+				return JSON.stringify({ id: v.id, status: "error", error_type: v.error, output: v.output });
+			}
+			return JSON.stringify({ id: v.id, status: "success", output: v.output });
+		})
+		.join("\n");
 }
 
-/** Minimal XML escaping — only what's needed for element content safety. */
-function escapeXml(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function determineErrorType(err: unknown, signal?: AbortSignal): TaskErrorType {
+	if (signal?.aborted) return "cancelled";
+	const msg = err instanceof Error ? err.message : String(err);
+	if (msg === "Aborted") return "cancelled";
+	return "execution_error";
 }
 
 function sessionNotFoundError(sessionName: string) {
@@ -346,7 +356,7 @@ export default function (pi: ExtensionAPI) {
 
 				const stop = startTimer(() =>
 					onUpdate?.({
-						content: [{ type: "text", text: tasksToLlmXml([taskDisplay]) }],
+						content: [{ type: "text", text: tasksToNdjson([taskDisplay]) }],
 						details: { tasks: [taskDisplay] },
 					}),
 				);
@@ -361,7 +371,16 @@ export default function (pi: ExtensionAPI) {
 					taskDisplay.endedAt = endedAt;
 
 					return {
-						content: [{ type: "text", text: tasksToLlmXml([taskDisplay]) }],
+						content: [{ type: "text", text: tasksToNdjson([taskDisplay]) }],
+						details: { tasks: [taskDisplay] },
+					};
+				} catch (err) {
+					taskDisplay.error = determineErrorType(err, signal);
+					taskDisplay.done = true;
+					taskDisplay.endedAt = Date.now();
+
+					return {
+						content: [{ type: "text", text: tasksToNdjson([taskDisplay]) }],
 						details: { tasks: [taskDisplay] },
 					};
 				} finally {
@@ -386,7 +405,7 @@ export default function (pi: ExtensionAPI) {
 					details: { header: `(0/${taskCount})`, tasks: [...taskDisplays] },
 				});
 
-				await Promise.all(
+				await Promise.allSettled(
 					params.tasks.map(async (t, i) => {
 						const resolved = tryResolveModel(ctx.modelRegistry, ctx.model, t.model);
 						const model = resolved.model;
@@ -401,7 +420,7 @@ export default function (pi: ExtensionAPI) {
 						const stop = startTimer(() => {
 							const doneCount = taskDisplays.filter((t) => t.done).length;
 							onUpdate?.({
-								content: [{ type: "text", text: tasksToLlmXml([...taskDisplays]) }],
+								content: [{ type: "text", text: tasksToNdjson([...taskDisplays]) }],
 								details: { header: `(${doneCount}/${taskCount})`, tasks: [...taskDisplays] },
 							});
 						});
@@ -429,7 +448,18 @@ export default function (pi: ExtensionAPI) {
 
 							// Send accumulated results so far
 							onUpdate?.({
-								content: [{ type: "text", text: tasksToLlmXml([...taskDisplays]) }],
+								content: [{ type: "text", text: tasksToNdjson([...taskDisplays]) }],
+								details: {
+									header: `(${taskDisplays.filter((t) => t.done).length}/${taskCount})`,
+									tasks: [...taskDisplays],
+								},
+							});
+						} catch (err) {
+							taskDisplays[i].error = determineErrorType(err, signal);
+							taskDisplays[i].done = true;
+							taskDisplays[i].endedAt = Date.now();
+							onUpdate?.({
+								content: [{ type: "text", text: tasksToNdjson([...taskDisplays]) }],
 								details: {
 									header: `(${taskDisplays.filter((t) => t.done).length}/${taskCount})`,
 									tasks: [...taskDisplays],
@@ -442,7 +472,7 @@ export default function (pi: ExtensionAPI) {
 				);
 
 				return {
-					content: [{ type: "text", text: tasksToLlmXml(taskDisplays) }],
+					content: [{ type: "text", text: tasksToNdjson(taskDisplays) }],
 					details: {
 						header: `(${taskDisplays.length}/${taskDisplays.length})`,
 						tasks: taskDisplays,

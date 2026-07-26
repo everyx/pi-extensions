@@ -18,7 +18,7 @@ Pi 不支持内置子 agent。官方推荐的 `pi --print` 模式存在不足：
 - **非交互**（默认）：`spawn` + `pi --print --no-session`，零 tmux 开销。
 - **交互**（`interactive: true`）：命名 tmux 会话（`pi-sub-<id>`），可 `tmux attach`。
 - **Battle**（`session + task`）：`tmux paste-buffer` 向运行中的子 agent 发后续提示，结果通过 Unix socket 推回。
-- **并行**（`tasks[]`）：`Promise.all` 并发运行多个子 agent 并聚合结果。
+- **并行**（`tasks[]`）：`Promise.allSettled` 并发运行多个子 agent 并聚合结果，部分失败不丢成功结果。
 
 同一扩展按 seam 拆分为两个模块：`index.ts`（编排层）通过 `SubagentRunner` seam 委托给 `runner.ts`（执行后端）。
 
@@ -35,6 +35,11 @@ Pi 不支持内置子 agent。官方推荐的 `pi --print` 模式存在不足：
 LLM 上下文窗口是宝贵资源。
 
 - **Token Economy**：返回给 LLM 的 `content` 仅包含完成任务所需的最小信息——任务名和结果输出。装饰性元素（状态标记、emoji、计时、原始 prompt）仅在 TUI 渲染中呈现，不出现在 LLM 可见的文本中。
+
+### 提供能力而非方案
+
+提供原语，让用户组合。组合逻辑在调用者的 prompt 里，不在工具层。
+不封装工作流模板、不自动重试、不做结果后处理。
 
 ## 用户故事
 
@@ -67,15 +72,21 @@ subagent (0/2)
 Took 4.0s
 ```
 
-- 状态 checkbox：`[ ]` 未开始 → `[~]` 进行中 → `[✓]` 完成，与 emoji、任务名使用同一 status 颜色。
+- 状态 checkbox：`[ ]` 未开始 → `[~]` 进行中 → `[✓]` 完成 / `[✗]` 失败，与 emoji、任务名使用同一 status 颜色。
 - 模式 emoji：`⚡` 非交互、`💬` 交互。
 - 非交互模式不显示 session 名（`| pi-sub-xxx`），交互模式显示。
 - 状态行各字段用 `|` 分隔：`(模型)`、`[| session]`、`| ⏱️ 耗时`。进行中的耗时实时刷新（0.1s 精度），完成后定格。末尾显示所有任务的总耗时。
 - 若模型降级，紧接状态行下方以 `warning` 色显示 warning 信息，然后跟上 prompt。
 - prompt（`>` 开头）与 output 均为 dim 样式，之间无空行，紧接排列。合并为一个可折叠块（`renderExpandableOutput`），折叠时最多 5 行，超出显示 `keyHint`。
 - 单任务与并行复用同一套渲染逻辑，仅列表项数量不同。
-- `execute` 返回双格式：`content` 给 LLM 阅读（XML：`<result id="...">...output...</result>`），`details.tasks` 给 TUI 渲染（含完整状态信息）。
-- LLM 输出采用 XML 而非 markdown 代码块，因为子 agent 的 output 本身可能包含三反引号导致解析歧义。XML tag 提供无歧义的边界。
+- `execute` 返回双格式：`content` 给 LLM 阅读（JSON 数组，每个任务一个对象，含 `id`/`status`/`output`），`details.tasks` 给 TUI 渲染（含完整状态信息）。
+- LLM 输出采用 JSON 而非 XML：JSON 是所有模型训练数据中最大公约数的结构化格式，跨模型解析可靠。
+  失败任务标记 `status: "error"`，附 `error_type` 说明原因。
+
+  ```json
+  {"id": "r1", "status": "success", "output": "..."}
+  {"id": "r2", "status": "error", "error_type": "timeout", "output": "..."}
+  ```
 
 ### Battle 模式
 
@@ -154,7 +165,9 @@ Unix socket + 长度前缀帧（4 字节大端 uint32 长度 + UTF-8 载荷）�
 
 ### 并行执行
 
-`Promise.all` 并发运行，各子 agent 无共享可变状态（唯一 session 名、socket 路径、tmux 会话）。
+`Promise.allSettled` 并发运行，各子 agent 无共享可变状态（唯一 session 名、socket 路径、tmux 会话）。
+失败任务不导致整体 reject：成功任务正常返回，失败任务标记 `status: "error"`。
+LLM 看到的是部分成功 + 部分失败的结构化列表，而非全部丢失。
 
 ### 父级退出时的清理
 
@@ -177,9 +190,8 @@ pi mono 仓库不为其扩展提供测试，本仓库遵循相同约定。
 ## 不在此范围
 
 - **Agent 定义文件**：不定义预设 agent 人格。Agent 由调用者参数完全定义。
-- **并发限制**：`Promise.all` 不加限制，后续可按需添加。
+- **并发限制**：`Promise.allSettled` 不加限制，后续可按需添加。
 - **Windows 支持**：Unix socket + tmux 仅限 Linux/macOS。
-- **结构化输出**：子 agent 返回原始助手文本，不做 schema 强制。
 - **持久化会话**：会话临时，父级退出即清理，不序列化。
 - **守护进程**：子 agent 始终在 pi 进程中运行。
 
