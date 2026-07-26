@@ -13,9 +13,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { keyHint, type Theme, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
-import { Container, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { activateChildMode, PrintRunner, TmuxRunner } from "./runner.js";
+import { activateChildMode, PrintRunner, type SubagentResult, TmuxRunner } from "./runner.js";
 
 // ─── Temp dir (created at module init, cleaned up on shutdown) ─
 
@@ -29,23 +29,6 @@ function getTmpDir(): string {
 
 const printRunner = new PrintRunner();
 const tmuxRunner = new TmuxRunner(getTmpDir());
-
-// ─── Task display type ──────────────────────────────────────────
-
-type TaskErrorType = "cancelled" | "execution_error";
-
-interface TaskDisplay {
-	id: string;
-	output: string;
-	sessionName?: string;
-	prompt: string;
-	model: string;
-	done: boolean;
-	startedAt?: number;
-	endedAt?: number;
-	warning?: string;
-	error?: TaskErrorType;
-}
 
 // ─── Expandable output helper ──────────────────────────────────
 
@@ -75,13 +58,7 @@ function resolveModel(registry: ModelRegistry, model?: string): string | undefin
 	const normalize = (s: string) => s.toLowerCase().replace(/[._:]+/g, "-");
 
 	// Try to parse provider/model — prefer /, fallback to : or .
-	const sepIdx = model.includes("/")
-		? model.indexOf("/")
-		: model.includes(":")
-			? model.indexOf(":")
-			: model.includes(".")
-				? model.indexOf(".")
-				: -1;
+	const sepIdx = model.indexOf("/");
 
 	const providerHint = sepIdx >= 0 ? model.slice(0, sepIdx) : undefined;
 	const modelName = sepIdx >= 0 ? model.slice(sepIdx + 1) : model;
@@ -132,138 +109,37 @@ function tryResolveModel(
 
 // ─── Tool parameters ─────────────────────────────────────────────
 
-const TaskConfig = Type.Object({
-	id: Type.Optional(Type.String({ description: "Optional identifier" })),
-	task: Type.String({ description: "Task prompt for the sub‑agent" }),
-	model: Type.Optional(Type.String({ description: "Model override" })),
-	tools: Type.Optional(Type.String({ description: "Tool allowlist (comma‑separated)" })),
-	interactive: Type.Optional(Type.Boolean({ description: "Spawn in tmux (attachable)", default: false })),
-});
-
 const SubagentParams = Type.Object({
-	tasks: Type.Optional(
-		Type.Array(TaskConfig, {
-			description:
-				"One or more sub‑agents to run. " +
-				"Pass a single entry for one task, " +
-				"multiple entries for parallel execution. " +
-				"Each entry can set interactive, model, tools per‑task.",
-		}),
-	),
 	task: Type.Optional(
 		Type.String({
-			description: "Follow‑up prompt for battle mode (requires `session`).",
+			description:
+				"Task prompt for the sub‑agent. " +
+				"Provide `task` alone for a single execution, " +
+				"or `session` + `task` for battle mode.",
 		}),
 	),
-	session: Type.Optional(Type.String({ description: "Continue existing session (battle)" })),
-	close: Type.Optional(Type.Boolean({ description: "Close a session" })),
+	model: Type.Optional(Type.String({ description: "Model override (e.g. claude-sonnet-4 or provider/name)" })),
+	tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist" })),
+	interactive: Type.Optional(
+		Type.Boolean({ description: "Spawn in tmux (attachable). Default: false (non‑interactive)", default: false }),
+	),
+	session: Type.Optional(Type.String({ description: "Existing interactive session name for battle or close" })),
+	close: Type.Optional(Type.Boolean({ description: "Close an interactive session (requires `session`)" })),
 });
 
-// ─── Rendering helpers ──────────────────────────────────────────
+// ─── Error helper ────────────────────────────────────────────────
 
-/** Start a live timer that calls `tick()` every `interval` ms. Returns a stop function. */
-function startTimer(tick: () => void, interval = 100): () => void {
-	const id = setInterval(tick, interval);
-	return () => clearInterval(id);
+function toErrorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }
 
-/**
- * Render a single task item: status line + collapsible body.
- * Shared between tasks/parallel and battle modes.
- */
-function renderTaskItem(cmp: Container, t: TaskDisplay, isPartial: boolean, expanded: boolean, theme: Theme): void {
-	const isInteractive = !!t.sessionName;
-	const emoji = isInteractive ? "💬" : "⚡";
-
-	// Status
-	let statusColor: "error" | "success" | "accent" | "muted";
-	let checkChar: string;
-	if (t.done) {
-		if (t.error) {
-			statusColor = "error";
-			checkChar = "[✗]";
-		} else {
-			statusColor = "success";
-			checkChar = "[✓]";
-		}
-	} else if (isPartial) {
-		statusColor = "accent";
-		checkChar = "[~]";
-	} else {
-		statusColor = "muted";
-		checkChar = "[ ]";
-	}
-
-	// Model tag (dim)
-	const modelTag = t.model ? theme.fg("dim", `(${t.model})`) : "";
-
-	// Session tag (dim, with | separator)
-	const sessionTag = t.sessionName ? theme.fg("dim", `| ${t.sessionName}`) : "";
-
-	// Timing tag (dim, with | separator)
-	let timingTag = "";
-	if (t.startedAt) {
-		const endTime = t.endedAt ?? Date.now();
-		const dur = ((endTime - t.startedAt) / 1000).toFixed(1);
-		timingTag = theme.fg("dim", `| ⏱️ ${dur}s`);
-	}
-
-	// Assemble status line: - [✓] ⚡ task (model) [| session] [| ⏱️ x.xs]
-	const statusLine = [
-		`${theme.fg(statusColor, `- ${checkChar}`)} ${theme.fg(statusColor, emoji)} ${theme.fg(statusColor, t.id)}`,
-		modelTag,
-		sessionTag,
-		timingTag,
-	]
-		.filter(Boolean)
-		.join(" ");
-
-	cmp.addChild(new Text(statusLine, 0, 0));
-
-	// Body: warning + prompt (with >) + output
-	if (t.warning || t.prompt || t.output) {
-		const lines: string[] = [];
-		if (t.warning) {
-			lines.push(theme.fg("warning", t.warning));
-		}
-		if (t.prompt) {
-			const promptDisplay = (t.prompt.length > 78 ? `${t.prompt.slice(0, 78)}...` : t.prompt).replace(/\n/g, " ");
-			lines.push(theme.fg("dim", `> ${promptDisplay}`));
-		}
-		if (t.output) {
-			const cleaned = t.output.replace(/\n+$/, "");
-			const outputLines = cleaned.split("\n").map((line) => theme.fg("dim", line));
-			lines.push(...outputLines);
-		}
-		const combined = lines.join("\n");
-		const indent = 2; // aligns with [ of - [✓]
-		if (expanded) {
-			cmp.addChild(new Text(combined, indent, 0));
-		} else {
-			cmp.addChild({
-				invalidate: () => {},
-				render: (w: number) => renderExpandableOutput(combined, theme, w, indent),
-			});
-		}
-	}
-}
-
-function tasksToNdjson(tasks: TaskDisplay[]): string {
-	return tasks
-		.map((v) => {
-			if (v.error) {
-				return JSON.stringify({ id: v.id, status: "error", error_type: v.error, output: v.output });
-			}
-			return JSON.stringify({ id: v.id, status: "success", output: v.output });
-		})
-		.join("\n");
-}
-
-function determineErrorType(err: unknown, signal?: AbortSignal): TaskErrorType {
-	if (signal?.aborted) return "cancelled";
-	const msg = err instanceof Error ? err.message : String(err);
-	if (msg === "Aborted") return "cancelled";
-	return "execution_error";
+interface SubagentDetails {
+	task: string;
+	model: string;
+	sessionName?: string;
+	startedAt: number;
+	endedAt?: number;
+	warning?: string;
 }
 
 function sessionNotFoundError(sessionName: string) {
@@ -290,25 +166,32 @@ export default function (pi: ExtensionAPI) {
 			"Delegate a task to a sub‑agent with an isolated context window. " +
 			"Non‑interactive (default): spawns pi --print and captures stdout. " +
 			"Interactive (interactive:true): spawns inside tmux so you can tmux attach -t <name>. " +
-			"Battle: set session to an existing interactive session name and the task becomes a follow‑up prompt. " +
-			"Parallel: use tasks[] to run multiple sub‑agents.",
+			"Battle: set session to an existing interactive session name and the task becomes a follow‑up prompt.",
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			// Validate mutually exclusive parameters
-			const hasTasks = !!(params.tasks && params.tasks.length > 0);
 			const hasSession = !!params.session;
 			const hasClose = !!params.close;
 			const hasTask = !!params.task;
-			const activeModeCount = [hasTasks, hasSession && hasTask, hasSession && hasClose].filter(Boolean).length;
+			const activeModeCount = [hasTask, hasSession && hasTask, hasSession && hasClose].filter(Boolean).length;
 
 			if (activeModeCount > 1) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: "Ambiguous parameters: `tasks[]`, `session + task` (battle), and `session + close` are mutually exclusive.",
+							text: "Ambiguous parameters: `task`, `session + task` (battle), and `session + close` are mutually exclusive.",
 						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
+			if (!hasTask && !hasClose) {
+				return {
+					content: [
+						{ type: "text", text: "Provide `task` (execute), `session` + `task` (battle), or `session` + `close`." },
 					],
 					details: {},
 					isError: true,
@@ -333,6 +216,50 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
+			// ── Single task ────────────────────────────
+			if (params.task && !params.session) {
+				const resolved = tryResolveModel(ctx.modelRegistry, ctx.model, params.model);
+				const model = resolved.model ?? "";
+				const interactive = params.interactive ?? false;
+				const runner = interactive ? tmuxRunner : printRunner;
+				const startedAt = Date.now();
+
+				onUpdate?.({
+					content: [],
+					details: { task: params.task, model, startedAt, warning: resolved.warning },
+				});
+
+				let result: SubagentResult | undefined;
+				try {
+					result = await runner.execute(params.task, {
+						cwd: ctx.cwd,
+						model,
+						tools: params.tools,
+						signal,
+						onChunk: () => {},
+					});
+				} catch (err) {
+					const message = toErrorMessage(err);
+					return {
+						content: [{ type: "text", text: message }],
+						details: { task: params.task, model, startedAt, endedAt: Date.now() },
+						isError: true,
+					};
+				}
+
+				return {
+					content: [{ type: "text", text: result.output }],
+					details: {
+						task: params.task,
+						model,
+						sessionName: result.sessionName,
+						startedAt,
+						endedAt: Date.now(),
+						warning: resolved.warning,
+					},
+				};
+			}
+
 			// ── Battle ──────────────────────────────────
 			if (params.session && params.task) {
 				const s = tmuxRunner.getSession(params.session);
@@ -340,222 +267,148 @@ export default function (pi: ExtensionAPI) {
 
 				const startedAt = Date.now();
 
-				const taskDisplay: TaskDisplay = {
-					id: params.task.slice(0, 40),
-					output: "",
-					prompt: params.task,
-					model: s.model,
-					sessionName: params.session,
-					done: false,
-					startedAt,
-				};
 				onUpdate?.({
 					content: [],
-					details: { tasks: [taskDisplay] },
+					details: { task: params.task, model: s.model, sessionName: params.session, startedAt },
 				});
-
-				const stop = startTimer(() =>
-					onUpdate?.({
-						content: [{ type: "text", text: tasksToNdjson([taskDisplay]) }],
-						details: { tasks: [taskDisplay] },
-					}),
-				);
 
 				try {
 					const result = await tmuxRunner.battle(params.session, params.task, signal);
-					const endedAt = Date.now();
-
-					taskDisplay.output = result.output;
-					taskDisplay.model = s.model;
-					taskDisplay.done = true;
-					taskDisplay.endedAt = endedAt;
-
 					return {
-						content: [{ type: "text", text: tasksToNdjson([taskDisplay]) }],
-						details: { tasks: [taskDisplay] },
+						content: [{ type: "text", text: result.output }],
+						details: { task: params.task, model: s.model, sessionName: params.session, startedAt, endedAt: Date.now() },
 					};
 				} catch (err) {
-					taskDisplay.error = determineErrorType(err, signal);
-					taskDisplay.done = true;
-					taskDisplay.endedAt = Date.now();
-
+					const message = toErrorMessage(err);
 					return {
-						content: [{ type: "text", text: tasksToNdjson([taskDisplay]) }],
-						details: { tasks: [taskDisplay] },
+						content: [{ type: "text", text: message }],
+						details: { task: params.task, model: s.model, sessionName: params.session, startedAt, endedAt: Date.now() },
+						isError: true,
 					};
-				} finally {
-					stop();
 				}
 			}
 
-			// ── Tasks (single or parallel) ─────────────────
-			if (params.tasks && params.tasks.length > 0) {
-				const taskDisplays: TaskDisplay[] = params.tasks.map((t) => ({
-					id: t.id ?? t.task.slice(0, 40),
-					output: "",
-					prompt: t.task,
-					model: t.model ?? "",
-					done: false,
-				}));
-
-				// Toast: show all tasks in pending state (header + tasks atomically)
-				const taskCount = params.tasks.length;
-				onUpdate?.({
-					content: [],
-					details: { header: `(0/${taskCount})`, tasks: [...taskDisplays] },
-				});
-
-				await Promise.allSettled(
-					params.tasks.map(async (t, i) => {
-						const resolved = tryResolveModel(ctx.modelRegistry, ctx.model, t.model);
-						const model = resolved.model;
-						const interactive = t.interactive ?? false;
-
-						taskDisplays[i].model = resolved.model ?? "";
-						taskDisplays[i].warning = resolved.warning;
-						taskDisplays[i].startedAt = Date.now();
-
-						const runner = interactive ? tmuxRunner : printRunner;
-
-						const stop = startTimer(() => {
-							const doneCount = taskDisplays.filter((t) => t.done).length;
-							onUpdate?.({
-								content: [{ type: "text", text: tasksToNdjson([...taskDisplays]) }],
-								details: { header: `(${doneCount}/${taskCount})`, tasks: [...taskDisplays] },
-							});
-						});
-						try {
-							const result = await runner.execute(t.task, {
-								cwd: ctx.cwd,
-								model,
-								tools: t.tools,
-								signal,
-								onChunk: (chunk) => {
-									taskDisplays[i].output = chunk;
-								},
-							});
-
-							taskDisplays[i].output = result.output;
-							taskDisplays[i].sessionName = result.sessionName;
-							taskDisplays[i].done = true;
-							taskDisplays[i].endedAt = Date.now();
-
-							// Track session for battle / cleanup (runner already registered it)
-							// Session tracking is handled inside TmuxRunner.execute() on success.
-
-							// Yield to event loop so TUI can render partial state
-							await new Promise((resolve) => setTimeout(resolve, 10));
-
-							// Send accumulated results so far
-							onUpdate?.({
-								content: [{ type: "text", text: tasksToNdjson([...taskDisplays]) }],
-								details: {
-									header: `(${taskDisplays.filter((t) => t.done).length}/${taskCount})`,
-									tasks: [...taskDisplays],
-								},
-							});
-						} catch (err) {
-							taskDisplays[i].error = determineErrorType(err, signal);
-							taskDisplays[i].done = true;
-							taskDisplays[i].endedAt = Date.now();
-							onUpdate?.({
-								content: [{ type: "text", text: tasksToNdjson([...taskDisplays]) }],
-								details: {
-									header: `(${taskDisplays.filter((t) => t.done).length}/${taskCount})`,
-									tasks: [...taskDisplays],
-								},
-							});
-						} finally {
-							stop();
-						}
-					}),
-				);
-
-				return {
-					content: [{ type: "text", text: tasksToNdjson(taskDisplays) }],
-					details: {
-						header: `(${taskDisplays.length}/${taskDisplays.length})`,
-						tasks: taskDisplays,
-					},
-				};
-			}
-
+			// Should not reach here
 			return {
-				content: [
-					{
-						type: "text",
-						text: "Provide `tasks[]`, `session` + `task` (battle), or `session` + `close`.",
-					},
-				],
+				content: [{ type: "text", text: "Unexpected parameter combination." }],
 				details: {},
 				isError: true,
 			};
 		},
 
 		// ── Rendering ───────────────────────────────
-		renderCall(args, theme, _ctx) {
-			if (args.tasks && args.tasks.length > 0) {
-				return new Text("", 0, 0);
-			}
+		renderCall(args, theme, ctx) {
 			if (args.session && args.task) {
-				return new Text(`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("dim", args.session)}`, 0, 0);
-			}
-			if (args.close) {
+				// Battle
 				return new Text(
-					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("muted", "\u2715 close")} ${theme.fg("dim", args.session ?? "")}`,
+					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("toolTitle", "\ud83d\udcac")} ${theme.fg("dim", (args.task as string).slice(0, 40))} ${theme.fg("dim", `| ${args.session}`)}`,
 					0,
 					0,
 				);
 			}
-			return new Text(theme.fg("toolTitle", theme.bold("subagent")), 0, 0);
+			if (args.close) {
+				return new Text(
+					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("muted", "\u2715 close")} ${theme.fg("dim", (args.session as string) ?? "")}`,
+					0,
+					0,
+				);
+			}
+			// Single task — show model/session from state if available (set by renderResult)
+			const s = ctx.state as { model?: string; sessionName?: string };
+			const emoji = args.interactive ? "\ud83d\udcac" : "\u26a1";
+			const modelTag = s.model ? theme.fg("dim", `(${s.model})`) : "";
+			const sessionTag = s.sessionName ? theme.fg("dim", `| ${s.sessionName}`) : "";
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("toolTitle", emoji)} ${((args.task as string) ?? "").slice(0, 40)}${modelTag ? ` ${modelTag}` : ""}${sessionTag ? ` ${sessionTag}` : ""}`,
+				0,
+				0,
+			);
 		},
 
 		renderResult(result, { expanded, isPartial }, theme, ctx) {
-			const state = ctx.state as { startedAt?: number; endedAt?: number };
+			const state = ctx.state as {
+				startedAt?: number;
+				endedAt?: number;
+				interval?: ReturnType<typeof setInterval>;
+				model?: string;
+				sessionName?: string;
+			};
 
-			if (state.startedAt === undefined && isPartial) {
-				state.startedAt = Date.now();
+			const details = result.details as SubagentDetails | undefined;
+			const taskInfo = details?.task;
+
+			// For close / error responses without task info, render simple text
+			if (!taskInfo) {
+				const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+				if (!text && !isPartial) return new Text("", 0, 0);
+				return new Text(theme.fg("dim", text), 0, 0);
 			}
-			if (!isPartial && state.startedAt !== undefined) {
-				state.endedAt ??= Date.now();
+
+			// Timer management (bash pattern: interval via invalidate)
+			if (details?.startedAt && isPartial && !state.interval) {
+				state.startedAt = details.startedAt as number;
+				state.interval = setInterval(() => ctx.invalidate(), 100);
 			}
-
-			const details = result.details as Record<string, unknown> | undefined;
-			const tasks = details?.tasks as TaskDisplay[] | undefined;
-			if (tasks) {
-				const cmp: Container = (ctx.lastComponent as Container | undefined) ?? new Container();
-				cmp.clear();
-
-				if (details?.header) {
-					cmp.addChild(
-						new Text(
-							`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", details.header as string)}`,
-							0,
-							0,
-						),
-					);
-					cmp.addChild(new Spacer(1));
+			if (!isPartial || ctx.isError) {
+				state.endedAt = (details?.endedAt as number) ?? Date.now();
+				if (state.interval) {
+					clearInterval(state.interval);
+					state.interval = undefined;
 				}
-
-				for (let i = 0; i < tasks.length; i++) {
-					renderTaskItem(cmp, tasks[i], isPartial, expanded, theme);
-				}
-
-				if (state.startedAt !== undefined) {
-					const label = isPartial ? "Elapsed" : "Took";
-					const endTime = state.endedAt ?? Date.now();
-					const dur = ((endTime - state.startedAt) / 1000).toFixed(1);
-					cmp.addChild(new Text(`\n${theme.fg("muted", `${label} ${dur}s`)}`, 0, 0));
-				}
-
-				return cmp;
 			}
 
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			if (!text && !isPartial) {
-				return new Text("", 0, 0);
+			// Store resolved info in state so renderCall can show it on next update
+			state.model = details?.model;
+			state.sessionName = details?.sessionName;
+
+			// Reuse container
+			const cmp = (ctx.lastComponent as Container | undefined) ?? new Container();
+			cmp.clear();
+
+			// Warning (model downgrade)
+			if (details?.warning) {
+				cmp.addChild(new Text(theme.fg("warning", details.warning as string), 0, 0));
 			}
-			return new Text(theme.fg("dim", text), 0, 0);
+
+			// Body: prompt + output (only when result is final)
+			const prompt = details?.task as string | undefined;
+			const output = result.content[0]?.type === "text" ? result.content[0].text?.trim() : "";
+			const hasBody = (prompt || output) && !isPartial;
+
+			if (hasBody) {
+				const lines: string[] = [];
+				if (prompt) {
+					const promptDisplay = (prompt.length > 78 ? `${prompt.slice(0, 78)}...` : prompt).replace(/\n/g, " ");
+					lines.push(theme.fg("dim", `> ${promptDisplay}`));
+				}
+				if (output) {
+					const outputLines = output.split("\n").map((line: string) => theme.fg("dim", line));
+					lines.push(...outputLines);
+				}
+				const combined = lines.join("\n");
+				if (expanded) {
+					cmp.addChild(new Text(`\n${combined}`, 0, 0));
+				} else {
+					cmp.addChild({
+						invalidate: () => {},
+						render: (w: number) => {
+							const result = renderExpandableOutput(combined, theme, w, 0);
+							// Add leading blank line
+							return ["", ...result];
+						},
+					});
+				}
+			}
+
+			// Timer
+			if (state.startedAt) {
+				const label = isPartial ? "Elapsed" : "Took";
+				const endTime = state.endedAt ?? Date.now();
+				const dur = ((endTime - state.startedAt) / 1000).toFixed(1);
+				cmp.addChild(new Text(`\n${theme.fg("muted", `${label} ${dur}s`)}`, 0, 0));
+			}
+
+			return cmp;
 		},
 	});
 

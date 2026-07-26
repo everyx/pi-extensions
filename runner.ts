@@ -24,7 +24,7 @@ export interface SubagentResult {
 export interface SubagentOptions {
 	cwd: string;
 	model?: string;
-	tools?: string;
+	tools?: string[];
 	signal?: AbortSignal;
 	/**
 	 * Stream progress updates.
@@ -180,7 +180,7 @@ export class PrintRunner implements SubagentRunner {
 		return new Promise((resolve, reject) => {
 			const args = ["--mode", "json", "-p", "--no-session"];
 			if (options.model) args.push("--model", options.model);
-			if (options.tools) args.push("--tools", options.tools);
+			if (options.tools) args.push("--tools", options.tools.join(","));
 			args.push(task);
 
 			const proc = spawn("pi", args, {
@@ -300,7 +300,7 @@ export class TmuxRunner implements SubagentRunner {
 
 		const piArgs = ["pi", "-n", sessionName, "--name", `sub-${sid}`];
 		if (options.model) piArgs.push("--model", options.model);
-		if (options.tools) piArgs.push("--tools", options.tools);
+		if (options.tools) piArgs.push("--tools", options.tools.join(","));
 		piArgs.push(squote(task));
 
 		const script = [
