@@ -36,6 +36,8 @@ class FakeClient {
 	/** sessionFile/sessionId returned by get_state. */
 	sessionFile = "/tmp/fake.jsonl";
 	sessionId = "sess-1";
+	/** Entries returned by get_entries (drives sessionSummary). */
+	entries: Array<{ type: string; summary?: string }> = [];
 
 	constructor(options: RpcClientOptions) {
 		this.onEvent = options.onEvent;
@@ -64,6 +66,14 @@ class FakeClient {
 					command: "get_session_stats",
 					success: true,
 					data: { tokens: { total: this.stats.tokens }, toolCalls: this.stats.toolCalls },
+				};
+			case "get_entries":
+				return {
+					id: command.id,
+					type: "response",
+					command: "get_entries",
+					success: true,
+					data: { entries: this.entries, leafId: null },
 				};
 			case "get_last_assistant_text":
 				return {
@@ -206,6 +216,35 @@ describe("AgentProcess — waitForCompletion", () => {
 
 		const completion = await completionPromise;
 		assert.equal(completion.status, "failed");
+	});
+});
+
+describe("AgentProcess — sessionSummary", () => {
+	it("returns the latest summary entry regardless of type", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.entries = [
+			{ type: "message" },
+			{ type: "compaction", summary: "older compaction" },
+			{ type: "branch_summary", summary: "abandoned path summary" },
+		];
+		assert.equal(await agent.sessionSummary(), "abandoned path summary");
+	});
+
+	it("falls back to a compaction summary when no branch_summary exists", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.entries = [{ type: "message" }, { type: "compaction", summary: "compacted context" }];
+		assert.equal(await agent.sessionSummary(), "compacted context");
+	});
+
+	it("returns null when no summary entry exists", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.entries = [{ type: "message" }];
+		assert.equal(await agent.sessionSummary(), null);
+	});
+
+	it("returns null when entries are empty or transport fails", async () => {
+		const { agent } = makeAgent({ cwd: "/tmp" });
+		assert.equal(await agent.sessionSummary(), null);
 	});
 });
 

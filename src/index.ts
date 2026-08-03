@@ -110,12 +110,19 @@ function toErrorResult(err: unknown): {
 	};
 }
 
+/** First non-empty line of a prompt — title fallback for notifications. */
+function promptFirstLine(prompt: string): string {
+	const trimmed = prompt.trim();
+	const idx = trimmed.indexOf("\n");
+	return idx < 0 ? trimmed : trimmed.slice(0, idx);
+}
+
 /** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
-function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: AgentCompletion): void {
+function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: AgentCompletion, prompt: string): void {
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,
-		title: agent.title,
+		title: agent.title ?? promptFirstLine(prompt),
 		usage: {
 			tokens: completion.stats.tokens || null,
 			toolUses: completion.stats.toolUses || null,
@@ -184,7 +191,7 @@ export default function (pi: ExtensionAPI) {
 				cwd: ctx.cwd,
 				model: resolved.model,
 				tools: params.tools,
-				title: params.description,
+				title: params.title,
 			});
 
 			// Wire the execute AbortSignal (user cancel) to a graceful stop.
@@ -213,9 +220,9 @@ export default function (pi: ExtensionAPI) {
 					registerAgent(agent);
 					void agent
 						.waitForCompletion()
-						.then((completion) => {
+						.then(async (completion) => {
 							// AgentControl.stop is a deliberate user action — no notification.
-							if (!agent.stoppedByControl) notifyCompletion(pi, agent, completion);
+							if (!agent.stoppedByControl) await notifyCompletion(pi, agent, completion, params.prompt);
 							unregisterAgent(agent.agentId);
 							return agent.stop();
 						})
@@ -232,7 +239,7 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Started sub-agent ${agent.agentId} in the background. You will be notified on completion; use AgentControl to steer or stop it meanwhile.`,
+								text: `Started background sub-agent ${agent.agentId} — completion notification will arrive; use AgentControl to steer/stop meanwhile.`,
 							},
 						],
 						details: { agentId: agent.agentId, runInBackground: true, startedAt },
