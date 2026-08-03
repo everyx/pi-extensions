@@ -16,6 +16,8 @@
  * final output. AgentControl steers or stops a running background agent.
  */
 
+import * as os from "node:os";
+import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -31,10 +33,43 @@ import {
 	renderAgentResult,
 	renderNotification,
 } from "./render.js";
+import { AgentWidget } from "./widget.js";
 
 // ─── Running background agents registry ─────────────────────
 
 const activeAgents = new Map<string, AgentProcess>();
+
+/** Expand a leading `~` (pi's own expandTildePath only normalizes). */
+function expandTilde(p: string): string {
+	return p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+/**
+ * Sub-agent sessions directory: `<agentDir>/subagent-sessions` by default
+ * (agentDir honors PI_CODING_AGENT_DIR like pi itself), overridable via
+ * PI_SUBAGENT_SESSION_DIR. Kept outside pi's standard session tree so
+ * `pi -r` stays clean; resume goes through the main session via the
+ * session path on the notification / tool result.
+ */
+function resolveSubagentSessionDir(): string {
+	const override = process.env.PI_SUBAGENT_SESSION_DIR;
+	if (override) return expandTilde(override);
+	const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+	return path.join(expandTilde(agentDir), "subagent-sessions");
+}
+
+const SUBAGENT_SESSION_DIR = resolveSubagentSessionDir();
+
+/** TUI-only background-agent status widget (created lazily, tui mode only). */
+let widget: AgentWidget | null = null;
+
+function ensureWidget(ctx: { mode: string; ui: unknown }): AgentWidget | null {
+	if (widget) return widget;
+	if (ctx.mode !== "tui") return null;
+	// biome-ignore lint/suspicious/noExplicitAny: ExtensionUIContext shape from pi
+	widget = new AgentWidget(ctx.ui as any);
+	return widget;
+}
 
 function registerAgent(agent: AgentProcess): void {
 	activeAgents.set(agent.agentId, agent);
@@ -123,6 +158,8 @@ function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: Age
 		status: completion.status,
 		agent_id: agent.agentId,
 		title: agent.title ?? promptFirstLine(prompt),
+		// Card body (never enters LLM context — verified against convertToLlm).
+		result: completion.output,
 		usage: {
 			tokens: completion.stats.tokens || null,
 			toolUses: completion.stats.toolUses || null,
@@ -139,6 +176,9 @@ function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: Age
 				status: completion.status,
 				agent_id: agent.agentId,
 				result: completion.output,
+				// Resume entry point: sub-agent sessions live outside `pi -r`;
+				// attach with `pi --session <path>`.
+				session_path: completion.sessionPath ?? null,
 			}),
 			display: true,
 			details,
@@ -187,11 +227,27 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const startedAt = Date.now();
+			// Display label for the widget: title or prompt first line (not a session name —
+			// sub-agent sessions follow pi's default naming like any normal session).
+			const sessionName = (params.title ?? promptFirstLine(task)).slice(0, 80);
+
+			// Foreground: stream assistant deltas into the tool card (live output).
+			let streamed = "";
 			const agent = new AgentProcess({
 				cwd: ctx.cwd,
 				model: resolved.model,
 				tools: params.tools,
 				title: params.title,
+				sessionName,
+				sessionDir: SUBAGENT_SESSION_DIR,
+				onDelta: (delta) => {
+					if (params.run_in_background) return; // widget + notification cover background
+					streamed += delta;
+					onUpdate?.({
+						content: [{ type: "text", text: streamed }],
+						details: { task, startedAt },
+					});
+				},
 			});
 
 			// Wire the execute AbortSignal (user cancel) to a graceful stop.
@@ -218,15 +274,19 @@ export default function (pi: ExtensionAPI) {
 				// ── Background: return agent_id now, notify on completion ──
 				if (params.run_in_background) {
 					registerAgent(agent);
+					const w = ensureWidget(ctx);
+					w?.add(agent);
 					void agent
 						.waitForCompletion()
 						.then(async (completion) => {
 							// AgentControl.stop is a deliberate user action — no notification.
 							if (!agent.stoppedByControl) await notifyCompletion(pi, agent, completion, params.prompt);
+							w?.remove(agent.agentId);
 							unregisterAgent(agent.agentId);
 							return agent.stop();
 						})
 						.catch(() => {
+							w?.remove(agent.agentId);
 							unregisterAgent(agent.agentId);
 							return agent.stop();
 						});
@@ -265,7 +325,13 @@ export default function (pi: ExtensionAPI) {
 				}
 				return {
 					content: [{ type: "text", text: completion.output }],
-					details: { task, startedAt, endedAt: Date.now() },
+					details: {
+						task,
+						sessionPath: completion.sessionPath,
+						sessionId: completion.sessionId,
+						startedAt,
+						endedAt: Date.now(),
+					},
 				};
 			} catch (err) {
 				signal?.removeEventListener("abort", onAbort);
@@ -317,6 +383,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (params.action === "stop") {
 				await agent.stop();
+				widget?.remove(agent.agentId);
 				unregisterAgent(agent.agentId);
 				return {
 					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
@@ -347,9 +414,12 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			await agent.steer(message);
+			// TUI relay: capture the agent's current output as the card body snapshot
+			// (one get_last_assistant_text round-trip; details never enter LLM context).
+			const snapshot = await agent.lastOutput().catch(() => "");
 			return {
 				content: [{ type: "text", text: `Steered agent ${params.agent_id}.` }],
-				details: { agentId: agent.agentId },
+				details: { agentId: agent.agentId, action: "steer", message, snapshot },
 			};
 		},
 
@@ -371,5 +441,6 @@ export default function (pi: ExtensionAPI) {
 			void agent.stop();
 		}
 		activeAgents.clear();
+		widget?.dispose();
 	});
 }

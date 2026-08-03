@@ -40,6 +40,7 @@ export interface SubagentDetails {
 	agentId?: string;
 	model?: string;
 	runInBackground?: boolean;
+	sessionPath?: string;
 	startedAt?: number;
 	endedAt?: number;
 }
@@ -98,7 +99,7 @@ function buildMetaSuffix(state: TimerState, args: AgentParams, theme: Theme): st
 	const model = state.model ?? args.model;
 	if (model) parts.push(model);
 	if (parts.length === 0) return "";
-	return theme.fg("muted", ` (${parts.join(" | ")})`);
+	return theme.fg("muted", ` (${parts.join(" \u00b7 ")})`);
 }
 
 // ── Render call (tool header) ──────────────────────────────────
@@ -112,18 +113,17 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 		context.state.endedAt = undefined;
 	}
 
-	const summary = args.title?.trim() || promptSummary(args.prompt);
-	const emoji = args.run_in_background ? "\ud83c\udfaf" : "\u26a1";
+	const title = args.title?.trim() || promptSummary(args.prompt);
 	return new Text(
-		`${theme.fg("toolTitle", theme.bold("agent"))} ${theme.fg("toolTitle", emoji)} ${theme.fg("toolTitle", summary)}${buildMetaSuffix(context.state, args, theme)}`,
+		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", title)}${buildMetaSuffix(context.state, args, theme)}`,
 		0,
 		0,
 	);
 }
 
 export function renderAgentControlCall(args: AgentControlParams, theme: Theme): Text {
-	const verb = args.action === "steer" ? "\ud83e\udde9 steer" : "\u26d4 stop";
-	return new Text(theme.fg("toolTitle", theme.bold(`agent control ${verb} ${args.agent_id}`)), 0, 0);
+	const verb = args.action === "steer" ? "steer" : "stop";
+	return new Text(theme.fg("toolTitle", theme.bold(`Agent ${verb} ${args.agent_id}`)), 0, 0);
 }
 
 // ── Render result (output body) ────────────────────────────────
@@ -201,15 +201,77 @@ export function renderAgentResult(
 		cmp.addChild(new Text(`\n${theme.fg("muted", `${label} ${formatDuration(endTime - state.startedAt)}`)}`, 0, 0));
 	}
 
+	// Resume entry: sub-agent sessions live outside `pi -r` — show the path.
+	if (details?.sessionPath && !isPartial) {
+		cmp.addChild(new Text(theme.fg("muted", `session: ${details.sessionPath}`), 0, 0));
+	}
+
 	return cmp;
 }
 
+export interface AgentControlDetails {
+	agentId?: string;
+	/** "steer" | "stop" — validated at runtime in execute. */
+	action?: string;
+	/** The injected steer message (card body input). */
+	message?: string;
+	/** Agent's current output snapshot at steer time (card body output). */
+	snapshot?: string;
+}
+
+/**
+ * Steer renders as a relay of the Agent card — same input/output body
+ * structure (message → agent snapshot), confirmation as muted footer.
+ * Stop stays a dim one-liner (no output to show).
+ */
 export function renderAgentControlResult(
-	result: { details?: Record<string, unknown>; content: { type: string; text?: string }[] },
-	_opts: { expanded: boolean; isPartial: boolean },
+	result: { details?: AgentControlDetails; content: { type: string; text?: string }[] },
+	{ expanded }: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
-): Text {
+): Container | Text {
 	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+	const d = result.details;
+
+	if (d?.action === "steer" && d.message) {
+		const cmp = new Container();
+
+		// Body: steer message (input) + blank line + agent output snapshot.
+		const bodyParts: string[] = [];
+		if (d.message.trim()) bodyParts.push(d.message.trim());
+		if (d.snapshot?.trim()) {
+			bodyParts.push("");
+			bodyParts.push(d.snapshot.trim());
+		}
+		const rawBody = bodyParts.join("\n");
+		const bodyContent = rawBody
+			?.split("\n")
+			.map((l) => theme.fg("toolOutput", l))
+			.join("\n");
+
+		if (bodyContent) {
+			if (expanded) {
+				cmp.addChild(new Text(`\n${bodyContent}`, 0, 0));
+			} else {
+				cmp.addChild({
+					invalidate: () => {},
+					render: (w: number) => {
+						const preview = truncateToVisualLines(bodyContent, 5, w, 0);
+						if (preview.skippedCount === 0) return ["", ...preview.visualLines];
+						const hint = `${theme.fg("muted", `... ${preview.skippedCount} more lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+						return ["", hint, ...preview.visualLines];
+					},
+				});
+			}
+		}
+
+		// Footer: confirmation, muted.
+		if (text) {
+			cmp.addChild(new Text(`\n${theme.fg("muted", text)}`, 0, 0));
+		}
+		return cmp;
+	}
+
+	// stop / errors — dim one-liner.
 	if (!text) return new Text("", 0, 0);
 	return new Text(theme.fg("dim", text), 0, 0);
 }
@@ -220,6 +282,8 @@ export interface NotificationDetails {
 	status: string;
 	agent_id: string;
 	title?: string;
+	/** Final output — rendered as the card body (never enters LLM context). */
+	result?: string;
 	usage?: {
 		tokens?: number | null;
 		toolUses?: number | null;
@@ -229,9 +293,16 @@ export interface NotificationDetails {
 	sessionId?: string;
 }
 
+/** How many lines of the result the expanded card shows (rest: session file). */
+const NOTIFICATION_EXPANDED_LINES = 30;
+
+function formatTokens(n: number): string {
+	return n.toLocaleString("en-US");
+}
+
 export function renderNotification(
 	message: { details?: NotificationDetails },
-	_opts: unknown,
+	{ expanded }: { expanded: boolean },
 	theme: Theme,
 ): Container {
 	const d = message.details;
@@ -242,27 +313,48 @@ export function renderNotification(
 		return cmp;
 	}
 
-	const statusColor = d.status === "completed" ? "toolTitle" : "error";
-	const badge = d.status === "completed" ? "\u2705" : d.status === "failed" ? "\u274c" : "\u26d4";
+	// ── Header: Agent <icon> <title><status word> (<muted meta>) ──
+	const isError = d.status !== "completed";
+	const icon = d.status === "completed" ? "\u2713" : d.status === "failed" ? "\u2717" : "\u26d4";
+	const iconColor = isError ? "error" : "toolTitle";
+	const statusWord = isError ? ` ${d.status}` : "";
+
+	const metaParts: string[] = [];
+	if (d.usage?.durationMs != null) metaParts.push(`Took ${formatDuration(d.usage.durationMs)}`);
+	if (d.usage?.tokens != null) metaParts.push(`${formatTokens(d.usage.tokens)} tokens`);
+	if (d.usage?.toolUses != null) metaParts.push(`${d.usage.toolUses} tool use${d.usage.toolUses === 1 ? "" : "s"}`);
+	const metaSuffix = metaParts.length > 0 ? theme.fg("muted", ` (${metaParts.join(" \u00b7 ")})`) : "";
+
 	const title = d.title ?? `sub-agent ${d.agent_id}`;
 	cmp.addChild(
 		new Text(
-			`${theme.fg(statusColor as "toolTitle" | "error", theme.bold(`${badge} ${title}`))} ${theme.fg("muted", `(${d.status})`)}`,
+			`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg(iconColor as "toolTitle" | "error", icon)} ${theme.bold(title)}${statusWord}${metaSuffix}`,
 			0,
 			0,
 		),
 	);
 
-	const usageParts: string[] = [];
-	if (d.usage?.durationMs != null) usageParts.push(`${formatDuration(d.usage.durationMs)}`);
-	if (d.usage?.tokens != null) usageParts.push(`${d.usage.tokens} tokens`);
-	if (d.usage?.toolUses != null) usageParts.push(`${d.usage.toolUses} tool uses`);
-	if (usageParts.length > 0) {
-		cmp.addChild(new Text(theme.fg("muted", usageParts.join(" \u00b7 ")), 0, 0));
+	// ── Body: result preview (collapsed: first line; expanded: up to 30 lines) ──
+	const result = d.result?.trim();
+	if (result) {
+		const lines = result.split("\n");
+		const shown = expanded ? lines.slice(0, NOTIFICATION_EXPANDED_LINES) : lines.slice(0, 1);
+		const body = shown.map((l) => theme.fg("toolOutput", l)).join("\n");
+		cmp.addChild(new Text(`\n${body}`, 0, 0));
+		if (expanded && lines.length > NOTIFICATION_EXPANDED_LINES) {
+			cmp.addChild(
+				new Text(
+					theme.fg("muted", `\n... ${lines.length - NOTIFICATION_EXPANDED_LINES} more lines in session file`),
+					0,
+					0,
+				),
+			);
+		}
 	}
 
+	// ── Footer: session path (resume entry, custom dir → path required) ──
 	if (d.sessionPath) {
-		cmp.addChild(new Text(theme.fg("muted", `session: ${d.sessionPath}`), 0, 0));
+		cmp.addChild(new Text(`\n${theme.fg("muted", `session: ${d.sessionPath}`)}`, 0, 0));
 	}
 
 	return cmp;
