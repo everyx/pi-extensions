@@ -1,10 +1,10 @@
 /**
- * Tests for the pure JSONL protocol layer (src/protocol.ts).
+ * Tests for the pure JSONL protocol layer (protocol.ts).
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseLine, serializeCommand } from "../src/protocol.js";
+import { parseLine, serializeCommand } from "../protocol.js";
 
 describe("serializeCommand", () => {
 	it("serializes a prompt command as a single LF-terminated line", () => {

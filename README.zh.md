@@ -131,12 +131,11 @@ pnpm test       # node:test
 结构：
 
 ```
-src/
-  index.ts         — 工具注册（Agent / AgentControl）、通知、清理
-  protocol.ts      — 纯函数 JSONL 协议层（单测）
-  rpc-client.ts    — 状态化薄 JSONL 客户端（spawn + 传输）
-  agent-process.ts — AgentProcess：常驻 rpc 子进程语义封装（经 seam 测试）
-  model.ts         — 模型解析（测试）
-  render.ts        — TUI 渲染 + 通知卡片渲染器
-  widget.ts        — Agents 状态 widget（setWidget，编辑器上方）
+index.ts         — 工具注册（Agent / AgentControl）、通知、清理
+protocol.ts      — 纯函数 JSONL 协议层（单测）
+rpc-client.ts    — 状态化薄 JSONL 客户端（spawn + 传输）
+agent-process.ts — AgentProcess：常驻 rpc 子进程语义封装（经 seam 测试）
+model.ts         — 模型解析（测试）
+render.ts        — TUI 渲染 + 通知卡片渲染器
+widget.ts        — Agents 状态 widget（setWidget，编辑器上方）
 ```

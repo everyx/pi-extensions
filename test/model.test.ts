@@ -1,12 +1,12 @@
 /**
- * Tests for model resolution (src/model.ts).
+ * Tests for model resolution (model.ts).
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 /** Minimal fake model registry for tests. */
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { resolveModel } from "../src/model.js";
+import { resolveModel } from "../model.js";
 
 function stubRegistry(models: { provider: string; id: string }[]): ModelRegistry {
 	return {
