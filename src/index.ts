@@ -1,79 +1,102 @@
 /**
- * pi-subagent – Spawn isolated sub‑agent pi instances.
+ * pi-subagent — spawn isolated sub‑agent pi instances.
  *
- * Architecture:
- *   index.ts         — tool registration, mode dispatch, shutdown, cleanup
- *   child.ts         — child‑mode handlers (socket report)
- *   modes.ts         — pure param‑to‑discriminated‑union parser (testable)
- *   model.ts         — model‑spec → ResolvedModel (testable)
- *   protocol.ts      — length‑prefixed socket framing (tested)
- *   events.ts        — JSON‑lines event stream parser (testable)
- *   render.ts        — TUI rendering helpers (renderCall / renderResult)
- *   utils.ts         — shared utilities (lastAssistantText)
- *   runners/
- *     types.ts       — shared result/option types
- *     print.ts       — PrintRunner (pi --print --no-session)
- *     interactive.ts — InteractiveRunner (tmux + socket + pi -n)
+ * Architecture (issue #10):
+ *   index.ts        — tool registration (Agent / AgentControl), notifications, cleanup
+ *   protocol.ts     — pure JSONL protocol layer (tested)
+ *   rpc-client.ts   — stateful thin JSONL client (spawn + transport)
+ *   agent-process.ts— AgentProcess: one resident `pi --mode rpc` child, semantic API
+ *   model.ts        — model-spec → ResolvedModel (testable)
+ *   render.ts       — TUI rendering + notification card renderer
  *
- * Two‑mode startup:
- *   Parent mode (no env vars) → registers the `subagent` tool
- *   Child  mode (env var set) → hooks agent_end + agent_settled, reports back
+ * Every sub‑agent is a resident `pi --mode rpc` child with a persisted
+ * session. Foreground Agent calls block until completion; background calls
+ * return an agent_id immediately and deliver a completion notification
+ * (`customType: "subagent-notification"`, deliverAs "followUp") carrying the
+ * final output. AgentControl steers or stops a running background agent.
  */
 
-import * as crypto from "node:crypto";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { activateChildMode } from "./child.js";
+import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { resolveModel } from "./model.js";
-import { parseMode, type SubagentParams } from "./modes.js";
-import { getState, releaseState, renderCall, renderResult } from "./render.js";
-import { InteractiveRunner } from "./runners/interactive.js";
-import { PrintRunner } from "./runners/print.js";
-import type { SubagentResult } from "./runners/types.js";
+import {
+	type AgentControlParams,
+	type AgentParams,
+	type NotificationDetails,
+	renderAgentCall,
+	renderAgentControlCall,
+	renderAgentControlResult,
+	renderAgentResult,
+	renderNotification,
+} from "./render.js";
 
-// ─── Temp dir (created at module init, cleaned up on shutdown) ─
+// ─── Running background agents registry ─────────────────────
 
-let _tmpDir: string | null = null;
-function getTmpDir(): string {
-	if (!_tmpDir) _tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-"));
-	return _tmpDir;
+const activeAgents = new Map<string, AgentProcess>();
+
+function registerAgent(agent: AgentProcess): void {
+	activeAgents.set(agent.agentId, agent);
 }
 
-// ─── Runner singletons ─────────────────────────────────
+function unregisterAgent(agentId: string): void {
+	activeAgents.delete(agentId);
+}
 
-const printRunner = new PrintRunner();
-const interactiveRunner = new InteractiveRunner(getTmpDir());
+// ─── Tool parameter schemas ──────────────────────────────────
 
-// ─── Tool parameter schema ─────────────────────────────
-
-const ToolParamsSchema = Type.Object({
-	task: Type.Optional(
+const AgentParamsSchema = Type.Object({
+	prompt: Type.String({
+		description:
+			"The task for the sub-agent. Must be self-contained — the sub-agent starts with " +
+			"zero context from this conversation. Include file paths, constraints, and the " +
+			"desired output shape.",
+	}),
+	description: Type.Optional(
 		Type.String({
 			description:
-				"Task prompt for the sub‑agent. " +
-				"Provide `task` alone for a single execution, " +
-				"or `session` + `task` for battle mode.",
+				"Short task title (3-5 words) shown in notifications and UI. Optional — if " +
+				"omitted, the renderer extracts a title from the prompt.",
 		}),
 	),
 	model: Type.Optional(
 		Type.String({
 			description:
-				"Optional. Defaults to parent model — omit unless you need a different one. " +
-				"Format: provider/name or just model name.",
+				'Model for the sub-agent — provider/modelId or fuzzy name (e.g. "haiku", "sonnet"). ' +
+				"Omit to inherit your current model.",
 		}),
 	),
-	tools: Type.Optional(Type.Array(Type.String(), { description: "Tool allowlist" })),
-	interactive: Type.Optional(
-		Type.Boolean({ description: "Spawn in tmux (attachable). Default: false (non‑interactive)", default: false }),
+	tools: Type.Optional(
+		Type.Array(Type.String(), {
+			description:
+				"Tool allowlist for the sub-agent. Omit to grant all tools. For read-only " +
+				"exploration, restrict to read/grep/find/ls and consider a cheaper model.",
+		}),
 	),
-	session: Type.Optional(Type.String({ description: "Existing interactive session name for battle or close" })),
-	close: Type.Optional(Type.Boolean({ description: "Close an interactive session (requires `session`)" })),
+	run_in_background: Type.Optional(
+		Type.Boolean({
+			description:
+				"If true, return an agent_id immediately and notify you on completion — you can " +
+				"keep working meanwhile. If false (default), block until the result is ready.",
+		}),
+	),
 });
 
-// ─── Helpers ───────────────────────────────────────────
+const AgentControlParamsSchema = Type.Object({
+	agent_id: Type.String({ description: "The agent ID to control." }),
+	action: StringEnum(["steer", "stop"], {
+		description: '"steer" — inject a redirecting message into a running agent. "stop" — terminate it.',
+	}),
+	message: Type.Optional(
+		Type.String({
+			description:
+				'Required when action is "steer". The message injected as a user message into ' + "the agent's conversation.",
+		}),
+	),
+});
+
+// ─── Helpers ─────────────────────────────────────────────────
 
 function toErrorResult(err: unknown): {
 	content: { type: "text"; text: string }[];
@@ -87,213 +110,259 @@ function toErrorResult(err: unknown): {
 	};
 }
 
-function sessionNotFound(session: string) {
-	return {
-		content: [{ type: "text" as const, text: `Session "${session}" not found.` }],
-		details: {} as const,
-		isError: true as const,
+/** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
+function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: AgentCompletion): void {
+	const details: NotificationDetails = {
+		status: completion.status,
+		agent_id: agent.agentId,
+		title: agent.title,
+		usage: {
+			tokens: completion.stats.tokens || null,
+			toolUses: completion.stats.toolUses || null,
+			durationMs: completion.stats.durationMs || null,
+		},
+		sessionPath: completion.sessionPath,
+		sessionId: completion.sessionId,
 	};
-}
 
-/** Wire state bridge, run tracking lifecycle, and auto‑cleanup for a mode branch. */
-function withTracking(
-	toolCallId: string,
-	onUpdate: ((...args: never[]) => unknown) | undefined,
-	task: string,
-	state: { model?: string; sessionName?: string },
-	work: () => Promise<SubagentResult>,
-) {
-	const st = getState(toolCallId);
-	if (st) {
-		if (state.model !== undefined) st.model = state.model;
-		if (state.sessionName !== undefined) st.sessionName = state.sessionName;
-	}
-	return runWithTracking(onUpdate, { task }, work).finally(() => releaseState(toolCallId));
-}
-
-/** Run a sub‑agent execution with consistent tracking lifecycle. */
-async function runWithTracking<T extends (...args: never[]) => unknown>(
-	onUpdate: T | undefined,
-	init: { task: string },
-	work: () => Promise<SubagentResult>,
-): Promise<{
-	content: { type: "text"; text: string }[];
-	details: Record<string, unknown>;
-	isError?: true;
-}> {
-	const startedAt = Date.now();
-
-	// biome-ignore lint/suspicious/noExplicitAny: pi framework type not importable
-	(onUpdate as any)?.({
-		content: [],
-		details: { ...init, startedAt },
-	});
-
-	try {
-		const result = await work();
-		return {
-			content: [{ type: "text", text: result.output }],
-			details: { ...init, sessionName: result.sessionName, startedAt, endedAt: Date.now() },
-		};
-	} catch (err) {
-		return {
-			content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-			details: { ...init, startedAt, endedAt: Date.now() },
-			isError: true,
-		};
-	}
+	pi.sendMessage(
+		{
+			customType: "subagent-notification",
+			content: JSON.stringify({
+				status: completion.status,
+				agent_id: agent.agentId,
+				result: completion.output,
+			}),
+			display: true,
+			details,
+		},
+		{ deliverAs: "followUp", triggerTurn: true },
+	);
 }
 
 // ─── Default export (pi extension entry) ───────────────────────
 
 export default function (pi: ExtensionAPI) {
-	// ── Child mode ────────────────────────────────
-	const parentSocket = process.env.PI_SUBAGENT_PARENT_SOCKET;
-	if (parentSocket) {
-		activateChildMode(pi, parentSocket, process.env.PI_SUBAGENT_SESSION_NAME ?? "");
-		return; // Don't register the tool in child mode
-	}
-
-	// ── Parent mode ──────────────────────────────
+	// ── Agent ───────────────────────────────────────────
 	pi.registerTool({
-		name: "subagent",
-		label: "Sub‑agent",
+		name: "Agent",
+		label: "Sub-agent",
 		description:
-			"Delegate a task to a sub‑agent with an isolated context window. " +
-			"Model inherits from parent — omit unless you need a different one. " +
-			"Non‑interactive (default): spawns pi --print, captures stdout. " +
-			"Interactive (interactive:true): spawns inside tmux, attachable. " +
-			"Battle (session + task): send a follow‑up to an interactive session.",
-		parameters: ToolParamsSchema,
+			"Spawn a sub-agent that works in its own isolated context window. " +
+			"The sub-agent starts with zero context from this conversation, so the prompt " +
+			"must be self-contained: include file paths, constraints, and the desired output shape. " +
+			"Use it for heavy tasks whose verbose intermediate output (search results, logs, test " +
+			"output) would pollute your context, and for independent tasks that can run in parallel. " +
+			"Foreground (run_in_background: false): blocks until the sub-agent finishes and returns " +
+			"its final output directly. Background (run_in_background: true): returns an agent_id " +
+			"immediately; the completion notification carries its result (status + agent_id + final " +
+			"output), and you can intervene with AgentControl while it runs.",
+		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
+		promptGuidelines: [
+			"Use Agent when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
+			"Use Agent for independent parallel work: spawn several with run_in_background: true — each completion notification carries its own result.",
+			"Write Agent prompts self-contained: the sub-agent has zero context from this conversation. Include paths, constraints, and the expected output shape.",
+			"Never poll a background Agent. Wait for its completion notification — it carries the result directly.",
+			"Trust but verify: a sub-agent's summary describes intent, not outcome. Check its actual changes before reporting work as done.",
+		],
+		parameters: AgentParamsSchema,
 
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
-			const mode = parseMode(raw as SubagentParams);
-			if (mode.kind === "error") {
-				return { content: [{ type: "text", text: mode.message }], details: {}, isError: true };
+			const params = raw as AgentParams;
+			const task = params.prompt?.trim();
+			if (!task) {
+				return { content: [{ type: "text", text: "`prompt` is required." }], details: {}, isError: true };
+			}
+
+			const resolved = resolveModel(ctx.modelRegistry, ctx.model, params.model);
+			if (resolved.error) {
+				return { content: [{ type: "text", text: resolved.error }], details: {}, isError: true };
+			}
+
+			const startedAt = Date.now();
+			const agent = new AgentProcess({
+				cwd: ctx.cwd,
+				model: resolved.model,
+				tools: params.tools,
+				title: params.description,
+			});
+
+			// Wire the execute AbortSignal (user cancel) to a graceful stop.
+			const onAbort = () => {
+				void agent.stop();
+			};
+			if (signal?.aborted) {
+				onAbort();
+			} else {
+				signal?.addEventListener("abort", onAbort, { once: true });
 			}
 
 			try {
-				switch (mode.kind) {
-					// ── Close ──────────────────────────────
-					case "close": {
-						if (!interactiveRunner.getSession(mode.session)) {
-							return sessionNotFound(mode.session);
-						}
-						await interactiveRunner.closeSession(mode.session);
-						return {
-							content: [{ type: "text", text: `Closed sub‑agent session ${mode.session}` }],
-							details: {},
-						};
-					}
-
-					// ── Print (non‑interactive) ─────────────
-					case "print": {
-						const resolved = resolveModel(ctx.modelRegistry, ctx.model, mode.model);
-						if (resolved.error) {
-							return { content: [{ type: "text", text: resolved.error }], details: {}, isError: true };
-						}
-
-						return withTracking(_toolCallId, onUpdate, mode.task, { model: resolved.model }, async () => {
-							const opts = {
-								cwd: ctx.cwd,
-								model: resolved.model ?? undefined,
-								tools: mode.tools,
-								signal,
-								onOutput: (output: string) => {
-									onUpdate?.({
-										content: [{ type: "text", text: output }],
-										details: { task: mode.task, startedAt: Date.now() },
-									});
-								},
-							};
-							return printRunner.execute(mode.task, opts);
-						});
-					}
-
-					// ── Interactive ─────────────────────────
-					case "interactive": {
-						const resolved = resolveModel(ctx.modelRegistry, ctx.model, mode.model);
-						if (resolved.error) {
-							return { content: [{ type: "text", text: resolved.error }], details: {}, isError: true };
-						}
-
-						const sessionName = `pi-sub-${crypto.randomBytes(6).toString("hex")}`;
-
-						return withTracking(_toolCallId, onUpdate, mode.task, { model: resolved.model, sessionName }, async () => {
-							const opts = {
-								cwd: ctx.cwd,
-								model: resolved.model ?? undefined,
-								tools: mode.tools,
-								signal,
-								sessionName,
-								onOutput: (output: string) => {
-									onUpdate?.({
-										content: [{ type: "text", text: output }],
-										details: { task: mode.task, startedAt: Date.now() },
-									});
-								},
-							};
-							return interactiveRunner.execute(mode.task, opts);
-						});
-					}
-
-					// ── Battle ──────────────────────────────
-					case "battle": {
-						const s = interactiveRunner.getSession(mode.session);
-						if (!s) return sessionNotFound(mode.session);
-
-						return withTracking(
-							_toolCallId,
-							onUpdate,
-							mode.task,
-							{ model: s.model, sessionName: mode.session },
-							async () => interactiveRunner.battle(mode.session, mode.task, signal),
-						);
-					}
-
-					default: {
-						const _exhaustive: never = mode;
-						return _exhaustive;
-					}
+				const started = await agent.spawnAndSend(task);
+				if (!started.ok) {
+					await agent.stop().catch(() => {});
+					return {
+						content: [{ type: "text", text: started.error }],
+						details: {},
+						isError: true,
+					};
 				}
+
+				// ── Background: return agent_id now, notify on completion ──
+				if (params.run_in_background) {
+					registerAgent(agent);
+					void agent
+						.waitForCompletion()
+						.then((completion) => {
+							// AgentControl.stop is a deliberate user action — no notification.
+							if (!agent.stoppedByControl) notifyCompletion(pi, agent, completion);
+							unregisterAgent(agent.agentId);
+							return agent.stop();
+						})
+						.catch(() => {
+							unregisterAgent(agent.agentId);
+							return agent.stop();
+						});
+
+					onUpdate?.({
+						content: [{ type: "text", text: `Started sub-agent ${agent.agentId} (background)` }],
+						details: { agentId: agent.agentId, runInBackground: true, startedAt },
+					});
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Started sub-agent ${agent.agentId} in the background. You will be notified on completion; use AgentControl to steer or stop it meanwhile.`,
+							},
+						],
+						details: { agentId: agent.agentId, runInBackground: true, startedAt },
+					};
+				}
+
+				// ── Foreground: block until completion ──
+				onUpdate?.({
+					content: [{ type: "text", text: "Running sub-agent\u2026" }],
+					details: { task, startedAt },
+				});
+
+				const completion = await agent.waitForCompletion();
+				await agent.stop().catch(() => {});
+				signal?.removeEventListener("abort", onAbort);
+
+				if (completion.status === "failed") {
+					return {
+						content: [{ type: "text", text: completion.output || "Sub-agent failed." }],
+						details: { task, startedAt, endedAt: Date.now() },
+						isError: true,
+					};
+				}
+				return {
+					content: [{ type: "text", text: completion.output }],
+					details: { task, startedAt, endedAt: Date.now() },
+				};
 			} catch (err) {
+				signal?.removeEventListener("abort", onAbort);
+				await agent.stop().catch(() => {});
 				return toErrorResult(err);
 			}
 		},
 
-		// ── Render call (tool header) ──────────────────────
-		renderCall,
-
-		// ── Render result (output body + timer) ────────────
-		renderResult,
+		renderCall: renderAgentCall,
+		renderResult: renderAgentResult,
 	});
 
-	// ── Cleanup on exit ───────────────────────────────────
-	pi.on("session_shutdown", async (event, ctx) => {
+	// ── AgentControl ────────────────────────────────────
+	pi.registerTool({
+		name: "AgentControl",
+		label: "Control Sub-agent",
+		description:
+			"Intervene in a running sub-agent. steer: inject a message into its conversation to " +
+			"redirect its work mid-run (delivered after its current turn settles — only supported " +
+			"for background agents still running, before the completion notification is sent). " +
+			"stop: terminate a running sub-agent immediately, discarding further work. Only works " +
+			"on agents that are currently running.",
+		promptSnippet: "Steer or stop a running sub-agent",
+		promptGuidelines: [
+			'Use AgentControl with action "stop" when a background agent is consuming tokens on a wrong path — stop it and respawn with a corrected prompt.',
+		],
+		parameters: AgentControlParamsSchema,
+
+		async execute(_toolCallId, raw) {
+			const params = raw as AgentControlParams;
+			const agent = activeAgents.get(params.agent_id);
+
+			if (!agent) {
+				return {
+					content: [{ type: "text", text: `Agent ${params.agent_id} not found or already finished.` }],
+					details: {},
+					isError: true,
+				};
+			}
+
+			// Runtime validation (schema union may be downgraded by some providers).
+			if (params.action !== "steer" && params.action !== "stop") {
+				return {
+					content: [{ type: "text", text: 'action must be "steer" or "stop".' }],
+					details: {},
+					isError: true,
+				};
+			}
+
+			if (params.action === "stop") {
+				await agent.stop();
+				unregisterAgent(agent.agentId);
+				return {
+					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
+					details: { agentId: agent.agentId },
+				};
+			}
+
+			// steer
+			const message = params.message?.trim();
+			if (!message) {
+				return {
+					content: [{ type: "text", text: '`message` is required when action is "steer".' }],
+					details: {},
+					isError: true,
+				};
+			}
+			if (agent.status !== "running") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Agent ${params.agent_id} is not running (status: ${agent.status}).`,
+						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
+
+			await agent.steer(message);
+			return {
+				content: [{ type: "text", text: `Steered agent ${params.agent_id}.` }],
+				details: { agentId: agent.agentId },
+			};
+		},
+
+		renderCall: renderAgentControlCall,
+		renderResult: renderAgentControlResult,
+	});
+
+	// ── Notification card (user side) ───────────────────
+	pi.registerMessageRenderer("subagent-notification", renderNotification);
+
+	// ── Cleanup on exit ─────────────────────────────────
+	pi.on("session_shutdown", async (event) => {
 		if (event.reason !== "quit") return;
 
-		const names = interactiveRunner.activeSessionNames();
-
-		if (names.length > 0) {
-			if (ctx.hasUI) {
-				const ok = await ctx.ui.confirm(
-					"Sub‑agents still running",
-					`${names.length} active: ${names.join(", ")}\nClose them?`,
-				);
-				if (!ok) return;
-			}
-			interactiveRunner.killAll();
-		} else {
-			interactiveRunner.closeServer();
+		// Graceful stop of every tracked agent. Children exit on their own
+		// (stdin EOF → rpc shutdown) even if the parent dies first, because
+		// the pipe closes — no tmux, no disk cleanup, no signals.
+		for (const agent of activeAgents.values()) {
+			void agent.stop();
 		}
-
-		// Remove temp dir
-		if (_tmpDir) {
-			try {
-				fs.rmSync(_tmpDir, { recursive: true, force: true });
-			} catch {
-				/* ok */
-			}
-		}
+		activeAgents.clear();
 	});
 }

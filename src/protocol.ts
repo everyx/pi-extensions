@@ -1,91 +1,116 @@
 /**
- * pi-subagent — child→parent result transport.
+ * pi-subagent — RPC JSONL protocol (pure functions).
  *
- * Length‑prefixed framing over a Unix socket.
- * Protocol: `[4B big‑endian payload length][payload]`.
- * Payload is `sessionName\0text` (sessionName may be empty → no NUL separator).
+ * Framing matches pi's own rpc mode (`dist/modes/rpc/jsonl.js`): one JSON
+ * object per line, split on `\n` only — never on U+2028/U+2029.
+ *
+ * We speak only the subset of the pi rpc protocol this extension needs:
+ *   prompt / steer / abort / get_last_assistant_text / get_state / get_session_stats
+ *
+ * This module is deliberately free of process/stream I/O so it can be unit
+ * tested standalone. All stateful wiring lives in rpc-client.ts.
  */
 
-import type * as net from "node:net";
+// ─── Commands we send on stdin ──────────────────────────────
 
-export interface PrefixedMessage {
-	sessionName: string;
-	text: string;
+export interface RpcCommandPrompt {
+	id: string;
+	type: "prompt";
+	message: string;
+}
+
+export interface RpcCommandSteer {
+	id: string;
+	type: "steer";
+	message: string;
+}
+
+export interface RpcCommandAbort {
+	id: string;
+	type: "abort";
+}
+
+export interface RpcCommandGetLastAssistantText {
+	id: string;
+	type: "get_last_assistant_text";
+}
+
+export interface RpcCommandGetState {
+	id: string;
+	type: "get_state";
+}
+
+export interface RpcCommandGetSessionStats {
+	id: string;
+	type: "get_session_stats";
+}
+
+export type RpcCommand =
+	| RpcCommandPrompt
+	| RpcCommandSteer
+	| RpcCommandAbort
+	| RpcCommandGetLastAssistantText
+	| RpcCommandGetState
+	| RpcCommandGetSessionStats;
+
+// ─── Responses and events we read from stdout ──────────────
+
+export interface RpcResponseSuccess<T = unknown> {
+	id?: string;
+	type: "response";
+	command: string;
+	success: true;
+	data?: T;
+}
+
+export interface RpcResponseError {
+	id?: string;
+	type: "response";
+	command: string;
+	success: false;
+	error: string;
+}
+
+export type RpcResponse = RpcResponseSuccess | RpcResponseError;
+
+/** Session events (agent_settled, agent_end, message_update, …) plus extension_* messages. */
+export type RpcEvent = { type: string } & Record<string, unknown>;
+
+export type ParsedLine = { kind: "response"; response: RpcResponse } | { kind: "event"; event: RpcEvent };
+
+// ─── Pure helpers ──────────────────────────────────────────
+
+/** Serialize a command to a single JSONL line (LF-terminated). */
+export function serializeCommand(command: RpcCommand): string {
+	return `${JSON.stringify(command)}\n`;
 }
 
 /**
- * Read one length‑prefixed message from a connected socket.
- * Resolves with the parsed payload, or rejects on error/timeout/abort/connection close.
+ * Classify a single JSONL line as a response or an event.
+ * Returns null for empty lines, unparseable JSON, and malformed records.
  */
-export function readLengthPrefixed(socket: net.Socket, signal?: AbortSignal): Promise<PrefixedMessage> {
-	return new Promise((resolve, reject) => {
-		let buf = Buffer.alloc(0);
+export function parseLine(line: string): ParsedLine | null {
+	const trimmed = line.trim();
+	if (!trimmed) return null;
 
-		const onAbort = () => done(new Error("Aborted"));
-		if (signal?.aborted) return onAbort();
-		signal?.addEventListener("abort", onAbort, { once: true });
+	let value: unknown;
+	try {
+		value = JSON.parse(trimmed);
+	} catch {
+		return null;
+	}
+	if (typeof value !== "object" || value === null) return null;
 
-		const timer = setTimeout(() => done(new Error("Timeout reading from socket")), 10_000);
+	const obj = value as Record<string, unknown>;
 
-		const onData = (chunk: Buffer) => {
-			buf = Buffer.concat([buf, chunk]);
-			if (buf.length < 4) return;
-			const len = buf.readUInt32BE(0);
-			if (buf.length < 4 + len) return;
-			const payload = buf.subarray(4, 4 + len);
-			done(undefined, payload);
-		};
-		const onError = (err: Error) => done(err);
-		const onClose = () => done(new Error("Socket closed before full message"));
+	if (obj.type === "response") {
+		if (typeof obj.command !== "string") return null;
+		return { kind: "response", response: value as RpcResponse };
+	}
 
-		function done(err?: Error, payload?: Buffer) {
-			cleanup();
-			signal?.removeEventListener("abort", onAbort);
-			if (err) return reject(err);
-			// At this point `payload` was set by `onData` before calling `done(undefined, payload)`.
-			const [sessionName, text] = splitPayload(payload as Buffer);
-			resolve({ sessionName, text });
-		}
-		function cleanup() {
-			clearTimeout(timer);
-			socket.removeListener("data", onData);
-			socket.removeListener("error", onError);
-			socket.removeListener("close", onClose);
-			socket.removeListener("end", onClose);
-		}
+	if (typeof obj.type === "string") {
+		return { kind: "event", event: value as RpcEvent };
+	}
 
-		socket.on("data", onData);
-		socket.on("error", onError);
-		socket.on("close", onClose);
-		socket.on("end", onClose);
-	});
-}
-
-/** Parse `sessionName\0text` (or plain text when no NUL present). */
-export function splitPayload(payload: Buffer): [string, string] {
-	const nullIdx = payload.indexOf(0);
-	if (nullIdx < 0) return ["", payload.toString("utf8")];
-	const sessionName = payload.subarray(0, nullIdx).toString("utf8");
-	const text = payload.subarray(nullIdx + 1).toString("utf8");
-	return [sessionName, text];
-}
-
-/** Encode `sessionName\0text` (or just text when sessionName is empty). */
-export function encodePayload(sessionName: string, text: string): Buffer {
-	return sessionName ? Buffer.from(`${sessionName}\0${text}`, "utf8") : Buffer.from(text, "utf8");
-}
-
-/**
- * Write one length‑prefixed message to a connected socket.
- * Resolves once the framed buffer is flushed.
- */
-export function writeLengthPrefixed(socket: net.Socket, sessionName: string, text: string): Promise<void> {
-	const payload = encodePayload(sessionName, text);
-	const hdr = Buffer.alloc(4);
-	hdr.writeUInt32BE(payload.length);
-	const frame = Buffer.concat([hdr, payload]);
-
-	return new Promise<void>((resolve, reject) => {
-		socket.write(frame, (err) => (err ? reject(err) : resolve()));
-	});
+	return null;
 }

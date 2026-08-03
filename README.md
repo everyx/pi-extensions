@@ -2,20 +2,18 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-Spawn isolated sub‑agents from pi. Each runs in its own context and streams results back.
+Spawn isolated sub‑agents from pi. Each sub‑agent is a full pi instance running in its own context — your conversation stays clean.
 
 ```
 You:  Research this project's database schema for me
-  → pi calls subagent, spins up a child agent
-  → Child works independently, sends results back
-  → You keep chatting
+  → pi calls Agent, spawns a resident `pi --mode rpc` child
+  → Child works independently in its own context window
+  → Result comes back; you keep chatting
 ```
-
-> Only works on Linux/macOS (requires Unix socket + tmux).
 
 ## Why?
 
-Pi doesn't have built‑in sub‑agents. When you want to split work across multiple agents running in parallel, or send a long‑running task to the background without blocking your main conversation — that's what `subagent` is for.
+Pi doesn't have built‑in sub‑agents. When a task would flood your context with verbose intermediate output (search results, logs, test output), or you want to run independent tasks in parallel without blocking your conversation — that's what this extension is for.
 
 ## Install
 
@@ -35,6 +33,15 @@ ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 
 Restart pi and just tell it "ask a sub‑agent to…".
 
+## Tools
+
+Two primitive tools:
+
+- **`Agent`** — spawn an isolated sub‑agent. Foreground (default) blocks until the result is ready; `run_in_background: true` returns an `agent_id` immediately and delivers a completion notification carrying the final output.
+- **`AgentControl`** — intervene in a running background agent: `steer` (inject a redirecting message) or `stop` (terminate).
+
+The LLM is guided by `promptSnippet` + `promptGuidelines` (system-prompt injection): when to delegate, to keep prompts self-contained, to never poll, and to verify a sub‑agent's actual changes before reporting done.
+
 ## Usage
 
 ### Kick off a task
@@ -45,54 +52,23 @@ Tell pi:
 Ask a sub‑agent to analyze the auth logic under src/
 ```
 
-Pi calls `subagent`, a child agent runs in isolation, and the result comes back — you continue from there.
+Pi calls `Agent` (foreground), the child runs in isolation, and the result comes back.
 
-### Run several at once
+### Run several in parallel (background)
 
 ```
 Spawn three sub‑agents to look at the auth module, the database layer, and the API routes
 ```
 
-Pi runs all three in parallel and returns the combined results.
+Pi calls `Agent` with `run_in_background: true` three times. Each completion notification carries that agent's final output — no polling, no extra result tool.
 
-### Interactive — watch it work
-
-```
-Start an interactive sub‑agent to refactor the data layer with repository pattern, I want to watch
-```
-
-Pi creates a tmux session. The result includes its name (e.g. `pi-sub-a1b2c`), so you can attach:
-
-```bash
-tmux attach -t pi-sub-a1b2c
-```
-
-Detach (Ctrl+B D) and the child keeps running. Results come back automatically.
-
-### Send a follow‑up (battle)
+### Steer or stop a running agent
 
 ```
 That data‑layer sub‑agent — the approach won't work, rewrite it with composition instead
 ```
 
-Pi pastes the new prompt into the child's editor. The child continues and its new result comes back.
-
-### Close a session
-
-```
-Kill pi-sub-a1b2c
-```
-
-## Two modes
-
-| | Non‑interactive | Interactive |
-|---|---|---|
-| Backend | `pi --print --no-session`, zero overhead | Full pi in tmux |
-| Attachable | ❌ | ✅ `tmux attach -t pi-sub-xxx` |
-| Follow‑ups | ❌ | ✅ |
-| Best for | Quick queries, one‑offs | Complex work, exploration, iteration |
-
-Non‑interactive is the default — fast and lightweight. Reach for interactive when you need to watch or iterate.
+Pi calls `AgentControl` with `steer` to redirect the running agent. To stop a runaway agent: "kill that background sub‑agent" → `stop`.
 
 ## Advanced
 
@@ -103,20 +79,57 @@ Spawn a sub‑agent with claude-sonnet to analyze the database design
 ```
 
 No model specified → inherits your current session's model.
-Model specified but not found in the registry → falls back to the parent model with a warning.
+Model specified but not found in the registry → error, no silent fallback.
 
 ### Restrict tools
 
 ```
-Ask a sub‑agent to research the project structure, but only let it use bash and read
+Ask a sub‑agent to research the project structure, but only let it use read and grep
 ```
 
-Sub‑agent won't see any other tools.
+Sub‑agent won't see any other tools. Read-only exploration with a cheaper model is the recommended pattern for research tasks.
+
+## How it works
+
+Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
+
+- **Foreground** — `Agent` waits for the child to settle, fetches the final output, then closes stdin (graceful shutdown).
+- **Background** — `Agent` returns immediately; on `agent_settled` the extension delivers a `subagent-notification` (JSON content to the LLM, rendered card to the user) and the child shuts down gracefully.
+- **Steer/stop** — `AgentControl` writes a `steer`/`abort` command (or closes stdin for `stop`) to the child's stdin.
+- **Attach** — sessions are persisted to `~/.pi/agent/sessions/` and are **never deleted**. Watch one from another terminal: `pi --session <id>` or `pi -r` to pick from the list. The notification card shows the session path.
+- **Graceful turn limits** — after each settled turn the extension checks token usage: at the wrap‑up threshold it steers a "wrap up" message; at the hard limit (or total timeout) it aborts, waits for the settle, then shuts down. No truncated output from an abrupt SIGTERM.
+
+## Nested sub‑agents
+
+Sub‑agents are full pi instances and therefore spawn sub‑agents of their own if you have this extension installed globally — nesting works out of the box with no depth control. Each level is a separate process with its own context, so nesting depth multiplies startup time and token cost. You (or the model) judge when nesting is worth it.
+
+## Costs & caveats
+
+- **One process per agent.** Foreground and background are identical (resident rpc child). Many background agents = many processes — spawn them in moderation.
+- **Notification is one-shot.** A background result is delivered once; if the main session dies before delivery, the result survives only in the session file (attach it with `pi --session <id>`).
+- **Steer needs a live agent.** `AgentControl` only works while the agent is still running, before its completion notification.
 
 ## Cleanup
 
-When pi exits, if sub‑agents are still running:
-- **TUI mode** — asks whether to kill them
-- **Headless mode** — kills silently
+When pi exits, running sub‑agents receive a graceful stdin-EOF shutdown. Sessions remain on disk for attach/replay; nothing is killed or deleted.
 
-You can also tell pi "kill that sub‑agent" any time.
+## For developers
+
+```bash
+pnpm install
+pnpm check      # biome
+pnpm typecheck  # tsc --noEmit
+pnpm test       # node:test
+```
+
+Layout:
+
+```
+src/
+  index.ts         — tool registration (Agent / AgentControl), notifications, cleanup
+  protocol.ts      — pure JSONL protocol layer (unit tested)
+  rpc-client.ts    — stateful thin JSONL client (spawn + transport)
+  agent-process.ts — AgentProcess: one resident rpc child, semantic API (tested via seam)
+  model.ts         — model resolution (tested)
+  render.ts        — TUI rendering + notification card renderer
+```
