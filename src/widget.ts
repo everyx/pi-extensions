@@ -2,7 +2,7 @@
  * pi-subagent — AgentWidget.
  *
  * Persistent above-editor widget showing one status line per *background*
- * agent: `⠋ <title> · 42s`. Foreground agents are intentionally
+ * agent: `⠋ sub: <title> · 42s`. Foreground agents are intentionally
  * excluded — their live output already streams inline in the tool card
  * (mirrors tintinweb's default widget mode, which hides foreground runs).
  *
@@ -127,8 +127,10 @@ export class AgentWidget {
 		for (const row of this.rows.values()) {
 			const { agent, frame } = row;
 			const spinner = SPINNER[frame % SPINNER.length];
-			// Task label — same as the session display name (no prefix).
-			const name = agent.title ?? agent.sessionName ?? `sub-agent ${agent.agentId.slice(0, 8)}`;
+			// Task label without the session-name "sub: " prefix (that prefix exists
+			// for the session display name, not for this widget).
+			const name =
+				agent.title ?? agent.sessionName?.replace(/^sub:\s*/, "") ?? `sub-agent ${agent.agentId.slice(0, 8)}`;
 			const elapsed = formatElapsed(Date.now() - agent.startedAt);
 			lines.push(
 				`${theme.fg("toolTitle", spinner)} ${theme.fg("toolOutput", name)} ${theme.fg("muted", `\u00b7 ${elapsed}`)}`,

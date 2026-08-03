@@ -92,7 +92,7 @@ Sub‑agent won't see any other tools. Read-only exploration with a cheaper mode
 ## Observability
 
 - **Foreground** — the sub‑agent's output streams live into the tool card, word by word (rpc `text_delta` events forwarded to `onUpdate`).
-- **Background** — a persistent status widget sits above the editor with an `Agents` heading, one line per running agent: `⠋ <title> · 42s`. Status-only by design (no output preview — full content arrives via the completion notification, and via `pi --session <path>` for review). The widget clears itself when the last agent finishes.
+- **Background** — a persistent status widget sits above the editor, one line per running agent: `⠋ sub: <title> · 42s`. Status-only by design (no output preview — full content arrives via the completion notification, and via `pi --session <path>` for review). The widget clears itself when the last agent finishes.
 
 ## How it works
 
@@ -110,7 +110,6 @@ Sub‑agents are full pi instances and therefore spawn sub‑agents of their own
 
 ## Costs & caveats
 
-- **Headless (`pi -p`) background agents die with the host.** The main process exits when the agent finishes its response — background children are then torn down via stdin EOF (they never leak as orphans). Background workflows (wait for notification, steer, stop) are designed for the TUI session, which stays alive.
 - **One process per agent.** Foreground and background are identical (resident rpc child). Many background agents = many processes — spawn them in moderation.
 - **Notification is one-shot.** A background result is delivered once; if the main session dies before delivery, the result survives only in the session file (attach it with `pi --session <id>`).
 - **Steer needs a live agent.** `AgentControl` only works while the agent is still running, before its completion notification.
