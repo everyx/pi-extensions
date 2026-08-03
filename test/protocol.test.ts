@@ -8,18 +8,18 @@ import { parseLine, serializeCommand } from "../src/protocol.js";
 
 describe("serializeCommand", () => {
 	it("serializes a prompt command as a single LF-terminated line", () => {
-		const line = serializeCommand({ id: "a1", type: "prompt", message: "do the thing" });
-		assert.equal(line, '{"id":"a1","type":"prompt","message":"do the thing"}\n');
+		const line = serializeCommand({ type: "prompt", message: "do the thing" });
+		assert.equal(line, '{"type":"prompt","message":"do the thing"}\n');
 	});
 
 	it("serializes a steer command with message", () => {
-		const line = serializeCommand({ id: "a1", type: "steer", message: "focus on errors" });
+		const line = serializeCommand({ type: "steer", message: "focus on errors" });
 		assert.ok(line.includes('"type":"steer"'));
 		assert.ok(line.endsWith("\n"));
 	});
 
 	it("escapes JSON inside the message (quotes, newlines)", () => {
-		const line = serializeCommand({ id: "a1", type: "prompt", message: 'say "hi"\nnext' });
+		const line = serializeCommand({ type: "prompt", message: 'say "hi"\nnext' });
 		const parsed = JSON.parse(line);
 		assert.equal(parsed.message, 'say "hi"\nnext');
 	});

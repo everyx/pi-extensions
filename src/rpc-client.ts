@@ -25,6 +25,8 @@ export interface RpcClientOptions {
 	/** pi argv after `--mode rpc` (e.g. --model, --tools, --name). */
 	args: string[];
 	cwd: string;
+	/** Test seam: executable to spawn (default "pi"). When set, `args` are used verbatim (no --mode rpc). */
+	command?: string;
 	onEvent?: (event: RpcEvent) => void;
 	onStderr?: (text: string) => void;
 	/** Called once when the child exits (any reason). */
@@ -45,6 +47,7 @@ export class RpcClient {
 	private readonly options: RpcClientOptions;
 	private readonly pending = new Map<string, PendingWaiter>();
 	private readonly decoder = new StringDecoder("utf8");
+	private seq = 0;
 	private buffer = "";
 	private stderr = "";
 	private closed = false;
@@ -57,13 +60,17 @@ export class RpcClient {
 			this.resolveExit = resolve;
 		});
 
-		const proc = spawn("pi", ["--mode", "rpc", ...options.args], {
+		const argv = options.command === undefined ? ["--mode", "rpc", ...options.args] : options.args;
+		const proc = spawn(options.command ?? "pi", argv, {
 			cwd: options.cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		this.proc = proc;
 
-		proc.stdout.on("data", (chunk: Buffer) => this.onData(chunk.toString("utf8")));
+		// Raw Buffer chunks: StringDecoder buffers partial multibyte sequences
+		// across chunk boundaries — toString("utf8") first would corrupt them
+		// (U+FFFD) and make the decoder pointless.
+		proc.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
 		proc.stderr.on("data", (chunk: Buffer) => {
 			this.stderr += chunk.toString();
 			options.onStderr?.(chunk.toString());
@@ -95,26 +102,30 @@ export class RpcClient {
 
 	/** Send one command and await its correlated response. */
 	sendCommand(command: RpcCommand): Promise<RpcResponse> {
+		// Unique per-command id: the pending map is keyed by id and the child
+		// echoes it back — a shared id (e.g. the agent id) would let a later
+		// command steal an earlier waiter and mismatch responses.
+		const cmd = { ...command, id: `c${++this.seq}` };
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
-				this.pending.delete(command.id);
+				this.pending.delete(cmd.id);
 				reject(new Error(`RPC timeout waiting for "${command.type}" response`));
 			}, RESPONSE_TIMEOUT_MS);
 
-			this.pending.set(command.id, { resolve, reject, timer });
+			this.pending.set(cmd.id, { resolve, reject, timer });
 			const stdin = this.proc.stdin;
 			// Guard against shutdown races: a command written after endInput()
 			// would throw ERR_STREAM_WRITE_AFTER_END (unhandled 'error' crash).
 			if (!stdin || stdin.writableEnded || stdin.destroyed) {
 				clearTimeout(timer);
-				this.pending.delete(command.id);
+				this.pending.delete(cmd.id);
 				reject(new Error(`RPC stdin closed (cannot send "${command.type}")`));
 				return;
 			}
-			stdin.write(serializeCommand(command), (err) => {
+			stdin.write(serializeCommand(cmd), (err) => {
 				if (!err) return;
 				clearTimeout(timer);
-				this.pending.delete(command.id);
+				this.pending.delete(cmd.id);
 				reject(err);
 			});
 		});
@@ -138,7 +149,7 @@ export class RpcClient {
 
 	// ── stdout line framing (strict LF, mirrors pi's jsonl.js) ──
 
-	private onData(chunk: string): void {
+	private onData(chunk: Buffer): void {
 		this.buffer += this.decoder.write(chunk);
 		for (;;) {
 			const idx = this.buffer.indexOf("\n");
