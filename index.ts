@@ -23,6 +23,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { resolveModel } from "./model.js";
+import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import {
 	type AgentControlParams,
 	type AgentParams,
@@ -36,8 +37,6 @@ import {
 import { AgentWidget } from "./widget.js";
 
 // ─── Running background agents registry ─────────────────────
-
-const activeAgents = new Map<string, AgentProcess>();
 
 /** Expand a leading `~` (pi's own expandTildePath only normalizes). */
 function expandTilde(p: string): string {
@@ -71,12 +70,15 @@ function ensureWidget(ctx: { mode: string; ui: unknown }): AgentWidget | null {
 	return widget;
 }
 
-function registerAgent(agent: AgentProcess): void {
-	activeAgents.set(agent.agentId, agent);
-}
-
-function unregisterAgent(agentId: string): void {
-	activeAgents.delete(agentId);
+/** Narrow TUI adapter: AgentWidget → WidgetSurface (registry seam). */
+function widgetSurface(): WidgetSurface | null {
+	const w = widget;
+	if (!w) return null;
+	return {
+		add: (agent) => w.add(agent as AgentProcess),
+		remove: (agentId) => w.remove(agentId),
+		dispose: () => w.dispose(),
+	};
 }
 
 // ─── Tool parameter schemas ──────────────────────────────────
@@ -150,7 +152,7 @@ function toErrorResult(err: unknown): {
 }
 
 /** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
-function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: AgentCompletion): void {
+function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: AgentCompletion): void {
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,
@@ -187,6 +189,12 @@ function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: Age
 // ─── Default export (pi extension entry) ───────────────────────
 
 export default function (pi: ExtensionAPI) {
+	// One registry per session: owns the running-agent bookkeeping and the
+	// completion policy (notify unless user-stopped; cleanup on every path).
+	const registry = new AgentRegistry({
+		notify: (agent, completion) => notifyCompletion(pi, agent, completion),
+		getWidget: () => widgetSurface(),
+	});
 	// ── Agent ───────────────────────────────────────────
 	pi.registerTool({
 		name: "Agent",
@@ -274,8 +282,7 @@ export default function (pi: ExtensionAPI) {
 					// Spawn failure: deliver the failed notification (D15) — the
 					// caller only sees an isError return, the user gets the card.
 					if (!started.ok) {
-						await agent.stop().catch(() => {});
-						await notifyCompletion(pi, agent, {
+						await registry.complete(agent, {
 							status: "failed",
 							output: started.error,
 							stats: { tokens: 0, toolUses: 0, durationMs: 0 },
@@ -289,23 +296,14 @@ export default function (pi: ExtensionAPI) {
 						};
 					}
 
-					registerAgent(agent);
-					const w = ensureWidget(ctx);
-					w?.add(agent);
+					ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
+					registry.register(agent);
 					void agent
 						.waitForCompletion()
-						.then(async (completion) => {
-							// AgentControl.stop is a deliberate user action — no notification.
-							if (!agent.stoppedByControl) await notifyCompletion(pi, agent, completion);
-							w?.remove(agent.agentId);
-							unregisterAgent(agent.agentId);
-							return agent.stop();
-						})
-						.catch(() => {
-							w?.remove(agent.agentId);
-							unregisterAgent(agent.agentId);
-							return agent.stop();
-						});
+						.then((completion) => registry.complete(agent, completion))
+						// Defensive: waitForCompletion is deadline-bounded and never
+						// rejects today — if it ever does, clean up without notifying.
+						.catch(() => registry.stopAndRemove(agent.agentId));
 
 					onUpdate?.({
 						content: [{ type: "text", text: `Started agent ${agent.agentId} (background)` }],
@@ -387,7 +385,9 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, raw) {
 			const params = raw as AgentControlParams;
-			const agent = activeAgents.get(params.agent_id);
+			// The registry stores full AgentProcess objects — the narrow
+			// RegisteredAgent surface is the seam; steer needs the whole child.
+			const agent = registry.lookup(params.agent_id) as AgentProcess | undefined;
 
 			if (!agent) {
 				return {
@@ -407,12 +407,10 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (params.action === "stop") {
-				await agent.stop();
-				widget?.remove(agent.agentId);
-				unregisterAgent(agent.agentId);
+				await registry.stopAndRemove(params.agent_id);
 				return {
 					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
-					details: { agentId: agent.agentId },
+					details: { agentId: params.agent_id },
 				};
 			}
 
@@ -462,10 +460,6 @@ export default function (pi: ExtensionAPI) {
 		// Graceful stop of every tracked agent. Children exit on their own
 		// (stdin EOF → rpc shutdown) even if the parent dies first, because
 		// the pipe closes — no tmux, no disk cleanup, no signals.
-		for (const agent of activeAgents.values()) {
-			void agent.stop();
-		}
-		activeAgents.clear();
-		widget?.dispose();
+		await registry.shutdown();
 	});
 }
