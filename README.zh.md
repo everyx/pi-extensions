@@ -37,7 +37,7 @@ ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 
 两个最小原语：
 
-- **`Agent`** — spawn 一个隔离的 sub-agent：`{ prompt, title?, model?, tools?, run_in_background? }`。`title`（3-5 词）作为通知卡片和工具头的标题——省略时用 prompt 首行。前台（默认）阻塞到结果就绪；`run_in_background: true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。
+- **`Agent`** — spawn 一个隔离的 sub-agent：`{ prompt, title, model?, tools?, run_in_background? }`。`title`（3-5 词，**必填**）作为工具头、通知卡片、widget 行和会话名的标识——对齐 Claude Code 的 `description` / Codex 的 `task_name`。前台（默认）阻塞到结果就绪；`run_in_background: true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。
 - **`AgentControl`** — 干预运行中的后台 agent：`steer`（注入重定向消息）或 `stop`（终止）。
 
 LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使用指南：何时委派、prompt 必须自包含、绝不轮询、汇报前验证子 agent 的实际改动。
@@ -91,7 +91,8 @@ Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失�
 ## 可观测性
 
 - **前台** — sub-agent 的输出逐字流式进入工具卡片（rpc `text_delta` 事件转发到 `onUpdate`）。
-- **后台** — 编辑器上方常驻状态 widget：`Agents` 标题下每个运行中的 agent 一行 `⠋ <标题> · 42s`。纯状态设计（无输出预览——完整内容由完成通知携带，复盘走 `pi --session <path>`）。最后一个 agent 结束后 widget 自动清除。
+- **后台** — 编辑器上方常驻状态 widget：`Agents` 标题下每个运行中的 agent 一行 `⠋ <标题> · 42s`（accent spinner + muted 文本，与 pi 内置 working 指示器同一视觉语言）。纯状态设计（无输出预览——完整内容由完成通知携带，复盘走 `pi --session <path>`）。最后一个 agent 结束后 widget 自动清除。
+- **完成通知** — 以 Agent 家族风格渲染卡片：`Agent ✓ <标题> (Took 12.3s · 1,250 tokens · 3 tool uses)` + 结果预览 body + session 路径 footer（状态词仅在失败时显示）。
 
 ## 工作原理
 
@@ -99,7 +100,7 @@ Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失�
 
 - **前台** — `Agent` 等待子进程 settled，取最终输出，然后关闭 stdin（优雅退出）。
 - **后台** — `Agent` 立即返回；`agent_settled` 时扩展投递 `subagent-notification`（JSON 内容给 LLM、渲染卡片给用户），子进程优雅退出。
-- **Steer/stop** — `AgentControl` 向子进程 stdin 写 `steer`/`abort` 命令（`stop` 则关闭 stdin）。
+- **Steer/stop** — `AgentControl.steer` 向子进程 stdin 写 `steer` 命令（在当前 turn settled 后投递）；`stop` 关闭 stdin 优雅退出。
 - **Attach / 复盘** — sub-agent 会话存储在 `<agent 目录>/subagent-sessions/`（默认 `~/.pi/agent/subagent-sessions/`；可用 `PI_SUBAGENT_SESSION_DIR` 覆盖，agent 目录同样尊重 `PI_CODING_AGENT_DIR`，与 pi 一致），刻意放在 pi 标准会话树**之外**，让 `pi -r` 保持干净。**永不删除**。要 resume/复盘：在主会话里找到 session 路径（Agent 调用结果或完成通知卡片），执行 `pi --session <path>`——通知里也带 path，直接问 LLM 也行。
 - **Graceful turn limits** — 每轮 settled 后检查 token 用量：超过 wrap-up 阈值时 steer "尽快总结"消息；超过硬限制（或总超时）时 abort → 等 settled → 优雅退出。不会因突然 SIGTERM 截断输出。
 
@@ -109,6 +110,7 @@ Sub-agent 是完整 pi 实例，若你全局安装了本扩展，它天然能再
 
 ## 成本与注意
 
+- **Headless（`pi -p`）下后台 agent 随主进程退出。** 主 agent 响应结束即进程退出，后台子 agent 通过 stdin EOF 被清理（不会泄漏为孤儿进程）。后台工作流（等通知、steer、stop）是为常驻的 TUI 会话设计的。
 - **一 agent 一进程。** 前台和后台都是常驻 rpc 子进程。后台开多了 = 进程开多了——请节制。
 - **通知一次性投递。** 后台结果只投递一次；若投递前主会话崩溃，结果只存在于 session 文件（用 `pi --session <id>` attach 恢复）。
 - **Steer 需要活的 agent。** `AgentControl` 只在 agent 运行中（完成通知之前）有效。
@@ -136,4 +138,5 @@ src/
   agent-process.ts — AgentProcess：常驻 rpc 子进程语义封装（经 seam 测试）
   model.ts         — 模型解析（测试）
   render.ts        — TUI 渲染 + 通知卡片渲染器
+  widget.ts        — Agents 状态 widget（setWidget，编辑器上方）
 ```

@@ -2,182 +2,195 @@
 
 ## 问题陈述
 
-Pi 不支持内置子 agent。官方推荐的 `pi --print` 模式存在不足：
+Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结果、日志、测试输出）污染主会话上下文，或需要并行运行独立任务而不阻塞主对话时，需要一种委托机制：
 
-- **不可迭代**：主 agent 看到输出后无法发送后续提示。
-- **不可观测**：子 agent 是黑盒运行，无法查看中间状态或跳入。
-- **不可清理**：悬挂的 tmux 会话和进程缺乏协调清理机制。
-
-生态中的其他 skill 需要一个标准的 `subagent` 工具来委托工作。
+- **上下文隔离**：子任务的中间过程不应进入主上下文。
+- **并行**：多个独立任务可同时进行，主 agent 不被阻塞。
+- **可干预**：运行中的子任务可被重定向（steer）或终止（stop）。
+- **可观测**：运行状态在 TUI 中可见，完成后可复盘完整会话。
 
 > **并行**由 pi 原生支持：LLM 一次响应中发出多个 tool call 时，pi 并发执行所有调用。subagent 不内置自己的并行机制。
 
 ## 解决方案
 
-一个 pi 扩展，注册 `subagent` 工具，支持三种模式：
+一个 pi 扩展，注册两个原语工具：
 
-- **非交互**（默认）：spawn 子 pi 进程，零 tmux 开销。
-- **交互**（`interactive: true`）：命名 tmux 会话，可 `tmux attach` 观测。
-- **Battle**（`session + task`）：向运行中的交互式子 agent 发后续 prompt，结果通过 Unix socket 推回。
+- **`Agent`** — spawn 一个隔离的子 agent（前台阻塞 / 后台异步）。
+- **`AgentControl`** — 干预运行中的后台 agent（steer / stop）。
+
+每个子 agent 是一个常驻 `pi --mode rpc` 子进程，拥有独立上下文与持久化会话。
 
 ## 设计原则
 
 ### Pi Native
-用户使用本插件的感觉应与使用 pi 内置工具一致统一：
 
-- **一致的调用方式**：参数 schema、命名风格与 pi 内置工具（`bash`、`read`、`edit` 等）保持一致。
-- **一致的输出质感**：渲染复用 pi 原生 TUI 组件（`Text`、`Container`），排版、颜色、交互反馈与内置工具一致。输出截断、折叠展开等细节由 pi 框架统一控制，折叠展开行数阈值与 pi 内置工具一致。
-- **一致的行为体感**：错误处理、进度反馈、清理逻辑等遵循 pi 生态惯例。
-- **依赖原生能力**：多 task 并行由 pi 的 tool call 批量执行机制实现，subagent 不内置聚合逻辑。
+- **一致的调用方式**：参数 schema、命名风格与 pi 内置工具（`bash`、`read` 等）保持一致；`promptSnippet` / `promptGuidelines` 注入系统提示。
+- **一致的输出质感**：渲染复用 pi 原生组件（`Text`、`Container`、`setWidget`、`registerMessageRenderer`），排版、颜色、折叠展开遵循内置工具（bash 工具卡片）的惯例；widget 与内置 working 指示器同一视觉语言（accent spinner 80ms + muted 文本）。
+- **一致的视觉家族**：工具卡 `Agent <title>`、通知卡 `Agent ✓ <title>`、总览 `Agents`——不出现 "subagent" 字样、无装饰 emoji（通知卡状态 icon 除外）。
+- **依赖原生能力**：会话存储/attach 走 pi 原生机制（`--session <path>`），不自造会话管理。
 
 ### LLM + Token Friendly
-LLM 上下文窗口是宝贵资源。
 
-- **Token Economy**：返回给 LLM 的 `content` 仅包含完成任务所需的最小信息——子 agent 的输出文本。装饰性元素（状态标记、emoji、原始 prompt）仅在 TUI 渲染中呈现，不出现在 LLM 可见的文本中。
-- **纯函数隔热层**：参数校验、model 解析、事件流解析都是无副作用的纯函数，可独立单测、不占用运行时上下文窗口。
+- **Token Economy**：通知的 `content`（LLM 可见）只含最小结构化信息（status / agent_id / result / session_path）；装饰性元素（title、usage、session 路径）放 `details`——源码核实 `convertToLlm` 只转 `content`，`details` 永不进入 LLM 上下文。
+- **纯函数隔热层**：协议序列化/解析（`protocol.ts`）、模型解析（`model.ts`）是无副作用的纯函数，可独立单测。
+- **不轮询**：后台结果由完成通知一次投递，无查询工具（promptGuidelines 写死 "Never poll"）。
 
 ### 提供能力而非方案
 
 提供原语，让用户组合。组合逻辑在调用者的 prompt 里，不在工具层。
-不封装工作流模板、不自动重试、不做结果后处理。
+不封装工作流模板、不自动重试、不做结果后处理、不做预定义 agent 类型系统。
 
 ## 用户故事
 
 1. 委托子 agent 研究问题，不污染主会话上下文窗口，输出纯文本直接可用。
-2. 简单任务默认非交互模式（零 tmux 开销）；复杂任务切交互模式通过 session 名 `tmux attach` 观测。
-3. 向运行中的交互式子 agent 发送后续提示，在不丢失上下文的情况下迭代讨论。
-4. 同时调用多个 subagent 探索独立问题——LLM 发出多次 tool call，pi 原生并发执行，结果各自返回。
-5. 父级退出时自动清理子 agent 会话，支持确认保留或通过工具提前关闭。
-6. 为每个子 agent 独立覆盖模型和工具白名单（如廉价模型做侦察，强模型做实现）。
-7. skill 开发者依赖稳定的 `subagent` 工具 API 和参数 schema。
-8. Ctrl+C 终止执行中的子 agent，取消耗时或错误的子任务。
-9. 扩展零额外 npm 依赖（仅依赖 pi 已打包的 packages）。
+2. 并行探索多个独立问题——多个后台 Agent 同时运行，widget 显示状态，完成通知逐个到达。
+3. 后台 agent 跑偏时注入 steer 消息重定向，或直接 stop 终止。
+4. 为每个子 agent 独立覆盖模型和工具白名单（如廉价模型做侦察，强模型做实现）。
+5. 子 agent 完成后从主会话（工具卡/通知卡）找到 session 路径，`pi --session <path>` 复盘完整过程。
+6. 嵌套：子 agent 是完整 pi 实例，天然可再 spawn 孙 agent，无深度控制。
+7. 父级退出时子进程经 stdin EOF 自动优雅退出（无孤儿进程），会话文件永不删除。
+8. 扩展零运行时 npm 依赖（仅 peerDependencies：pi-ai / pi-coding-agent / pi-tui / typebox）。
 
 ## UI 设计
 
-### 渲染状态
+### 统一视觉语法
 
-`renderCall` 展示 header（工具名 + emoji + prompt 首行 + metadata），`renderResult` 追加 output + footer（计时器）。
+`<bold 工具名> + <icon?> + <title> + <muted 括号 meta>` → 1 空行 → `toolOutput body（bash 折叠）` → 1 空行 → `muted footer`。
 
-计时器行为：
-- **执行中**：显示 `Elapsed X.Xs`，每秒刷新
-- **完成后**：定格为 `Took X.Xs`
-
-### 执行中（renderCall）
+### Agent 工具卡片
 
 ```
-subagent ⚡ 认证扫描 (opencode/ling-3.0-flash-free | pi-sub-c3d)
-subagent ⚡ 深度分析系统架构… (opencode/ling-3.0-flash-free)
+Agent 检查 CI 配置 (sonnet)
+<prompt 全文>            ← 输入
+<空行>
+<子 agent 输出>          ← 输出（前台流式：text_delta → onUpdate 逐字滚动）
+Took 27.5s
+session: /path/...jsonl
 ```
 
-- model 和 session 作为 muted 后缀跟随在 header 末尾（对齐 bash 的 ` (timeout 10s)`）
-- 多行 prompt 在首行后加 `…`，一目可见是摘要
-- 非交互模式无 session，仅显示 model
+- header：`Agent`（bold toolTitle）+ title（必填 3-5 词）+ muted meta `(background · model)`——只显非默认值，对齐 bash 的 ` (timeout 10s)`
+- body：输入（prompt 全文）+ 输出（流式），整体 `toolOutput`，bash 同款折叠（`... N earlier lines, <key> to expand`）
+- footer：`Took/Elapsed X.Xs`（muted）+ `session: <path>`（前台完成时）
 
-### 完成（renderResult）
-
-```
-subagent ⚡ 查找所有数据库... (opencode/ling-3.0-flash-free | pi-sub-c3d)
-
-查找所有数据库表和模式定义...
-
-正在扫描 src/ 目录下的认证逻辑..
-分析完成，共发现 5 个问题...
-
-Took 4.0s
-```
-
-- header 由 renderCall 独占，renderResult 展示 body（prompt + output）+ footer
-- body：全量内容（prompt + 分隔空行 + output）整体使用 `toolOutput` 样式
-- footer：`Took X.Xs` / `Elapsed X.Xs`，muted 样式
-
-### Battle 模式
+### AgentControl 卡片
 
 ```
-subagent 💬 继续深入分析认证模块 (opencode/ling-3.0-flash-free | pi-sub-c3d)
-
-分析结果：...
-
-Took 0.8s
+Agent steer a1b2c3
+<注入的 steer 消息全文>            ← 输入
+<空行>
+<agent 当前输出快照>              ← 输出（steer 时刻 get_last_assistant_text，details 专用）
+Steered agent a1b2c3.            ← muted 确认
 ```
 
-- header 与单任务一致，emoji + prompt 首行 + model/session muted 后缀
-- footer 仅展示计时器
+- steer 是 Agent 卡片的**接力**：同一输入/输出 body 结构（LLM 语义不变——立即返回，结果仍由完成通知送达）
+- stop：一行 dim 确认（无输出可显示）
 
-### Close 模式
+### 完成通知卡片（registerMessageRenderer）
 
 ```
-subagent close pi-sub-a1b
-Closed sub‑agent session pi-sub-a1b
+Agent ✓ 检查 CI 配置 (Took 27.5s · 1,250 tokens · 3 tool uses)
+Found 5 files handling authentication: src/auth/*.ts …
+session: /path/...jsonl
 ```
 
-- renderCall：`subagent close <session>`，全部 toolTitle 样式
-- renderResult：dim 样式确认文本
-- 无主体内容
+- header：`Agent` + 状态 icon（✓ completed / ✗ failed / ⛔ stopped）+ title + muted meta（usage 并入括号）；状态词仅在失败时显示（`failed` / `stopped`）
+- body：结果预览（collapsed 1 行 / expanded 30 行 + 剩余提示）
+- footer：session 路径
+- 渲染数据在 `details`，不进 LLM 上下文
+
+### Agents 状态 widget（setWidget，aboveEditor）
+
+```
+（容器级 1 空行，pi 自动）
+  ● Agents                    ← accent 标题
+  ⠋ 检查 CI 配置 · 42s         ← 每行：accent spinner（80ms 帧）+ muted 文本；1 空格左 padding（对齐 pi string[] widget 形式）
+```
+
+- 仅跟踪后台 agent（前台已 inline 流式，不重复）
+- 完成/停止即移除该行，最后一个结束后 widget 自动清除
+- 与 pi 内置 working 指示器（Loader）同一视觉语言
 
 ## 实现决策
 
 ### 架构
 
-参数校验从 `execute` 中抽出为纯函数 `parseMode()`，返回判别联合类型，`execute` 以此为 switch 进入四个干净分支：print / interactive / battle / close。非交互（PrintRunner）和交互（InteractiveRunner）两种后端直连 dispatch，无抽象 seam。
+```
+index.ts         — 工具注册（Agent / AgentControl）、通知投递、widget 生命周期、清理
+protocol.ts      — 纯函数 JSONL 协议层（serializeCommand / parseLine）
+rpc-client.ts    — 状态化薄 JSONL 客户端（spawn + pending map + 事件流 + 退出）
+agent-process.ts — AgentProcess：一个常驻 rpc 子进程的语义封装
+model.ts         — model spec → resolved model（纯函数）
+render.ts        — TUI 渲染（工具卡 / 通知卡 / 接力卡）
+widget.ts        — Agents 状态 widget
+```
 
-### 通信协议
+### RPC 协议（自写薄客户端，方案 II）
 
-Unix socket + 长度前缀帧。短连接，每轮新连接写一个包即断开。
-协议格式：`[4B big‑endian payload length][payload]`，payload 为 `sessionName\0text`（sessionName 可为空）。
+- 线格式：JSONL（LF 分隔，与 pi 的 jsonl.js 一致）
+- 命令：`prompt` / `steer` / `abort` / `get_last_assistant_text` / `get_state` / `get_session_stats`（带 id 关联）
+- 响应：`{id, type:"response", command, success, data|error}`
+- 事件：`agent_settled` / `agent_end` / `message_update` 等全事件流
+- 不绑定框架 `RpcClient`（私有 + setTimeout 赌就绪 + SIGTERM→SIGKILL 脏点）
 
-### 子模式结果上报
+### 生命周期
 
-子 pi 实例通过环境变量激活子模式。挂钩 `agent_end` + `agent_settled` 两个事件，取最后一条 assistant 消息回传。
-即使无输出也发送空字符串 sentinel，避免父进程 socket 超时。
+```
+queued → running ──→ completed（通知）／ failed（API 错误/崩溃，通知）／ stopped（超限，通知；AgentControl.stop，无通知）
+```
 
-### tmux 生命周期
+- **就绪判定**：prompt 命令 preflight 回执（`success:true`）——两道信号之一；`agent_settled` 为完成信号
+- **前台**：spawnAndSend → waitForCompletion（含 graceful limits 循环）→ lastOutput → stdin.end()（优雅退出）
+- **后台**：spawnAndSend 后立即返回 agent_id；waitForCompletion resolve 后投递通知 → stdin.end() 退出
+- **steer**：写 `steer` 命令（turn 结束后注入，排队语义）；仅 running 期间有效
+- **stop**：stdin.end() 优雅退出，5s 未退 SIGTERM 兜底；`stoppedByControl` 抑制通知
+- **异常**：agent_end `stopReason:"error"` → failed（错误信息进输出）；子进程非零退出 → failed；RPC stdin 关闭竞态（write-after-end）→ 优雅 reject
 
-| | 非交互模式 | 交互模式 |
-|---|---|---|
-| tmux 会话 | 不创建 | `pi-sub-<random>` |
-| pi 调用 | `pi --print --no-session`（spawn） | per‑session launcher 脚本（`pi -n`） |
-| Battle 灌入 | ❌ | 通过临时文件灌入（`load-buffer -t <session> <file>`） |
-| 结果捕获 | stdout 管道（JSON lines 事件流） | Unix socket |
-| 退出清理 | 不适用 | 确认提示（TUI）或静默杀死（headless） |
+### 完成通知
 
-### 工具参数设计
+- `pi.sendMessage({customType:"subagent-notification", content: <JSON>, display:true, details}, {deliverAs:"followUp", triggerTurn:true})`
+- content：`{status, agent_id, result, session_path}`（LLM 一次拿全）
+- details：`{title, result, usage, sessionPath, sessionId}`（卡片渲染，不进 LLM）
+- 一次投递、无重试、无查询工具
 
-三组互斥参数对应三种模式：
-- **print**：`{ task, model?, tools? }`（默认）
-- **interactive**：`{ task, model?, tools?, interactive: true }`
-- **battle**：`{ session, task }`
-- **close**：`{ session, close: true }`
+### Graceful turn limits
 
-`parseMode()` 负责将这组参数分类为判别联合，不依赖调用者手动组合条件。
+- 每轮 settled 后查 `get_session_stats`：≥400k tokens → steer "wrap up"；≥500k tokens 或总时长 ≥600s → `abort` 命令 → 观察 settled → stdin.end() 兜底（三段式）
 
-### Model 解析
+### 会话存储
 
-- 未指定 → 使用父会话模型，不经过 registry。
-- 指定 → 匹配 registry（支持 `provider/name` 或 `name` 简写，大小写不敏感，`.` `:` `_` 等价），找不到则直接报错退出——用户明确指定的模型不可用时不降级。
-- 解析结果在 TUI footer 中展示：`(provider/id) | session | Took X.Xs`。
+- 目录：`<agentDir>/subagent-sessions`（默认 `~/.pi/agent/subagent-sessions/`；`PI_SUBAGENT_SESSION_DIR` 覆盖；尊重 `PI_CODING_AGENT_DIR`）
+- 刻意在 pi 标准会话树之外——`pi -r` 保持干净；主会话（工具卡 + 通知卡携带 session path）作为索引
+- 文件命名与 pi 一致（`{timestamp}_{sessionId}.jsonl`），永不删除
+- `--name` 仅当显式提供 title 时传（否则跟随 pi 默认：firstMessage）
+- attach：`pi --session <path>`（resolveSessionPath 支持文件路径）
 
-### 父级退出时的清理
+### 嵌套
 
-父级退出时自动触发清理。TUI 模式展示活跃会话确认对话框，headless 模式静默杀死。临时目录一并清理。
+子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth；agent_id 用随机 UUID 全局唯一。
 
 ## 开发约束
 
-### 使用原生组件
-所有 UI 渲染使用 pi 的原生组件（`Text`、`Container` 等），不引入第三方 UI 库。
+- 所有 UI 渲染使用 pi 原生组件（`Text`、`Container`、`setWidget`、`registerMessageRenderer`），不引入第三方 UI 库。
+- 参数枚举用 `StringEnum`（Gemini 兼容）。
 
 ## 测试决策
 
-纯函数全面单测（parseMode / resolveModel / 事件流解析 / 协议 framing），基础设施编排（spawn/tmux 进程管理等）不测——它们依赖外部环境且在不注入大量 mock 时不可测。
+- 纯函数全面单测：`protocol.ts`（序列化/解析）、`model.ts`（模型解析）。
+- 状态化语义经 seam 测试：`agent-process.ts` 通过 `createClient` 注入 fake，确定性驱动状态机（完成 / wrap-up / 硬中止 / API 错误 / stop / onDelta）。
+- 基础设施不测：真实 spawn / rpc 传输（依赖外部进程），以 E2E 冒烟验证（`pi -p` 真实调用）。
 
 ## 不在此范围
 
-- **Agent 定义文件**：不定义预设 agent 人格。Agent 由调用者参数完全定义。
-- **Windows 支持**：Unix socket + tmux 仅限 Linux/macOS。
-- **持久化会话**：会话临时，父级退出即清理，不序列化。
-- **守护进程**：子 agent 始终在 pi 进程中运行。
-- **并行聚合**：多 task 由 LLM 多次 tool call 驱动，subagent 不提供 `tasks[]` 聚合参数。
+- **预定义 agent 类型系统**：不定义预设 agent 人格/类型文件；agent 由调用者参数完全定义。
+- **schedule / 定时任务**。
+- **worktree 隔离**。
+- **fleet view / conversation viewer**：不渲染子对话流；attach 走 pi 原生 `--session <path>`。
+- **并发上限 / 排队**：多后台 = 多进程，LLM/用户自负其责。
+- **结果查询工具**：通知一次投递，不做轮询/查询原语。
+- **Windows 支持**：依赖 POSIX 进程与管道语义。
+- **会话删除**：子会话永不删除，供复盘。
 
 ## 其它说明
 
-扩展必须支持子模式自动加载（`~/.pi/agent/extensions/` 或 `pi install`），子 pi 实例启动时自动激活子模式行为。
+- 扩展经 `~/.pi/agent/extensions/` 或 `pi install` 加载；子 pi 实例（嵌套场景）同样加载扩展，天然获得 Agent 工具。
+- headless（`pi -p`）：主 agent 响应结束即进程退出，后台子 agent 经 stdin EOF 被清理（无孤儿）；后台工作流面向常驻 TUI 会话。
