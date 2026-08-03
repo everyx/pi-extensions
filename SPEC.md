@@ -55,7 +55,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 ### 统一视觉语法
 
-`<bold 工具名> + <icon?> + <title> + <muted 括号 meta>` → 1 空行 → `toolOutput body（输入固定全显，输出折叠为尾部）` → 1 空行 → `muted footer`。
+`<bold 工具名> + <icon?> + <title> + <muted 括号 meta>` → 1 空行 → `toolOutput body（prompt 与输出同一流，折叠为尾部预览）` → 1 空行 → `muted footer`。
 
 ### Agent 工具卡片
 
@@ -64,9 +64,7 @@ Agent 检查 CI 配置 (sonnet)
 Thinking...                  ← 活动行（思考中：italic + thinkingText，pi 隐藏 thinking 同款）
 bash: pnpm check             ← 活动行（工具调用：工具名 toolTitle + 冒号 + muted 参数）
 <空行>
-<prompt 全文>            ← 输入（固定全显——bash 命令头同款，不参与折叠）
-<空行>
-... 12 earlier lines (ctrl+o to expand)   ← 折叠提示（muted + keyHint，位于输入与输出之间）
+... 12 earlier lines (ctrl+o to expand)   ← 折叠提示（muted + keyHint；被折叠的是流的头部：prompt + 早期输出）
 <子 agent 输出尾部 5 行>          ← 输出（前台流式逐字滚动；折叠时只显示最新尾部，展开全显）
 <空行>
 Took 27.5s
@@ -75,7 +73,7 @@ session: /path/...jsonl
 
 - header：`Agent`（bold toolTitle）+ title（必填 3-5 词）+ muted meta `(background · model)`——只显示显式参数（run_in_background / model），对齐 bash 的 ` (timeout 10s)`
 - 活动行（widget 对齐，仅前台流式期间）：`Thinking...`（italic + thinkingText）与工具调用（工具名 toolTitle + 参数），数据同 widget 的 `latestActivity`（不进 LLM context）；正文本身已流式，故不重复显示 text 活动
-- body：输入（prompt 全文，固定不折叠）+ 输出（流式，折叠为尾部 5 行——最新输出持续可见，bash 同款折叠，`... N earlier lines (<key> to expand)`）；展开全显；折叠/展开经 keyHint 绑定键切换
+- body：prompt 与输出**同一流**——prompt 在流头、header 的 title 承担固定标识，折叠时整流截为尾部 5 行（`... N earlier lines (<key> to expand)`，N 含被折叠的 prompt 与早期输出）；展开全显（prompt 在顶部随滚动流逝）；折叠/展开经 keyHint 绑定键切换
 - footer：`Took/Elapsed X.Xs`（muted）+ `session: <path>`（前台完成时）
 - 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值（`pi.getThinkingLevel()`），经 `--thinking` 传给子进程
 
@@ -84,7 +82,7 @@ session: /path/...jsonl
 ```
 Agent steer a1b2c3
 <空行>
-<注入的 steer 消息全文>            ← 输入（固定全显，同 Agent 卡）
+<注入的 steer 消息全文>            ← 输入（短消息，同流头）
 <空行>
 <agent 当前输出快照尾部 5 行>      ← 输出（steer 时刻 get_last_assistant_text，details 专用；折叠同 Agent 卡）
 <空行>
@@ -106,7 +104,7 @@ session: /path/...jsonl
 ```
 
 - header：`Agent` + 状态 icon（✓ completed / ✗ failed / ⛔ stopped）+ title + muted meta（usage 并入括号）；状态词仅在失败时显示（`failed` / `stopped`）
-- body：结果预览，同一折叠策略（输出尾部 5 行 + `... N earlier lines (<key> to expand)`；展开全显）
+- body：结果预览，同一流折叠策略（尾部 5 行 + `... N earlier lines (<key> to expand)`；展开全显）
 - footer：session 路径
 - 渲染数据在 `details`，不进 LLM 上下文
 

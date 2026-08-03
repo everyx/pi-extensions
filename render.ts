@@ -175,15 +175,15 @@ function dimOneLiner(text: string | undefined, theme: Theme): Text {
 }
 
 /**
- * Shared output body, mirroring pi's bash card: the input block (prompt /
- * steer message) is always shown in full — it's the card's "command header",
- * like `$ cmd` on the bash card. The output block folds to the last
- * PREVIEW_LINES with an "N earlier lines" hint on top (bash parity); expanded
+ * Shared output body: the prompt and the output are one stream — the prompt
+ * rides at the head and flows away as output grows (terminal-scroll feel;
+ * the header title is the card's fixed identifier). Collapsed folds the
+ * stream to the tail PREVIEW_LINES with an "N earlier lines" hint; expanded
  * shows everything. Returns null when there is nothing to show.
  */
 type BodyComponent = Text | { invalidate: () => void; render: (w: number) => string[] };
 
-/** Output preview line limit when collapsed (bash's PREVIEW_LINES analog). */
+/** Output preview line limit when collapsed. */
 const PREVIEW_LINES = 5;
 
 function renderBody(
@@ -194,42 +194,36 @@ function renderBody(
 ): BodyComponent | null {
 	const inputText = input?.trim();
 	const outputText = output?.trim();
-	if (!inputText && !outputText) return null;
 
-	const styledInput = inputText ? theme.fg("toolOutput", inputText) : "";
-	const outputLines = outputText ? outputText.split("\n") : [];
-	const outputBlock = outputLines.map((l) => theme.fg("toolOutput", l)).join("\n");
+	// One stream: prompt (input) + blank line + output. The prompt is not
+	// pinned — it flows off the top of the fold/scroll once output grows.
+	const parts: string[] = [];
+	if (inputText) parts.push(inputText);
+	if (inputText && outputText) parts.push("");
+	if (outputText) parts.push(outputText);
+	const rawBody = parts.join("\n");
+	if (!rawBody) return null;
+
+	const styledBody = rawBody
+		.split("\n")
+		.map((l) => theme.fg("toolOutput", l))
+		.join("\n");
 
 	if (expanded) {
-		const rows = [""];
-		if (styledInput) rows.push(styledInput, "");
-		if (outputBlock) rows.push(outputBlock);
-		return new Text(rows.join("\n"), 0, 0);
+		// \n prefix gives 1 blank line between header and body (bash parity).
+		return new Text(`\n${styledBody}`, 0, 0);
 	}
-
-	// Collapsed: input in full; output tail preview with the hint on top.
-	const previewLines = outputLines.slice(-PREVIEW_LINES);
-	const hiddenCount = outputLines.length - previewLines.length;
-	const styledPreview = previewLines.map((l) => theme.fg("toolOutput", l)).join("\n");
-	const hint =
-		hiddenCount > 0
-			? `${theme.fg("muted", `... ${hiddenCount} earlier lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
-			: "";
 
 	return {
 		invalidate: () => {},
 		render: (w: number) => {
-			// Input and preview both go through truncateToVisualLines: raw lines
-			// would bypass Text's wrapping and crash the TUI on long input
-			// ("Rendered line N exceeds terminal width").
-			const rows: string[] = [""];
-			if (styledInput) {
-				rows.push(...truncateToVisualLines(styledInput, 1e6, w, 0).visualLines, "");
-			}
-			if (hint) rows.push(hint);
-			const preview = truncateToVisualLines(styledPreview ? `\n${styledPreview}` : "", PREVIEW_LINES, w, 0);
-			rows.push(...preview.visualLines);
-			return rows;
+			// Tail preview of the whole stream — goes through truncateToVisualLines
+			// so long input wraps instead of crashing the TUI with an overflowing
+			// rendered line.
+			const preview = truncateToVisualLines(styledBody, PREVIEW_LINES, w, 0);
+			if (preview.skippedCount === 0) return ["", ...preview.visualLines];
+			const hint = `${theme.fg("muted", `... ${preview.skippedCount} earlier lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+			return ["", hint, ...preview.visualLines];
 		},
 	};
 }
@@ -307,7 +301,9 @@ export interface AgentControlDetails {
  */
 export function renderAgentControlResult(
 	result: { details?: AgentControlDetails; content: { type: string; text?: string }[] },
-	{ expanded, isPartial }: { expanded: boolean; isPartial: boolean },
+	// `expanded` is accepted by the renderer contract but unused here — the
+	// steer card body is a single line and the stop card has no body.
+	{ isPartial }: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
 	context: RenderContext,
 ): Container | Text {
