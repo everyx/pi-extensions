@@ -158,6 +158,8 @@ function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: Age
 		status: completion.status,
 		agent_id: agent.agentId,
 		title: agent.title ?? promptFirstLine(prompt),
+		// Card body (never enters LLM context — verified against convertToLlm).
+		result: completion.output,
 		usage: {
 			tokens: completion.stats.tokens || null,
 			toolUses: completion.stats.toolUses || null,
@@ -225,9 +227,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const startedAt = Date.now();
-			// Session display name: `sub: <title|prompt first line>` — shows up in `pi -r`
-			// so users can tell sub-agent sessions apart from their own.
-			const sessionName = `sub: ${(params.title ?? promptFirstLine(task)).slice(0, 80)}`;
+			// Display label for the widget: title or prompt first line (not a session name —
+			// sub-agent sessions follow pi's default naming like any normal session).
+			const sessionName = (params.title ?? promptFirstLine(task)).slice(0, 80);
 
 			// Foreground: stream assistant deltas into the tool card (live output).
 			let streamed = "";
@@ -412,9 +414,12 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			await agent.steer(message);
+			// TUI relay: capture the agent's current output as the card body snapshot
+			// (one get_last_assistant_text round-trip; details never enter LLM context).
+			const snapshot = await agent.lastOutput().catch(() => "");
 			return {
 				content: [{ type: "text", text: `Steered agent ${params.agent_id}.` }],
-				details: { agentId: agent.agentId },
+				details: { agentId: agent.agentId, action: "steer", message, snapshot },
 			};
 		},
 

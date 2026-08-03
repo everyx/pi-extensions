@@ -68,6 +68,9 @@ export class RpcClient {
 			this.stderr += chunk.toString();
 			options.onStderr?.(chunk.toString());
 		});
+		// Stream errors (e.g. write-after-end during shutdown races) must never
+		// crash the host as unhandled 'error' events — fail pending commands.
+		proc.stdin.on("error", (err) => this.failAll(err));
 		proc.on("error", (err) => this.failAll(err));
 		proc.on("close", (code, signal) => {
 			this.closed = true;
@@ -100,10 +103,12 @@ export class RpcClient {
 
 			this.pending.set(command.id, { resolve, reject, timer });
 			const stdin = this.proc.stdin;
-			if (!stdin) {
+			// Guard against shutdown races: a command written after endInput()
+			// would throw ERR_STREAM_WRITE_AFTER_END (unhandled 'error' crash).
+			if (!stdin || stdin.writableEnded || stdin.destroyed) {
 				clearTimeout(timer);
 				this.pending.delete(command.id);
-				reject(new Error("stdin unavailable (child not spawned)"));
+				reject(new Error(`RPC stdin closed (cannot send "${command.type}")`));
 				return;
 			}
 			stdin.write(serializeCommand(command), (err) => {

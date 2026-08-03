@@ -47,7 +47,8 @@ export interface AgentProcessOptions {
 	tools?: string[];
 	/** Short task title (notification card). */
 	title?: string;
-	/** Session display name (--name) — what `pi -r` shows. Falls back to title. */
+	/** Display label (title ?? prompt first line) — widget rows only, NOT passed as --name.
+	 *  Sub-agent sessions follow pi's default naming (empty name → firstMessage). */
 	sessionName?: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
 	sessionDir?: string;
@@ -77,7 +78,7 @@ export const WRAP_UP_MESSAGE =
 export class AgentProcess {
 	readonly agentId: string = crypto.randomUUID();
 	readonly title: string | undefined;
-	/** Session display name ("sub: <title>"), what the widget and session list show. */
+	/** Session display name ("<title>"), what the widget and session list show. */
 	readonly sessionName: string | undefined;
 	readonly startedAt = Date.now();
 
@@ -96,6 +97,8 @@ export class AgentProcess {
 	private done = false;
 	private wrappedUp = false;
 	private hardAborted = false;
+	/** Model API error captured from agent_end (stopReason "error"). */
+	private agentError: string | null = null;
 
 	sessionPath?: string;
 	sessionId?: string;
@@ -111,8 +114,10 @@ export class AgentProcess {
 		const args: string[] = [];
 		if (options.model) args.push("--model", options.model);
 		if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
-		const displayName = options.sessionName ?? options.title;
-		if (displayName) args.push("--name", displayName);
+		// An explicit title is a deliberate session name (pi supports renaming);
+		// without one the session follows pi's default (firstMessage) like any
+		// normal session — the prompt-first-line fallback is TUI display only.
+		if (options.title) args.push("--name", options.title.slice(0, 80));
 		if (options.sessionDir) args.push("--session-dir", options.sessionDir);
 
 		const clientOptions: RpcClientOptions = {
@@ -253,6 +258,8 @@ export class AgentProcess {
 			// Already stopped externally (AgentControl.stop) — keep it.
 		} else if (this.hardAborted) {
 			this.status = "stopped";
+		} else if (this.agentError) {
+			this.status = "failed";
 		} else if (this.client.exitCode !== null && this.client.exitCode !== 0) {
 			this.status = "failed";
 		} else {
@@ -260,10 +267,11 @@ export class AgentProcess {
 		}
 
 		const output = await this.lastOutput();
+		const finalOutput = this.agentError && !output.trim() ? this.agentError : output;
 		const stats = await this.getStats();
 		return {
 			status: this.status,
-			output,
+			output: finalOutput,
 			stats: {
 				tokens: stats?.tokens ?? 0,
 				toolUses: stats?.toolUses ?? 0,
@@ -307,6 +315,25 @@ export class AgentProcess {
 			const ae = event.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
 			if (ae?.type === "text_delta" && typeof ae.delta === "string") {
 				this.onDelta(ae.delta);
+			}
+			return;
+		}
+		// Capture model API errors: the final assistant message carries
+		// stopReason "error" (rate limit, network, auth…). Without this the
+		// turn settles normally and we'd report an empty success.
+		if (event.type === "agent_end") {
+			const messages = event.messages as
+				| Array<{ role?: string; stopReason?: string; errorMessage?: unknown }>
+				| undefined;
+			if (Array.isArray(messages)) {
+				for (let i = messages.length - 1; i >= 0; i--) {
+					const m = messages[i];
+					if (m?.role === "assistant" && m.stopReason === "error") {
+						this.agentError =
+							typeof m.errorMessage === "string" && m.errorMessage ? m.errorMessage : "Sub-agent model API error";
+						return;
+					}
+				}
 			}
 		}
 	}
