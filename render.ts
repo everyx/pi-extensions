@@ -219,10 +219,15 @@ function renderBody(
 	return {
 		invalidate: () => {},
 		render: (w: number) => {
-			const preview = truncateToVisualLines(styledPreview ? `\n${styledPreview}` : "", PREVIEW_LINES, w, 0);
+			// Input and preview both go through truncateToVisualLines: raw lines
+			// would bypass Text's wrapping and crash the TUI on long input
+			// ("Rendered line N exceeds terminal width").
 			const rows: string[] = [""];
-			if (styledInput) rows.push(styledInput, "");
+			if (styledInput) {
+				rows.push(...truncateToVisualLines(styledInput, 1e6, w, 0).visualLines, "");
+			}
 			if (hint) rows.push(hint);
+			const preview = truncateToVisualLines(styledPreview ? `\n${styledPreview}` : "", PREVIEW_LINES, w, 0);
 			rows.push(...preview.visualLines);
 			return rows;
 		},
