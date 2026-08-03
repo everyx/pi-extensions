@@ -96,19 +96,12 @@ export function activityRow(activity: AgentActivity, theme: Theme, max?: number)
 		return theme.italic(theme.fg("thinkingText", "Thinking..."));
 	}
 	if (activity.kind === "tool") {
-		const tool = splitToolLabel(activity.text);
-		if (tool) {
-			return `${theme.fg("toolTitle", tool.name)}: ${theme.fg("muted", max === undefined ? tool.args : truncateTail(tool.args, max))}`;
-		}
-		return theme.fg("toolTitle", max === undefined ? activity.text : truncateTail(activity.text, max));
+		const args = max === undefined ? activity.args : truncateTail(activity.args, max);
+		return args
+			? `${theme.fg("toolTitle", activity.name)}: ${theme.fg("muted", args)}`
+			: theme.fg("toolTitle", activity.name);
 	}
 	return theme.fg("muted", max === undefined ? activity.text : truncateTail(activity.text, max));
-}
-
-export function splitToolLabel(text: string): { name: string; args: string } | null {
-	const colon = text.indexOf(": ");
-	if (colon <= 0) return null;
-	return { name: text.slice(0, colon), args: text.slice(colon + 2) };
 }
 
 /** Extract a one-line summary of a long string: first line, ellipsis if truncated. */

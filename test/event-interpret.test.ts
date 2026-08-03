@@ -62,7 +62,9 @@ describe("interpretEvent — message_update activity", () => {
 			type: "message_update",
 			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "ls -la", cwd: "/tmp" } }] },
 		};
-		assert.deepEqual(interpretEvent(raw), [{ type: "activity", activity: { kind: "tool", text: "bash: ls -la" } }]);
+		assert.deepEqual(interpretEvent(raw), [
+			{ type: "activity", activity: { kind: "tool", name: "bash", args: "ls -la" } },
+		]);
 	});
 
 	it("summarizes a tool call with JSON when no friendly key exists", () => {
@@ -71,7 +73,7 @@ describe("interpretEvent — message_update activity", () => {
 			message: { content: [{ type: "toolCall", name: "Agent", arguments: { prompt: "do it" } }] },
 		};
 		assert.deepEqual(interpretEvent(raw), [
-			{ type: "activity", activity: { kind: "tool", text: 'Agent: {"prompt":"do it"}' } },
+			{ type: "activity", activity: { kind: "tool", name: "Agent", args: '{"prompt":"do it"}' } },
 		]);
 	});
 
@@ -91,8 +93,9 @@ describe("interpretEvent — message_update activity", () => {
 		const events = interpretEvent(raw);
 		assert.equal(events.length, 1);
 		const ev = events[0] as Extract<AgentEvent, { type: "activity" }>;
-		assert.ok(ev.activity.text.length <= 80 + "bash: ".length + 1, "summary truncated");
-		assert.ok(ev.activity.text.endsWith("\u2026"));
+		const args = ev.activity.kind === "tool" ? ev.activity.args : "";
+		assert.ok(args.length <= 80 + 1, "summary truncated");
+		assert.ok(args.endsWith("\u2026"));
 	});
 
 	it("ignores empty content, blank thinking, and non-content updates", () => {
@@ -112,7 +115,7 @@ describe("interpretEvent — message_update activity", () => {
 			assistantMessageEvent: { type: "text_delta", delta: "checking…" },
 		};
 		assert.deepEqual(interpretEvent(raw), [
-			{ type: "activity", activity: { kind: "tool", text: "read: a.ts" } },
+			{ type: "activity", activity: { kind: "tool", name: "read", args: "a.ts" } },
 			{ type: "text_delta", delta: "checking…" },
 		]);
 	});

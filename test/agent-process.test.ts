@@ -387,7 +387,7 @@ describe("AgentProcess — latest activity", () => {
 			type: "message_update",
 			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "sleep 20" } }] },
 		});
-		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", text: "bash: sleep 20" });
+		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", name: "bash", args: "sleep 20" });
 	});
 
 	it("summarizes tool calls with JSON when no friendly key exists", async () => {
@@ -396,7 +396,7 @@ describe("AgentProcess — latest activity", () => {
 			type: "message_update",
 			message: { content: [{ type: "toolCall", name: "custom_tool", arguments: { foo: 1 } }] },
 		});
-		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", text: 'custom_tool: {"foo":1}' });
+		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", name: "custom_tool", args: '{"foo":1}' });
 	});
 
 	it("returns null before any message_update", async () => {
@@ -423,7 +423,7 @@ describe("AgentProcess — latest activity", () => {
 
 		assert.deepEqual(events, [
 			{ kind: "thinking", text: "analyzing…" },
-			{ kind: "tool", text: "bash: ls" },
+			{ kind: "tool", name: "bash", args: "ls" },
 		]);
 	});
 
@@ -445,8 +445,8 @@ describe("AgentProcess — latest activity", () => {
 		});
 
 		assert.deepEqual(events, [
-			{ kind: "tool", text: "read: a.ts" },
-			{ kind: "tool", text: "read: b.ts" },
+			{ kind: "tool", name: "read", args: "a.ts" },
+			{ kind: "tool", name: "read", args: "b.ts" },
 		]);
 	});
 });

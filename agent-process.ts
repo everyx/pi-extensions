@@ -28,13 +28,17 @@ export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopp
 export type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
 
 /** Latest activity for the widget excerpt line (never enters LLM context). */
-export type AgentActivityKind = "text" | "thinking" | "tool";
+export type AgentActivityKind = "thinking" | "text" | "tool";
 
-export interface AgentActivity {
-	kind: AgentActivityKind;
-	/** For tool: "<name>: <args summary>". For text/thinking: the raw text. */
-	text: string;
-}
+/**
+ * Latest activity for the widget excerpt line (never enters LLM context).
+ * Tool calls carry structured name/args — the label format lives in the
+ * producer (event-interpret.ts), consumers render without re-parsing.
+ */
+export type AgentActivity =
+	| { kind: "thinking"; text: string }
+	| { kind: "text"; text: string }
+	| { kind: "tool"; name: string; args: string };
 
 export interface AgentStats {
 	tokens: number;
@@ -348,7 +352,8 @@ export class AgentProcess {
 					this.latestActivity = ev.activity;
 					// Thinking/tool transitions carry no text deltas — the card would
 					// never refresh without this push (text keeps streaming via onDelta).
-					const key = `${ev.activity.kind}\u0000${ev.activity.text}`;
+					const label = ev.activity.kind === "tool" ? `${ev.activity.name}: ${ev.activity.args}` : ev.activity.text;
+					const key = `${ev.activity.kind}\u0000${label}`;
 					if (ev.activity.kind !== "text" && key !== this.lastNotifiedActivityKey) {
 						this.lastNotifiedActivityKey = key;
 						this.onActivityChange?.(ev.activity);
