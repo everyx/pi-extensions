@@ -20,8 +20,12 @@ export type AgentEvent =
 	| { type: "text_delta"; delta: string }
 	| { type: "agent_failed"; error: string };
 
-/** Build a "<name>: <args summary>" label for a tool call (widget excerpt). */
-function summarizeToolCall(name: string, args: unknown): string {
+/**
+ * Summarize tool-call arguments into a one-line excerpt: the friendly arg
+ * key when the tool has one (bash→command, read/write/edit→path,
+ * grep/find→pattern), otherwise the JSON with a truncated tail.
+ */
+function summarizeArgs(name: string, args: unknown): string {
 	if (args && typeof args === "object") {
 		const a = args as Record<string, unknown>;
 		const key =
@@ -32,11 +36,11 @@ function summarizeToolCall(name: string, args: unknown): string {
 					: name === "grep" || name === "find"
 						? "pattern"
 						: undefined;
-		if (key && typeof a[key] === "string" && a[key]) return `${name}: ${a[key]}`;
+		if (key && typeof a[key] === "string" && a[key]) return a[key];
 		const json = JSON.stringify(a);
-		return json.length > 80 ? `${name}: ${json.slice(0, 80)}\u2026` : `${name}: ${json}`;
+		return json.length > 80 ? `${json.slice(0, 80)}\u2026` : json;
 	}
-	return name;
+	return "";
 }
 
 /**
@@ -68,7 +72,7 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 			} else if (last?.type === "toolCall" && typeof last.name === "string") {
 				events.push({
 					type: "activity",
-					activity: { kind: "tool", text: summarizeToolCall(last.name, last.arguments) },
+					activity: { kind: "tool", name: last.name, args: summarizeArgs(last.name, last.arguments) },
 				});
 			}
 		}
