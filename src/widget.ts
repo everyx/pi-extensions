@@ -2,13 +2,15 @@
  * pi-subagent — AgentWidget.
  *
  * Persistent above-editor widget showing one status line per *background*
- * agent: `⠋ <title> · 42s`. Foreground agents are intentionally
- * excluded — their live output already streams inline in the tool card
- * (mirrors tintinweb's default widget mode, which hides foreground runs).
+ * agent: `⠋ <title> · 42.0s`, plus a latest-activity excerpt line aligned
+ * under the title (tool call / Thinking... / text tail). Foreground agents
+ * are intentionally excluded — their live output already streams inline in
+ * the tool card (mirrors tintinweb's default widget mode, which hides
+ * foreground runs).
  *
- * Status-only by design: no output preview, no navigation, no conversation
- * rendering. Full content arrives via the completion notification and
- * `pi --session <path>` review afterwards.
+ * Status-only by design: no full output stream, no navigation, no
+ * conversation rendering. Full content arrives via the completion
+ * notification and `pi --session <path>` review afterwards.
  *
  * Visual + animation follow pi's built-in working indicator (Loader):
  * same Braille frames, 80ms interval, accent spinner + muted message.
@@ -16,6 +18,7 @@
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity, AgentProcess } from "./agent-process.js";
+import { formatDuration } from "./render.js";
 
 // Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
 const SPINNER = ["\u281b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
@@ -38,13 +41,6 @@ function truncateTail(s: string): string {
 interface WidgetRow {
 	agent: AgentProcess;
 	frame: number;
-}
-
-function formatElapsed(ms: number): string {
-	const s = Math.floor(ms / 1000);
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	return `${m}m ${s % 60}s`;
 }
 
 interface WidgetRender {
@@ -142,7 +138,7 @@ export class AgentWidget {
 			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
 			// Task label — same as the session display name (no prefix).
 			const name = agent.title ?? agent.sessionName ?? `sub-agent ${agent.agentId.slice(0, 8)}`;
-			const elapsed = formatElapsed(Date.now() - agent.startedAt);
+			const elapsed = formatDuration(Date.now() - agent.startedAt);
 			lines.push(` ${spinner} ${theme.fg("muted", `${name} \u00b7 ${elapsed}`)}`);
 
 			const activity = agent.getLatestActivity();

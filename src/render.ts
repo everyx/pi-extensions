@@ -64,23 +64,8 @@ interface RenderContext {
 	toolCallId?: string;
 }
 
-// ─── Bridging execute() → context.state ───────────────────────
-//
-// pi doesn't expose context.state to execute(), but renderCall does
-// have access.  We save the reference here so execute can write
-// resolved model BEFORE the first onUpdate triggers renderCall.
-
-const _stateRef = new Map<string, TimerState>();
-
-export function getState(toolCallId: string): TimerState | undefined {
-	return _stateRef.get(toolCallId);
-}
-
-export function releaseState(toolCallId: string): void {
-	_stateRef.delete(toolCallId);
-}
-
-function formatDuration(ms: number): string {
+/** Seconds with one decimal — shared by cards and the Agents widget. */
+export function formatDuration(ms: number): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
@@ -103,9 +88,6 @@ function buildMetaSuffix(state: TimerState, args: AgentParams, theme: Theme): st
 // ── Render call (tool header) ──────────────────────────────────
 
 export function renderAgentCall(args: AgentParams, theme: Theme, context: RenderContext): Text {
-	if (context.toolCallId) {
-		_stateRef.set(context.toolCallId, context.state);
-	}
 	if (context.executionStarted && context.state.startedAt === undefined) {
 		context.state.startedAt = Date.now();
 		context.state.endedAt = undefined;
@@ -126,6 +108,38 @@ export function renderAgentControlCall(args: AgentControlParams, theme: Theme): 
 
 // ── Render result (output body) ────────────────────────────────
 
+/** Dim one-liner for background-start/control acks and bare errors. */
+function dimOneLiner(text: string | undefined, theme: Theme): Text {
+	if (!text) return new Text("", 0, 0);
+	return new Text(theme.fg("dim", text), 0, 0);
+}
+
+/**
+ * Shared output body: colored toolOutput lines, collapsed to 5 lines with
+ * an expand hint (bash-style), or full when expanded. Returns null when
+ * there is nothing to show.
+ */
+type BodyComponent = Text | { invalidate: () => void; render: (w: number) => string[] };
+
+function renderBody(bodyParts: string[], expanded: boolean, theme: Theme): BodyComponent | null {
+	const rawBody = bodyParts.filter((p) => p).join("\n");
+	if (!rawBody) return null;
+	const bodyContent = rawBody
+		.split("\n")
+		.map((l) => theme.fg("toolOutput", l))
+		.join("\n");
+	if (expanded) return new Text(`\n${bodyContent}`, 0, 0);
+	return {
+		invalidate: () => {},
+		render: (w: number) => {
+			const preview = truncateToVisualLines(bodyContent, 5, w, 0);
+			if (preview.skippedCount === 0) return ["", ...preview.visualLines];
+			const hint = `${theme.fg("muted", `... ${preview.skippedCount} more lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+			return ["", hint, ...preview.visualLines];
+		},
+	};
+}
+
 export function renderAgentResult(
 	result: { details?: SubagentDetails; content: { type: string; text?: string }[] },
 	{ expanded, isPartial }: { expanded: boolean; isPartial: boolean },
@@ -133,20 +147,10 @@ export function renderAgentResult(
 	context: RenderContext,
 ): Container | Text {
 	const details = result.details;
+	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
-	// Background start / control ack — dim one-liner.
-	if (details?.agentId && !details.task) {
-		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-		if (!text) return new Text("", 0, 0);
-		return new Text(theme.fg("dim", text), 0, 0);
-	}
-
-	// Bare error — dim text.
-	if (!details?.task) {
-		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-		if (!text) return new Text("", 0, 0);
-		return new Text(theme.fg("dim", text), 0, 0);
-	}
+	// Background start / control ack / bare error — dim one-liner.
+	if (!details?.task) return dimOneLiner(text, theme);
 
 	const state = context.state;
 	if (details?.startedAt !== undefined && state.startedAt === undefined) {
@@ -165,33 +169,15 @@ export function renderAgentResult(
 
 	const cmp = new Container();
 	const promptText = details.task.trim();
-	const output = result.content[0]?.type === "text" ? (result.content[0].text?.trim() ?? "") : "";
+	const output = text?.trim() ?? "";
 
+	// Body: prompt (input) + blank line + final output.
 	const bodyParts: string[] = [];
 	if (promptText) bodyParts.push(promptText);
 	if (promptText && output) bodyParts.push("");
 	if (output) bodyParts.push(output);
-	const rawBody = bodyParts.join("\n");
-	const bodyContent = rawBody
-		?.split("\n")
-		.map((l) => theme.fg("toolOutput", l))
-		.join("\n");
-
-	if (bodyContent) {
-		if (expanded) {
-			cmp.addChild(new Text(`\n${bodyContent}`, 0, 0));
-		} else {
-			cmp.addChild({
-				invalidate: () => {},
-				render: (w: number) => {
-					const preview = truncateToVisualLines(bodyContent, 5, w, 0);
-					if (preview.skippedCount === 0) return ["", ...preview.visualLines];
-					const hint = `${theme.fg("muted", `... ${preview.skippedCount} more lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-					return ["", hint, ...preview.visualLines];
-				},
-			});
-		}
-	}
+	const body = renderBody(bodyParts, expanded, theme);
+	if (body) cmp.addChild(body);
 
 	if (state.startedAt !== undefined) {
 		const label = isPartial ? "Elapsed" : "Took";
@@ -240,27 +226,8 @@ export function renderAgentControlResult(
 			bodyParts.push("");
 			bodyParts.push(d.snapshot.trim());
 		}
-		const rawBody = bodyParts.join("\n");
-		const bodyContent = rawBody
-			?.split("\n")
-			.map((l) => theme.fg("toolOutput", l))
-			.join("\n");
-
-		if (bodyContent) {
-			if (expanded) {
-				cmp.addChild(new Text(`\n${bodyContent}`, 0, 0));
-			} else {
-				cmp.addChild({
-					invalidate: () => {},
-					render: (w: number) => {
-						const preview = truncateToVisualLines(bodyContent, 5, w, 0);
-						if (preview.skippedCount === 0) return ["", ...preview.visualLines];
-						const hint = `${theme.fg("muted", `... ${preview.skippedCount} more lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-						return ["", hint, ...preview.visualLines];
-					},
-				});
-			}
-		}
+		const body = renderBody(bodyParts, expanded, theme);
+		if (body) cmp.addChild(body);
 
 		// Footer: confirmation, muted.
 		if (text) {
@@ -270,8 +237,7 @@ export function renderAgentControlResult(
 	}
 
 	// stop / errors — dim one-liner.
-	if (!text) return new Text("", 0, 0);
-	return new Text(theme.fg("dim", text), 0, 0);
+	return dimOneLiner(text, theme);
 }
 
 // ── Notification card (registerMessageRenderer) ────────────────
