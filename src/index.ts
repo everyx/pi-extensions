@@ -88,11 +88,13 @@ const AgentParamsSchema = Type.Object({
 			"zero context from this conversation. Include file paths, constraints, and the " +
 			"desired output shape.",
 	}),
-	title: Type.String({
-		description:
-			"Short task title (3-5 words) — required. Identifies the agent in the UI, " +
-			"notification card, and session name.",
-	}),
+	description: Type.Optional(
+		Type.String({
+			description:
+				"Short task title (3-5 words) shown in notifications and UI. Optional — if " +
+				"omitted, the renderer extracts a title from the prompt.",
+		}),
+	),
 	model: Type.Optional(
 		Type.String({
 			description:
@@ -143,12 +145,19 @@ function toErrorResult(err: unknown): {
 	};
 }
 
+/** First non-empty line of a prompt — title fallback for notifications. */
+function promptFirstLine(prompt: string): string {
+	const trimmed = prompt.trim();
+	const idx = trimmed.indexOf("\n");
+	return idx < 0 ? trimmed : trimmed.slice(0, idx);
+}
+
 /** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
-function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: AgentCompletion): void {
+function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: AgentCompletion, prompt: string): void {
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,
-		title: agent.title ?? "sub-agent",
+		title: agent.title ?? promptFirstLine(prompt),
 		// Card body (never enters LLM context — verified against convertToLlm).
 		result: completion.output,
 		usage: {
@@ -218,8 +227,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const startedAt = Date.now();
-			// Widget label: the (required) title, truncated defensively.
-			const sessionName = params.title.slice(0, 80);
+			// Session display name: `sub: <title|prompt first line>` — shows up in `pi -r`
+			// so users can tell sub-agent sessions apart from their own.
+			const sessionName = `sub: ${(params.title ?? promptFirstLine(task)).slice(0, 80)}`;
 
 			// Foreground: stream assistant deltas into the tool card (live output).
 			let streamed = "";
@@ -270,7 +280,7 @@ export default function (pi: ExtensionAPI) {
 						.waitForCompletion()
 						.then(async (completion) => {
 							// AgentControl.stop is a deliberate user action — no notification.
-							if (!agent.stoppedByControl) await notifyCompletion(pi, agent, completion);
+							if (!agent.stoppedByControl) await notifyCompletion(pi, agent, completion, params.prompt);
 							w?.remove(agent.agentId);
 							unregisterAgent(agent.agentId);
 							return agent.stop();

@@ -37,7 +37,7 @@ Restart pi and just tell it "ask a sub‑agent to…".
 
 Two primitive tools:
 
-- **`Agent`** — spawn an isolated sub‑agent: `{ prompt, title, model?, tools?, run_in_background? }`. `title` (3‑5 words, required) labels the tool header, notification card, widget row, and session name — like Claude Code's `description` / Codex's `task_name`. Foreground (default) blocks until the result is ready; `run_in_background: true` returns an `agent_id` immediately and delivers a completion notification carrying the final output.
+- **`Agent`** — spawn an isolated sub‑agent: `{ prompt, title?, model?, tools?, run_in_background? }`. `title` (3‑5 words) labels the notification card and tool header — omit it and the first line of the prompt is used. Foreground (default) blocks until the result is ready; `run_in_background: true` returns an `agent_id` immediately and delivers a completion notification carrying the final output.
 - **`AgentControl`** — intervene in a running background agent: `steer` (inject a redirecting message) or `stop` (terminate).
 
 The LLM is guided by `promptSnippet` + `promptGuidelines` (system-prompt injection): when to delegate, to keep prompts self-contained, to never poll, and to verify a sub‑agent's actual changes before reporting done.
@@ -110,7 +110,6 @@ Sub‑agents are full pi instances and therefore spawn sub‑agents of their own
 
 ## Costs & caveats
 
-- **Headless (`pi -p`) background agents die with the host.** The main process exits when the agent finishes its response — background children are then torn down via stdin EOF (they never leak as orphans). Background workflows (wait for notification, steer, stop) are designed for the TUI session, which stays alive.
 - **One process per agent.** Foreground and background are identical (resident rpc child). Many background agents = many processes — spawn them in moderation.
 - **Notification is one-shot.** A background result is delivered once; if the main session dies before delivery, the result survives only in the session file (attach it with `pi --session <id>`).
 - **Steer needs a live agent.** `AgentControl` only works while the agent is still running, before its completion notification.

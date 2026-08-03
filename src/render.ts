@@ -19,8 +19,8 @@ import { Container, Text } from "@earendil-works/pi-tui";
 
 export interface AgentParams {
 	prompt: string;
-	/** Required 3-5 word task label — header/notification title and session name. */
-	title: string;
+	/** Optional 3-5 word task title — primary header/notification title, prompt first line as fallback. */
+	title?: string;
 	model?: string;
 	tools?: string[];
 	run_in_background?: boolean;
@@ -84,10 +84,12 @@ function formatDuration(ms: number): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** Extract a one-line summary of a long string: first line, ellipsis if truncated. */
-function firstLine(s: string): string {
+/** Extract a one‑line prompt summary: the first line, with an ellipsis if truncated. */
+function promptSummary(s?: string): string {
+	if (!s) return "";
 	const idx = s.indexOf("\n");
-	return idx < 0 ? s : `${s.slice(0, idx)}\u2026`;
+	if (idx < 0) return s;
+	return `${s.slice(0, idx)}\u2026`;
 }
 
 /** Muted metadata suffix, mirroring bash's ` (timeout 10s)` pattern. */
@@ -111,7 +113,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 		context.state.endedAt = undefined;
 	}
 
-	const title = args.title.trim() || firstLine(args.prompt);
+	const title = args.title?.trim() || promptSummary(args.prompt);
 	return new Text(
 		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", title)}${buildMetaSuffix(context.state, args, theme)}`,
 		0,

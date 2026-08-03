@@ -19,7 +19,7 @@ class FakeClient {
 	killCalls = 0;
 	exitCode: number | null = null;
 	isClosed = false;
-	/** argv captured at construction (--model/--tools/--session-dir). */
+	/** argv captured at construction (--model/--tools/--name/--session-dir). */
 	args: string[] = [];
 
 	private onEvent?: (event: { type: string }) => void;
@@ -38,6 +38,8 @@ class FakeClient {
 	/** sessionFile/sessionId returned by get_state. */
 	sessionFile = "/tmp/fake.jsonl";
 	sessionId = "sess-1";
+	/** Entries returned by get_entries (drives sessionSummary). */
+	entries: Array<{ type: string; summary?: string }> = [];
 
 	constructor(options: RpcClientOptions) {
 		this.onEvent = options.onEvent;
@@ -67,6 +69,14 @@ class FakeClient {
 					command: "get_session_stats",
 					success: true,
 					data: { tokens: { total: this.stats.tokens }, toolCalls: this.stats.toolCalls },
+				};
+			case "get_entries":
+				return {
+					id: command.id,
+					type: "response",
+					command: "get_entries",
+					success: true,
+					data: { entries: this.entries, leafId: null },
 				};
 			case "get_last_assistant_text":
 				return {
@@ -155,13 +165,13 @@ describe("AgentProcess — spawnAndSend", () => {
 		assert.equal(agent.status, "failed");
 	});
 
-	it("passes model/tools/sessionDir through and sets --name when title is given", () => {
+	it("passes model/tools/title/sessionDir through to the client argv", () => {
 		const { fake } = makeAgent({
 			cwd: "/tmp",
 			model: "google/gemini-x",
 			tools: ["read", "grep"],
 			title: "explore",
-			sessionName: "explore",
+			sessionName: "sub: explore",
 			sessionDir: "/home/u/.pi/agent/subagent-sessions",
 		});
 		assert.deepEqual(fake.args, [
@@ -170,19 +180,10 @@ describe("AgentProcess — spawnAndSend", () => {
 			"--tools",
 			"read,grep",
 			"--name",
-			"explore",
+			"sub: explore",
 			"--session-dir",
 			"/home/u/.pi/agent/subagent-sessions",
 		]);
-	});
-
-	it("omits --name when no title is given (pi default firstMessage)", () => {
-		const { fake } = makeAgent({
-			cwd: "/tmp",
-			model: "google/gemini-x",
-			sessionDir: "/home/u/.pi/agent/subagent-sessions",
-		});
-		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--session-dir", "/home/u/.pi/agent/subagent-sessions"]);
 	});
 });
 
@@ -240,6 +241,35 @@ describe("AgentProcess — waitForCompletion", () => {
 
 		const completion = await completionPromise;
 		assert.equal(completion.status, "failed");
+	});
+});
+
+describe("AgentProcess — sessionSummary", () => {
+	it("returns the latest summary entry regardless of type", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.entries = [
+			{ type: "message" },
+			{ type: "compaction", summary: "older compaction" },
+			{ type: "branch_summary", summary: "abandoned path summary" },
+		];
+		assert.equal(await agent.sessionSummary(), "abandoned path summary");
+	});
+
+	it("falls back to a compaction summary when no branch_summary exists", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.entries = [{ type: "message" }, { type: "compaction", summary: "compacted context" }];
+		assert.equal(await agent.sessionSummary(), "compacted context");
+	});
+
+	it("returns null when no summary entry exists", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.entries = [{ type: "message" }];
+		assert.equal(await agent.sessionSummary(), null);
+	});
+
+	it("returns null when entries are empty or transport fails", async () => {
+		const { agent } = makeAgent({ cwd: "/tmp" });
+		assert.equal(await agent.sessionSummary(), null);
 	});
 });
 
