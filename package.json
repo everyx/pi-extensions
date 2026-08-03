@@ -1,7 +1,7 @@
 {
 	"name": "@everyx/pi-subagent",
 	"version": "0.0.0-development",
-	"description": "Sub‑agent tool for pi – delegate tasks to isolated pi instances via tmux",
+	"description": "Sub-agent tool for pi – delegate tasks to isolated pi instances (resident rpc children)",
 	"keywords": [
 		"pi-package"
 	],
@@ -36,6 +36,7 @@
 		]
 	},
 	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
 		"@earendil-works/pi-coding-agent": "*",
 		"@earendil-works/pi-tui": "*",
 		"typebox": "*"

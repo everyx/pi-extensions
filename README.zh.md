@@ -2,19 +2,18 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-让 pi 能派生子 agent，在隔离上下文里跑任务，结果流回主会话。
+从 pi 启动隔离的 sub-agent。每个 sub-agent 都是一个完整 pi 实例、拥有独立上下文——主对话保持干净。
 
 ```
-用户：帮我研究一下这个项目的数据库设计，总结表结构
-  → pi 调 subagent 派子 agent 去做
-  → 结果回来，继续往下聊
+你： 调研一下这个项目的数据库 schema
+  → pi 调用 Agent，spawn 一个常驻的 `pi --mode rpc` 子进程
+  → 子 agent 在独立上下文窗口里独立工作
+  → 结果返回；你继续聊天
 ```
 
-## 为什么需要这个？
+## 为什么需要它？
 
-pi 不内置子 agent。遇到复杂问题你想分拆给多个 agent 并行探索，或者让一个 agent 做耗时研究不阻塞主对话——这时候就要 `subagent`。
-
-> 目前只支持 Linux/macOS（依赖 Unix socket + tmux）。
+Pi 没有内置 sub-agent。当一个任务会产生大量中间输出（搜索结果、日志、测试输出）污染你的上下文，或者你想并行跑独立任务而不阻塞主对话时——这就是本扩展的用武之地。
 
 ## 安装
 
@@ -26,98 +25,110 @@ pi install npm:@everyx/pi-subagent
 pi install git:github.com/everyx/pi-subagent
 ```
 
-或者手动 symlink（开发用）：
+开发期软链接：
 
 ```bash
 ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 ```
 
-装好后重启 pi，直接跟它说"让子 agent 做 X"就行了。
+重启 pi 后直接说"让子 agent 去…"。
 
-## 场景
+## 工具
 
-### 让子 agent 跑个任务
+两个最小原语：
 
-跟 pi 说：
+- **`Agent`** — spawn 一个隔离的 sub-agent。前台（默认）阻塞到结果就绪；`run_in_background: true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。
+- **`AgentControl`** — 干预运行中的后台 agent：`steer`（注入重定向消息）或 `stop`（终止）。
 
-```
-让子 agent 分析一下 src/ 下的认证逻辑
-```
+LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使用指南：何时委派、prompt 必须自包含、绝不轮询、汇报前验证子 agent 的实际改动。
 
-pi 会调 `subagent` 起一个隔离的子 agent 去做，结果回来之后你可以继续问。
+## 用法
 
-### 同时跑多个
+### 发起一个任务
 
-```
-派三个子 agent，分别分析认证模块、数据库层和 API 路由
-```
-
-pi 会并行启动三个子 agent，结果聚合到一起返回。
-
-### 跑个交互式的，盯着它干
+对 pi 说：
 
 ```
-启动一个交互式子 agent，重构数据层用 repository 模式，我要看着它干
+让一个子 agent 分析 src/ 下的认证逻辑
 ```
 
-pi 会创建一个 tmux 会话，结果里会返回 session 名（比如 `pi-sub-a1b2c`），你可以 attach：
+Pi 调用 `Agent`（前台），子 agent 隔离运行，结果返回。
 
-```bash
-tmux attach -t pi-sub-a1b2c
-```
-
-Detach（Ctrl+B D）后子 agent 继续跑，结果自动回来。
-
-### 对正在干的 agent 追加指令
+### 后台并行跑多个
 
 ```
-之前那个数据层的子 agent，那个方案不行，改用组合模式重写
+同时起三个子 agent 分别看 auth 模块、数据库层和 API 路由
 ```
 
-新指令会粘贴到子 agent 的编辑器里，它继续干活，结果回来。
+Pi 调用三次 `Agent`（`run_in_background: true`）。每个完成通知携带对应 agent 的最终输出——无需轮询、无需额外的取结果工具。
 
-### 关闭一个会话
+### 干预运行中的 agent
 
 ```
-把 pi-sub-a1b2c 关掉
+那个数据层子 agent——方案行不通，改用组合式重写
 ```
 
-## 两种运行模式
+Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失控的 agent："干掉那个后台子 agent" → `stop`。
 
-| | 非交互 | 交互 |
-|---|---|---|
-| 怎么跑 | `pi --print --no-session`，零开销 | tmux 里起完整 pi 会话 |
-| 能不能盯着看 | ❌ | ✅ `tmux attach -t pi-sub-xxx` |
-| 能不能追加指令 | ❌ | ✅ |
-| 适用场景 | 简单查询、一次性任务 | 复杂重构、探索性分析 |
-
-非交互是默认的，又快又轻。需要人盯着或者来回迭代时才用交互模式。
-
-## 进阶玩法
+## 进阶
 
 ### 指定模型
 
-你可以让子 agent 用不同的模型：
-
 ```
-派个子 agent，用 claude-sonnet 分析数据库设计
+用 claude-sonnet 起一个子 agent 分析数据库设计
 ```
 
-不指定模型 → 沿用主会话的模型。
-指定了但 registry 里找不到 → 降级到主模型，给你个 warning。
+不指定模型 → 继承当前会话模型。指定但注册表中找不到 → 报错，不静默降级。
 
 ### 限制工具
 
 ```
-让子 agent 只准用 bash 和 read，研究一下项目结构
+让子 agent 调研项目结构，但只允许用 read 和 grep
 ```
 
-子 agent 就看不到其他工具了。
+子 agent 看不到其他任何工具。只读探索 + 便宜模型是调研任务的推荐模式。
 
-## 退出清理
+## 工作原理
 
-退出 pi 时如果有子 agent 还在跑：
-- **TUI 模式**：弹框问你要不要杀掉
-- **Headless 模式**：静默清理
+每个 sub-agent 都是带持久化 session 的常驻 `pi --mode rpc` 子进程：
 
-也可以提前跟 pi 说"把那个子 agent 关掉"。
+- **前台** — `Agent` 等待子进程 settled，取最终输出，然后关闭 stdin（优雅退出）。
+- **后台** — `Agent` 立即返回；`agent_settled` 时扩展投递 `subagent-notification`（JSON 内容给 LLM、渲染卡片给用户），子进程优雅退出。
+- **Steer/stop** — `AgentControl` 向子进程 stdin 写 `steer`/`abort` 命令（`stop` 则关闭 stdin）。
+- **Attach** — session 持久化在 `~/.pi/agent/sessions/`，**永不删除**。可在另一终端 `pi --session <id>` 或 `pi -r` 选择查看。通知卡片显示 session 路径。
+- **Graceful turn limits** — 每轮 settled 后检查 token 用量：超过 wrap-up 阈值时 steer "尽快总结"消息；超过硬限制（或总超时）时 abort → 等 settled → 优雅退出。不会因突然 SIGTERM 截断输出。
+
+## 嵌套 sub-agent
+
+Sub-agent 是完整 pi 实例，若你全局安装了本扩展，它天然能再 spawn sub-agent——嵌套开箱即用，不做深度控制。每一层都是独立进程、独立上下文，嵌套深度会倍增启动时间和 token 成本。是否值得嵌套由你（或模型）判断。
+
+## 成本与注意
+
+- **一 agent 一进程。** 前台和后台都是常驻 rpc 子进程。后台开多了 = 进程开多了——请节制。
+- **通知一次性投递。** 后台结果只投递一次；若投递前主会话崩溃，结果只存在于 session 文件（用 `pi --session <id>` attach 恢复）。
+- **Steer 需要活的 agent。** `AgentControl` 只在 agent 运行中（完成通知之前）有效。
+
+## 清理
+
+pi 退出时，运行中的 sub-agent 收到优雅的 stdin-EOF 关闭。session 保留在磁盘供 attach/复盘；不 kill、不删除。
+
+## 开发
+
+```bash
+pnpm install
+pnpm check      # biome
+pnpm typecheck  # tsc --noEmit
+pnpm test       # node:test
+```
+
+结构：
+
+```
+src/
+  index.ts         — 工具注册（Agent / AgentControl）、通知、清理
+  protocol.ts      — 纯函数 JSONL 协议层（单测）
+  rpc-client.ts    — 状态化薄 JSONL 客户端（spawn + 传输）
+  agent-process.ts — AgentProcess：常驻 rpc 子进程语义封装（经 seam 测试）
+  model.ts         — 模型解析（测试）
+  render.ts        — TUI 渲染 + 通知卡片渲染器
+```

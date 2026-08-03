@@ -1,24 +1,44 @@
 /**
  * pi-subagent — TUI rendering helpers.
  *
- * `renderCall` and `renderResult` are pure rendering functions:
- * they don't mutate state or call back into the tool.
+ * `renderCall` / `renderResult` are pure rendering functions for the two
+ * tools (Agent / AgentControl); they don't mutate state or call back into
+ * the tool. Timer behaviour mirrors pi's built-in bash tool.
  *
- * Timer behaviour mirrors pi's built-in bash tool:
- *   - renderCall records startedAt when execution starts
- *   - renderResult shows "Elapsed X.Xs" during execution (isPartial = true)
- *     with 1s refresh interval, then "Took X.Xs" on completion
+ * `renderNotification` renders the `subagent-notification` custom message
+ * (registered via `pi.registerMessageRenderer`) into a themed card for the
+ * user. The LLM sees only the JSON `content`; `details` never enter context
+ * (verified against `convertToLlm` in pi's dist/core/messages.js).
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
-import type { SubagentParams } from "./modes.js";
+
+// ─── Tool params ───────────────────────────────────────────
+
+export interface AgentParams {
+	prompt: string;
+	description?: string;
+	model?: string;
+	tools?: string[];
+	run_in_background?: boolean;
+}
+
+export interface AgentControlParams {
+	agent_id: string;
+	/** Rendered as-is; execute() validates the literal at runtime (schema is StringEnum). */
+	action: string;
+	message?: string;
+}
 
 // ─── Tool details (returned to pi's details: T) ────────────────
 
 export interface SubagentDetails {
 	task?: string;
+	agentId?: string;
+	model?: string;
+	runInBackground?: boolean;
 	startedAt?: number;
 	endedAt?: number;
 }
@@ -30,7 +50,6 @@ interface TimerState {
 	endedAt?: number;
 	interval?: ReturnType<typeof setInterval>;
 	model?: string;
-	sessionName?: string;
 }
 
 // ─── Render context (from pi framework) ────────────────────────
@@ -47,7 +66,7 @@ interface RenderContext {
 //
 // pi doesn't expose context.state to execute(), but renderCall does
 // have access.  We save the reference here so execute can write
-// resolved model/session BEFORE the first onUpdate triggers renderCall.
+// resolved model BEFORE the first onUpdate triggers renderCall.
 
 const _stateRef = new Map<string, TimerState>();
 
@@ -71,95 +90,74 @@ function promptSummary(s?: string): string {
 	return `${s.slice(0, idx)}\u2026`;
 }
 
-/** Build the muted metadata suffix for the header, matching bash's ` (timeout 10s)` pattern.
- *
- * Reads resolved state (written by execute() via getState bridge),
- * falls back to raw args for the collapsed preview before execution starts.
- */
-function buildMetaSuffix(state: TimerState, args: SubagentParams, theme: Theme): string {
+/** Muted metadata suffix, mirroring bash's ` (timeout 10s)` pattern. */
+function buildMetaSuffix(state: TimerState, args: AgentParams, theme: Theme): string {
 	const parts: string[] = [];
+	if (args.run_in_background) parts.push("background");
 	const model = state.model ?? args.model;
 	if (model) parts.push(model);
-	const session = state.sessionName ?? args.session;
-	if (session) parts.push(session);
+	const desc = args.description;
+	if (desc) parts.push(desc);
 	if (parts.length === 0) return "";
-	const joined = parts.join(" | ");
-	return theme.fg("muted", ` (${joined})`);
+	return theme.fg("muted", ` (${parts.join(" | ")})`);
 }
 
 // ── Render call (tool header) ──────────────────────────────────
 
-export function renderCall(args: SubagentParams, theme: Theme, context: RenderContext): Text {
-	// Save context.state reference so execute() can write resolved
-	// model/session before the first onUpdate triggers renderCall.
+export function renderAgentCall(args: AgentParams, theme: Theme, context: RenderContext): Text {
 	if (context.toolCallId) {
 		_stateRef.set(context.toolCallId, context.state);
 	}
-
-	// Record timer start when execution begins (mirrors bash behaviour)
 	if (context.executionStarted && context.state.startedAt === undefined) {
 		context.state.startedAt = Date.now();
 		context.state.endedAt = undefined;
 	}
 
-	const p = args;
-	const metaSuffix = buildMetaSuffix(context.state, args, theme);
-
-	if (p.session && p.task) {
-		// Battle — header like bash: `$ command` + muted metadata suffix
-		const summary = promptSummary(p.task);
-		return new Text(
-			`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("toolTitle", "\ud83d\udcac")} ${theme.fg("toolTitle", summary)}${metaSuffix}`,
-			0,
-			0,
-		);
-	}
-	if (p.close) {
-		return new Text(theme.fg("toolTitle", theme.bold(`subagent close ${p.session ?? ""}`)), 0, 0);
-	}
-	// Single task — header like bash: `$ command` + muted metadata suffix
-	const emoji = p.interactive ? "\ud83d\udcac" : "\u26a1";
-	const summary = promptSummary(p.task);
+	const summary = promptSummary(args.prompt);
+	const emoji = args.run_in_background ? "\ud83c\udfaf" : "\u26a1";
 	return new Text(
-		`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("toolTitle", emoji)} ${theme.fg("toolTitle", summary)}${metaSuffix}`,
+		`${theme.fg("toolTitle", theme.bold("agent"))} ${theme.fg("toolTitle", emoji)} ${theme.fg("toolTitle", summary)}${buildMetaSuffix(context.state, args, theme)}`,
 		0,
 		0,
 	);
 }
 
+export function renderAgentControlCall(args: AgentControlParams, theme: Theme): Text {
+	const verb = args.action === "steer" ? "\ud83e\udde9 steer" : "\u26d4 stop";
+	return new Text(theme.fg("toolTitle", theme.bold(`agent control ${verb} ${args.agent_id}`)), 0, 0);
+}
+
 // ── Render result (output body) ────────────────────────────────
 
-export function renderResult(
+export function renderAgentResult(
 	result: { details?: SubagentDetails; content: { type: string; text?: string }[] },
 	{ expanded, isPartial }: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
 	context: RenderContext,
 ): Container | Text {
 	const details = result.details;
-	const task = details?.task;
 
-	// Close mode / bare error — just dim text.
-	if (!task) {
+	// Background start / control ack — dim one-liner.
+	if (details?.agentId && !details.task) {
 		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 		if (!text) return new Text("", 0, 0);
 		return new Text(theme.fg("dim", text), 0, 0);
 	}
 
-	// ── Timer lifecycle (mirrors bash) ─────────────────────
-	const state = context.state;
+	// Bare error — dim text.
+	if (!details?.task) {
+		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+		if (!text) return new Text("", 0, 0);
+		return new Text(theme.fg("dim", text), 0, 0);
+	}
 
-	// startedAt may come from details (set by onUpdate in execute)
-	// or from renderCall (set via context.executionStarted).
+	const state = context.state;
 	if (details?.startedAt !== undefined && state.startedAt === undefined) {
 		state.startedAt = details.startedAt;
 	}
-
-	// Start live Elapsed updates on first partial result
 	if (state.startedAt !== undefined && isPartial && !state.interval) {
 		state.interval = setInterval(() => context.invalidate(), 1000);
 	}
-
-	// End timer on final result or error
 	if (!isPartial || context.isError) {
 		state.endedAt ??= details?.endedAt ?? Date.now();
 		if (state.interval) {
@@ -168,27 +166,14 @@ export function renderResult(
 		}
 	}
 
-	// ── Body: full prompt (details.task) + sub‑agent output ──
 	const cmp = new Container();
-
-	const promptText = details?.task?.trim();
+	const promptText = details.task.trim();
 	const output = result.content[0]?.type === "text" ? (result.content[0].text?.trim() ?? "") : "";
 
-	const hasPrompt = !!promptText;
-	const hasOutput = !!output;
-
-	// Build body content (no leading \n — spacing is handled per-mode below)
 	const bodyParts: string[] = [];
-	if (hasPrompt) {
-		bodyParts.push(promptText);
-	}
-	if (hasPrompt && hasOutput) {
-		bodyParts.push(""); // blank line separator
-	}
-	if (hasOutput) {
-		bodyParts.push(output);
-	}
-
+	if (promptText) bodyParts.push(promptText);
+	if (promptText && output) bodyParts.push("");
+	if (output) bodyParts.push(output);
 	const rawBody = bodyParts.join("\n");
 	const bodyContent = rawBody
 		?.split("\n")
@@ -197,10 +182,8 @@ export function renderResult(
 
 	if (bodyContent) {
 		if (expanded) {
-			// bash: \n prefix gives 1 blank line between header and body
 			cmp.addChild(new Text(`\n${bodyContent}`, 0, 0));
 		} else {
-			// bash: always return ["", ...] — first element is the blank line
 			cmp.addChild({
 				invalidate: () => {},
 				render: (w: number) => {
@@ -213,11 +196,74 @@ export function renderResult(
 		}
 	}
 
-	// ── Footer: Elapsed/Took X.Xs ──
 	if (state.startedAt !== undefined) {
 		const label = isPartial ? "Elapsed" : "Took";
 		const endTime = state.endedAt ?? Date.now();
 		cmp.addChild(new Text(`\n${theme.fg("muted", `${label} ${formatDuration(endTime - state.startedAt)}`)}`, 0, 0));
+	}
+
+	return cmp;
+}
+
+export function renderAgentControlResult(
+	result: { details?: Record<string, unknown>; content: { type: string; text?: string }[] },
+	_opts: { expanded: boolean; isPartial: boolean },
+	theme: Theme,
+): Text {
+	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+	if (!text) return new Text("", 0, 0);
+	return new Text(theme.fg("dim", text), 0, 0);
+}
+
+// ── Notification card (registerMessageRenderer) ────────────────
+
+export interface NotificationDetails {
+	status: string;
+	agent_id: string;
+	title?: string;
+	usage?: {
+		tokens?: number | null;
+		toolUses?: number | null;
+		durationMs?: number | null;
+	};
+	sessionPath?: string;
+	sessionId?: string;
+}
+
+export function renderNotification(
+	message: { details?: NotificationDetails },
+	_opts: unknown,
+	theme: Theme,
+): Container {
+	const d = message.details;
+	const cmp = new Container();
+
+	if (!d) {
+		cmp.addChild(new Text(theme.fg("dim", "sub-agent notification (no details)"), 0, 0));
+		return cmp;
+	}
+
+	const statusColor = d.status === "completed" ? "toolTitle" : "error";
+	const badge = d.status === "completed" ? "\u2705" : d.status === "failed" ? "\u274c" : "\u26d4";
+	const title = d.title ?? `sub-agent ${d.agent_id}`;
+	cmp.addChild(
+		new Text(
+			`${theme.fg(statusColor as "toolTitle" | "error", theme.bold(`${badge} ${title}`))} ${theme.fg("muted", `(${d.status})`)}`,
+			0,
+			0,
+		),
+	);
+
+	const usageParts: string[] = [];
+	if (d.usage?.durationMs != null) usageParts.push(`${formatDuration(d.usage.durationMs)}`);
+	if (d.usage?.tokens != null) usageParts.push(`${d.usage.tokens} tokens`);
+	if (d.usage?.toolUses != null) usageParts.push(`${d.usage.toolUses} tool uses`);
+	if (usageParts.length > 0) {
+		cmp.addChild(new Text(theme.fg("muted", usageParts.join(" \u00b7 ")), 0, 0));
+	}
+
+	if (d.sessionPath) {
+		cmp.addChild(new Text(theme.fg("muted", `session: ${d.sessionPath}`), 0, 0));
 	}
 
 	return cmp;
