@@ -45,19 +45,13 @@ export interface RpcCommandGetSessionStats {
 	type: "get_session_stats";
 }
 
-export interface RpcCommandGetEntries {
-	id: string;
-	type: "get_entries";
-}
-
 export type RpcCommand =
 	| RpcCommandPrompt
 	| RpcCommandSteer
 	| RpcCommandAbort
 	| RpcCommandGetLastAssistantText
 	| RpcCommandGetState
-	| RpcCommandGetSessionStats
-	| RpcCommandGetEntries;
+	| RpcCommandGetSessionStats;
 
 // ─── Responses and events we read from stdout ──────────────
 

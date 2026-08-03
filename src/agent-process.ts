@@ -197,26 +197,6 @@ export class AgentProcess {
 	}
 
 	/**
-	 * Latest session summary, if the child generated one (branch_summary from
-	 * navigation, or compaction summary from auto-compaction). Best-effort:
-	 * returns null when absent or on transport failure.
-	 */
-	async sessionSummary(): Promise<string | null> {
-		const response = await this.client.sendCommand({ id: this.agentId, type: "get_entries" }).catch(() => null);
-		if (!response?.success || !response.data) return null;
-		const data = response.data as { entries?: Array<{ type?: string; summary?: string }> };
-		const entries = data.entries;
-		if (!Array.isArray(entries)) return null;
-		for (let i = entries.length - 1; i >= 0; i--) {
-			const entry = entries[i];
-			if ((entry?.type === "branch_summary" || entry?.type === "compaction") && entry.summary) {
-				return entry.summary;
-			}
-		}
-		return null;
-	}
-
-	/**
 	 * Wait until the agent reaches a terminal state, applying graceful turn
 	 * limits (wrap-up steer → hard abort) along the way.
 	 */
