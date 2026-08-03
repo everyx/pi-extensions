@@ -91,7 +91,7 @@ Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失�
 ## 可观测性
 
 - **前台** — sub-agent 的输出逐字流式进入工具卡片（rpc `text_delta` 事件转发到 `onUpdate`）。
-- **后台** — 编辑器上方常驻状态 widget：`Agents` 标题下每个运行中的 agent 一行 `⠋ <标题> · 42s`（accent spinner + muted 文本，与 pi 内置 working 指示器同一视觉语言）。纯状态设计（无输出预览——完整内容由完成通知携带，复盘走 `pi --session <path>`）。最后一个 agent 结束后 widget 自动清除。
+- **后台** — 编辑器上方常驻状态 widget：`Agents` 标题下每个运行中的 agent 一行 `⠋ <标题> · 42s`（accent spinner + muted 文本，与 pi 内置 working 指示器同一视觉语言），下方追加**最新活动摘录行**（与标题左对齐）：工具调用（`bash: sleep 20`，工具名高亮）、`Thinking...`（斜体，pi 隐藏 thinking 同款）、或最新正文尾部。纯状态设计（无完整输出流——最终结果由完成通知携带，复盘走 `pi --session <path>`）。最后一个 agent 结束后 widget 自动清除。
 - **完成通知** — 以 Agent 家族风格渲染卡片：`Agent ✓ <标题> (Took 12.3s · 1,250 tokens · 3 tool uses)` + 结果预览 body + session 路径 footer（状态词仅在失败时显示）。
 
 ## 工作原理

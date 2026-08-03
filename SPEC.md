@@ -109,6 +109,7 @@ session: /path/...jsonl
 - 仅跟踪后台 agent（前台已 inline 流式，不重复）
 - 完成/停止即移除该行，最后一个结束后 widget 自动清除
 - 与 pi 内置 working 指示器（Loader）同一视觉语言
+- 每行下方追加**最新活动摘录**（缩进 3 字符，与标题左对齐）：工具调用（工具名 toolTitle 色 + 冒号 + muted 参数摘要）、`Thinking...`（italic + thinkingText，pi 隐藏 thinking 同款）、或最新正文尾部（muted，截断 60 字符）；数据取自 `message_update` 累积消息的最新 content 部分，不进 LLM context
 
 ## 实现决策
 
