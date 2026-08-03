@@ -252,17 +252,27 @@ export default function (pi: ExtensionAPI) {
 
 			try {
 				const started = await agent.spawnAndSend(task);
-				if (!started.ok) {
-					await agent.stop().catch(() => {});
-					return {
-						content: [{ type: "text", text: started.error }],
-						details: {},
-						isError: true,
-					};
-				}
 
 				// ── Background: return agent_id now, notify on completion ──
 				if (params.run_in_background) {
+					// Spawn failure: deliver the failed notification (D15) — the
+					// caller only sees an isError return, the user gets the card.
+					if (!started.ok) {
+						await agent.stop().catch(() => {});
+						await notifyCompletion(pi, agent, {
+							status: "failed",
+							output: started.error,
+							stats: { tokens: 0, toolUses: 0, durationMs: 0 },
+							sessionPath: undefined,
+							sessionId: undefined,
+						});
+						return {
+							content: [{ type: "text", text: started.error }],
+							details: {},
+							isError: true,
+						};
+					}
+
 					registerAgent(agent);
 					const w = ensureWidget(ctx);
 					w?.add(agent);
@@ -297,6 +307,15 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				// ── Foreground: block until completion ──
+				if (!started.ok) {
+					await agent.stop().catch(() => {});
+					return {
+						content: [{ type: "text", text: started.error }],
+						details: {},
+						isError: true,
+					};
+				}
+
 				onUpdate?.({
 					content: [{ type: "text", text: "Running sub-agent\u2026" }],
 					details: { task, startedAt },
