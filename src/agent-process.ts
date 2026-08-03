@@ -25,6 +25,15 @@ export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopp
 
 export type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
 
+/** Latest activity for the widget excerpt line (never enters LLM context). */
+export type AgentActivityKind = "text" | "thinking" | "tool";
+
+export interface AgentActivity {
+	kind: AgentActivityKind;
+	/** For tool: "<name>: <args summary>". For text/thinking: the raw text. */
+	text: string;
+}
+
 export interface AgentStats {
 	tokens: number;
 	toolUses: number;
@@ -75,6 +84,25 @@ export const STOP_GRACE_MS = 5_000;
 export const WRAP_UP_MESSAGE =
 	"Please wrap up now: do not start any new work. Finish summarizing your current task and stop.";
 
+/** Build a "<name>: <args summary>" label for a tool call (widget excerpt). */
+function summarizeToolCall(name: string, args: unknown): string {
+	if (args && typeof args === "object") {
+		const a = args as Record<string, unknown>;
+		const key =
+			name === "bash"
+				? "command"
+				: name === "read" || name === "write" || name === "edit"
+					? "path"
+					: name === "grep" || name === "find"
+						? "pattern"
+						: undefined;
+		if (key && typeof a[key] === "string" && a[key]) return `${name}: ${a[key]}`;
+		const json = JSON.stringify(a);
+		return json.length > 80 ? `${name}: ${json.slice(0, 80)}\u2026` : `${name}: ${json}`;
+	}
+	return name;
+}
+
 export class AgentProcess {
 	readonly agentId: string = crypto.randomUUID();
 	readonly title: string | undefined;
@@ -99,6 +127,8 @@ export class AgentProcess {
 	private hardAborted = false;
 	/** Model API error captured from agent_end (stopReason "error"). */
 	private agentError: string | null = null;
+	/** Latest activity excerpt for the widget. */
+	private latestActivity: AgentActivity | null = null;
 
 	sessionPath?: string;
 	sessionId?: string;
@@ -281,6 +311,11 @@ export class AgentProcess {
 		if (!this.client.isClosed) this.client.kill("SIGTERM");
 	}
 
+	/** Latest activity excerpt for the widget (null until the first message_update). */
+	getLatestActivity(): AgentActivity | null {
+		return this.latestActivity;
+	}
+
 	// ── Internal ───────────────────────────────────────────
 
 	private readonly onDelta: ((delta: string) => void) | undefined;
@@ -291,10 +326,28 @@ export class AgentProcess {
 			return;
 		}
 		// Stream assistant text deltas to the tool card (foreground live output).
-		if (event.type === "message_update" && this.onDelta) {
+		if (event.type === "message_update") {
 			const ae = event.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
-			if (ae?.type === "text_delta" && typeof ae.delta === "string") {
+			if (ae?.type === "text_delta" && typeof ae.delta === "string" && this.onDelta) {
 				this.onDelta(ae.delta);
+			}
+			// Activity tracking: the accumulated message content exposes the latest
+			// part (thinking / text / toolCall) — powers the widget excerpt.
+			const message = event.message as
+				| {
+						content?: Array<{ type?: string; text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>;
+				  }
+				| undefined;
+			const content = message?.content;
+			if (Array.isArray(content) && content.length > 0) {
+				const last = content[content.length - 1];
+				if (last?.type === "thinking" && typeof last.thinking === "string" && last.thinking.trim()) {
+					this.latestActivity = { kind: "thinking", text: last.thinking };
+				} else if (last?.type === "text" && typeof last.text === "string" && last.text.trim()) {
+					this.latestActivity = { kind: "text", text: last.text };
+				} else if (last?.type === "toolCall" && typeof last.name === "string") {
+					this.latestActivity = { kind: "tool", text: summarizeToolCall(last.name, last.arguments) };
+				}
 			}
 			return;
 		}

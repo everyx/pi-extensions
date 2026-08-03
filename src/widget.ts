@@ -15,13 +15,25 @@
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { AgentProcess } from "./agent-process.js";
+import type { AgentActivity, AgentProcess } from "./agent-process.js";
 
 // Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
 const SPINNER = ["\u281b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
 
 const WIDGET_KEY = "subagents";
 const TICK_MS = 80;
+
+/** Widget line indent: 1 (widget padding) + ⠋ + space → excerpt aligns with the title. */
+const EXCERPT_INDENT = "   ";
+
+/** Excerpt length cap; long tails get a leading ellipsis. */
+const EXCERPT_MAX = 60;
+
+function truncateTail(s: string): string {
+	const clean = s.replace(/\s+/g, " ").trim();
+	if (clean.length <= EXCERPT_MAX) return clean;
+	return `\u2026${clean.slice(clean.length - EXCERPT_MAX + 1)}`;
+}
 
 interface WidgetRow {
 	agent: AgentProcess;
@@ -132,7 +144,32 @@ export class AgentWidget {
 			const name = agent.title ?? agent.sessionName ?? `sub-agent ${agent.agentId.slice(0, 8)}`;
 			const elapsed = formatElapsed(Date.now() - agent.startedAt);
 			lines.push(` ${spinner} ${theme.fg("muted", `${name} \u00b7 ${elapsed}`)}`);
+
+			const activity = agent.getLatestActivity();
+			if (activity) lines.push(this.renderExcerpt(activity, theme));
 		}
 		return lines;
+	}
+
+	/**
+	 * Latest-activity excerpt, aligned to the title column (pi's hidden-thinking
+	 * style for thinking; colored tool name for tool calls; plain text otherwise).
+	 */
+	private renderExcerpt(activity: AgentActivity, theme: Theme): string {
+		if (activity.kind === "thinking") {
+			// Identical to pi's hidden-thinking label: italic + thinkingText.
+			return `${EXCERPT_INDENT}${theme.italic(theme.fg("thinkingText", "Thinking..."))}`;
+		}
+		if (activity.kind === "tool") {
+			// "bash: sleep 20" — tool name in toolTitle, args muted.
+			const colon = activity.text.indexOf(": ");
+			if (colon > 0) {
+				const toolName = activity.text.slice(0, colon);
+				const args = activity.text.slice(colon + 2);
+				return `${EXCERPT_INDENT}${theme.fg("toolTitle", toolName)}: ${theme.fg("muted", truncateTail(args))}`;
+			}
+			return `${EXCERPT_INDENT}${theme.fg("toolTitle", truncateTail(activity.text))}`;
+		}
+		return `${EXCERPT_INDENT}${theme.fg("muted", truncateTail(activity.text))}`;
 	}
 }
