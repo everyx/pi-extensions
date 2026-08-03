@@ -32,8 +32,9 @@ export type AgentActivityKind = "thinking" | "text" | "tool";
 
 /**
  * Latest activity for the widget excerpt line (never enters LLM context).
- * Tool calls carry structured name/args — the label format lives in the
- * producer (event-interpret.ts), consumers render without re-parsing.
+ * Tool calls carry structured name/args — the producer (event-interpret.ts)
+ * emits the data; consumers decide how to display it (activityRow in
+ * render.ts assembles the "name: args" label).
  */
 export type AgentActivity =
 	| { kind: "thinking"; text: string }
@@ -352,8 +353,12 @@ export class AgentProcess {
 					this.latestActivity = ev.activity;
 					// Thinking/tool transitions carry no text deltas — the card would
 					// never refresh without this push (text keeps streaming via onDelta).
-					const label = ev.activity.kind === "tool" ? `${ev.activity.name}: ${ev.activity.args}` : ev.activity.text;
-					const key = `${ev.activity.kind}\u0000${label}`;
+					// Dedup key is structured, not a display label — no shared format
+					// with the render layer.
+					const key =
+						ev.activity.kind === "tool"
+							? `tool\u0000${ev.activity.name}\u0000${ev.activity.args}`
+							: `${ev.activity.kind}\u0000${ev.activity.text}`;
 					if (ev.activity.kind !== "text" && key !== this.lastNotifiedActivityKey) {
 						this.lastNotifiedActivityKey = key;
 						this.onActivityChange?.(ev.activity);

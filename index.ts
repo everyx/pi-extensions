@@ -2,7 +2,7 @@
  * pi-subagent — spawn isolated sub‑agent pi instances.
  *
  * Architecture (issue #10):
- *   index.ts          — tool registration (Agent / AgentControl) + parameter schemas
+ *   index.ts          — tool registration (Agent / AgentControl) + schemas + notification delivery
  *   protocol.ts       — pure JSONL protocol layer (tested)
  *   rpc-client.ts     — stateful thin JSONL client (spawn + transport)
  *   event-interpret.ts— raw RpcEvent → AgentEvent adapter (pure, tested)

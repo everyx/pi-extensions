@@ -128,7 +128,7 @@ session: /path/...jsonl
 ### 架构
 
 ```
-index.ts           — 工具注册（Agent / AgentControl）+ 参数 schema
+index.ts           — 工具注册（Agent / AgentControl）+ schema + 通知投递
 protocol.ts        — 纯函数 JSONL 协议层（serializeCommand / parseLine）
 rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + pending map + 事件流 + 退出）
 event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数，单测）

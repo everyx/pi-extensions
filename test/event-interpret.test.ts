@@ -108,6 +108,18 @@ describe("interpretEvent — message_update activity", () => {
 		assert.deepEqual(expect({ type: "message_update" }), []);
 	});
 
+	it("passes multibyte text through unchanged (UTF-8 integrity)", () => {
+		const raw = {
+			type: "message_update",
+			message: { content: [{ type: "text", text: "分析 src/auth/*.ts 的鉴权逻辑…" }] },
+			assistantMessageEvent: { type: "text_delta", delta: "已读文件" },
+		};
+		assert.deepEqual(interpretEvent(raw), [
+			{ type: "activity", activity: { kind: "text", text: "分析 src/auth/*.ts 的鉴权逻辑…" } },
+			{ type: "text_delta", delta: "已读文件" },
+		]);
+	});
+
 	it("combines activity and text_delta from one update", () => {
 		const raw = {
 			type: "message_update",
