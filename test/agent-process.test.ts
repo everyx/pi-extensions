@@ -92,6 +92,9 @@ class FakeClient {
 		type: string;
 		assistantMessageEvent?: { type: string; delta?: unknown };
 		messages?: Array<{ role?: string; stopReason?: string; errorMessage?: unknown; content?: unknown[] }>;
+		message?: {
+			content?: Array<{ type?: string; text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>;
+		};
 	}): void {
 		this.onEvent?.(event as never);
 	}
@@ -303,6 +306,54 @@ describe("AgentProcess — agent API errors", () => {
 
 		const completion = await completionPromise;
 		assert.equal(completion.status, "completed");
+	});
+});
+
+describe("AgentProcess — latest activity", () => {
+	it("tracks text as the latest content part", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.emitEvent({
+			type: "message_update",
+			message: {
+				content: [
+					{ type: "thinking", thinking: "hmm" },
+					{ type: "text", text: "Found 5 files" },
+				],
+			},
+		});
+		assert.deepEqual(agent.getLatestActivity(), { kind: "text", text: "Found 5 files" });
+	});
+
+	it("tracks thinking while the agent is reasoning", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "thinking", thinking: "Let me analyze the structure" }] },
+		});
+		assert.deepEqual(agent.getLatestActivity(), { kind: "thinking", text: "Let me analyze the structure" });
+	});
+
+	it("summarizes tool calls with the friendly argument key", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "sleep 20" } }] },
+		});
+		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", text: "bash: sleep 20" });
+	});
+
+	it("summarizes tool calls with JSON when no friendly key exists", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "toolCall", name: "custom_tool", arguments: { foo: 1 } }] },
+		});
+		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", text: 'custom_tool: {"foo":1}' });
+	});
+
+	it("returns null before any message_update", async () => {
+		const { agent } = makeAgent({ cwd: "/tmp" });
+		assert.equal(agent.getLatestActivity(), null);
 	});
 });
 
