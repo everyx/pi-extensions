@@ -14,7 +14,8 @@
  * Graceful turn limits (issue #10 decision 10):
  *   After each settled turn we read get_session_stats. At the wrap-up token
  *   threshold we steer a "wrap up" message; at the hard limit (or total
- *   wall-clock timeout) we abort → wait for the next settle → stop.
+ *   wall-clock timeout) we abort → wait for the next settle within a grace
+ *   window → hard-stop the child if it never settles (hung model call).
  */
 
 import * as crypto from "node:crypto";
@@ -65,12 +66,16 @@ export interface AgentProcessOptions {
 	sessionDir?: string;
 	/** Total wall-clock timeout for the whole task (incl. multi-turn). */
 	timeoutMs?: number;
+	/** After an abort, how long to wait for the child to settle before hard-stopping it. */
+	abortSettleGraceMs?: number;
 	/** Token threshold: at/above this, inject a "wrap up" steer. */
 	wrapUpTokens?: number;
 	/** Token threshold: at/above this, hard abort. */
 	hardLimitTokens?: number;
 	/** Streamed assistant text deltas (rpc message_update/text_delta) — for live tool-card output. */
 	onDelta?: (delta: string) => void;
+	/** Thinking/tool activity transitions (no text delta involved) — for live tool-card rows. */
+	onActivityChange?: (activity: AgentActivity) => void;
 }
 
 export interface AgentProcessDeps {
@@ -79,6 +84,7 @@ export interface AgentProcessDeps {
 }
 
 export const DEFAULT_TIMEOUT_MS = 600_000;
+export const DEFAULT_ABORT_SETTLE_GRACE_MS = 30_000;
 export const DEFAULT_WRAP_UP_TOKENS = 400_000;
 export const DEFAULT_HARD_LIMIT_TOKENS = 500_000;
 export const STOP_GRACE_MS = 5_000;
@@ -119,6 +125,7 @@ export class AgentProcess {
 
 	private readonly client: RpcClient;
 	private readonly timeoutMs: number;
+	private readonly abortSettleGraceMs: number;
 	private readonly wrapUpTokens: number;
 	private readonly hardLimitTokens: number;
 
@@ -143,9 +150,11 @@ export class AgentProcess {
 		this.title = options.title;
 		this.sessionName = options.sessionName ?? options.title;
 		this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+		this.abortSettleGraceMs = options.abortSettleGraceMs ?? DEFAULT_ABORT_SETTLE_GRACE_MS;
 		this.wrapUpTokens = options.wrapUpTokens ?? DEFAULT_WRAP_UP_TOKENS;
 		this.hardLimitTokens = options.hardLimitTokens ?? DEFAULT_HARD_LIMIT_TOKENS;
 		this.onDelta = options.onDelta;
+		this.onActivityChange = options.onActivityChange;
 
 		const args: string[] = [];
 		if (options.model) args.push("--model", options.model);
@@ -236,27 +245,34 @@ export class AgentProcess {
 	/**
 	 * Wait until the agent reaches a terminal state, applying graceful turn
 	 * limits (wrap-up steer → hard abort) along the way.
+	 *
+	 * Every settle wait is bounded by the overall deadline: a child stuck in a
+	 * hung model call would otherwise make us wait forever (issue #10, session
+	 * 019fc63c: sub-agent completed but never settled; only a user interrupt
+	 * released the wait). On deadline we abort, give the child a grace window
+	 * to settle, then hard-stop it.
 	 */
 	async waitForCompletion(): Promise<AgentCompletion> {
-		let timedOut = false;
-		const timer = setTimeout(() => {
-			timedOut = true;
-			this.hardAborted = true;
-			void this.abort();
-		}, this.timeoutMs);
+		const deadline = Date.now() + this.timeoutMs;
 
 		try {
 			while (this.status === "running" && !this.done) {
-				await this.awaitSettled();
-				if (timedOut || this.done) break;
+				const remaining = Math.max(0, deadline - Date.now());
+				const settled = await this.awaitSettled(remaining);
+				if (this.done) break;
+				if (!settled) {
+					// Total wall-clock timeout: abort and bound the settle wait.
+					this.hardAborted = true;
+					await this.abortAndWait();
+					break;
+				}
 
 				const stats = await this.getStats();
 				const total = stats?.tokens ?? 0;
 
 				if (total >= this.hardLimitTokens) {
 					this.hardAborted = true;
-					await this.abort();
-					await this.awaitSettled();
+					await this.abortAndWait();
 					break;
 				}
 				if (total >= this.wrapUpTokens && !this.wrappedUp) {
@@ -267,7 +283,7 @@ export class AgentProcess {
 				break; // normal completion
 			}
 		} finally {
-			clearTimeout(timer);
+			/* no timer to clear — waits are deadline-bounded */
 		}
 
 		this.done = true;
@@ -303,14 +319,24 @@ export class AgentProcess {
 	 * Graceful stop: stdin EOF → pi rpc shutdown(). If the child doesn't
 	 * exit within STOP_GRACE_MS, SIGTERM as a fallback.
 	 */
+	/**
+	 * Graceful stop: stdin EOF → pi rpc shutdown(). If the child doesn't
+	 * exit within STOP_GRACE_MS, SIGTERM as a fallback. Flags the stop as
+	 * user-controlled (AgentControl.stop / cancel) — suppresses notifications.
+	 */
 	async stop(): Promise<void> {
 		if (this.done) {
 			// Already terminal — just ensure the child is gone.
 			this.client.endInput();
 			return;
 		}
-		this.status = "stopped";
 		this.stoppedByControl = true;
+		await this.hardStop();
+	}
+
+	/** stdin EOF + SIGTERM fallback; waits for the child to exit. */
+	private async hardStop(): Promise<void> {
+		this.status = "stopped";
 		this.done = true;
 		this.client.endInput();
 		this.settle();
@@ -326,6 +352,9 @@ export class AgentProcess {
 	// ── Internal ───────────────────────────────────────────
 
 	private readonly onDelta: ((delta: string) => void) | undefined;
+	private readonly onActivityChange: ((activity: AgentActivity) => void) | undefined;
+	/** "kind\u0000text" of the activity last delivered via onActivityChange. */
+	private lastNotifiedActivityKey: string | undefined;
 
 	private onEvent(event: RpcEvent): void {
 		if (event.type === "agent_settled") {
@@ -343,12 +372,23 @@ export class AgentProcess {
 			const content = message?.content;
 			if (Array.isArray(content) && content.length > 0) {
 				const last = content[content.length - 1];
+				let next: AgentActivity | null = null;
 				if (last?.type === "thinking" && typeof last.thinking === "string" && last.thinking.trim()) {
-					this.latestActivity = { kind: "thinking", text: last.thinking };
+					next = { kind: "thinking", text: last.thinking };
 				} else if (last?.type === "text" && typeof last.text === "string" && last.text.trim()) {
-					this.latestActivity = { kind: "text", text: last.text };
+					next = { kind: "text", text: last.text };
 				} else if (last?.type === "toolCall" && typeof last.name === "string") {
-					this.latestActivity = { kind: "tool", text: summarizeToolCall(last.name, last.arguments) };
+					next = { kind: "tool", text: summarizeToolCall(last.name, last.arguments) };
+				}
+				if (next) {
+					this.latestActivity = next;
+					// Thinking/tool transitions carry no text deltas — the card would
+					// never refresh without this push (text keeps streaming via onDelta).
+					const key = `${next.kind}\u0000${next.text}`;
+					if (next.kind !== "text" && key !== this.lastNotifiedActivityKey) {
+						this.lastNotifiedActivityKey = key;
+						this.onActivityChange?.(next);
+					}
 				}
 			}
 			const ae = event.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
@@ -387,18 +427,49 @@ export class AgentProcess {
 		this.settleWaiters.clear();
 	}
 
-	private awaitSettled(): Promise<void> {
-		if (this.done) return Promise.resolve();
+	/**
+	 * Resolve true on the next settle, or false after timeoutMs (no timeout
+	 * when omitted). The waiter is removed from the set on either path so a
+	 * late settle can't double-resolve.
+	 */
+	private awaitSettled(timeoutMs?: number): Promise<boolean> {
+		if (this.done) return Promise.resolve(true);
 		// A settle arrived since our last wait — pass through immediately.
 		if (this.settleCount > this.lastSettledCount) {
 			this.lastSettledCount = this.settleCount;
-			return Promise.resolve();
+			return Promise.resolve(true);
 		}
 		return new Promise((resolve) => {
-			this.settleWaiters.add(() => {
+			let timer: NodeJS.Timeout | undefined;
+			const onSettle = () => {
+				if (timer) clearTimeout(timer);
+				this.settleWaiters.delete(onSettle);
 				this.lastSettledCount = this.settleCount;
-				resolve();
-			});
+				resolve(true);
+			};
+			if (timeoutMs !== undefined) {
+				timer = setTimeout(() => {
+					this.settleWaiters.delete(onSettle);
+					resolve(false);
+				}, timeoutMs);
+			}
+			this.settleWaiters.add(onSettle);
 		});
+	}
+
+	/**
+	 * Abort the child and wait (bounded) for its settle. An abort can be
+	 * ineffective when the child is stuck — hung model call, wedged run loop:
+	 * if no settle arrives within the grace window, hard-stop the child (stdin
+	 * EOF + SIGTERM fallback) so waitForCompletion can never hang forever.
+	 */
+	private async abortAndWait(): Promise<void> {
+		await this.abort().catch(() => {});
+		const settled = await this.awaitSettled(this.abortSettleGraceMs);
+		if (!settled && !this.done && this.client.exitCode === null) {
+			// Timeout/limit escalation, NOT a user-controlled stop — hard-stop
+			// without flagging stoppedByControl so background notifications still fire.
+			await this.hardStop();
+		}
 	}
 }

@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AgentProcess, type AgentProcessOptions } from "../src/agent-process.js";
+import { type AgentActivity, AgentProcess, type AgentProcessOptions } from "../src/agent-process.js";
 import type { RpcClientOptions } from "../src/rpc-client.js";
 
 /** Programmable fake standing in for RpcClient. */
@@ -244,6 +244,39 @@ describe("AgentProcess — waitForCompletion", () => {
 		assert.ok(fake.commands.some((c) => c.type === "abort"));
 	});
 
+	it("hard-stops a child that never settles after timeout", async () => {
+		const { agent, fake } = makeAgent({
+			cwd: "/tmp",
+			timeoutMs: 30,
+			abortSettleGraceMs: 20,
+		});
+		await agent.spawnAndSend("do it");
+
+		const completionPromise = agent.waitForCompletion(); // no settle ever arrives
+
+		const completion = await completionPromise;
+		assert.equal(completion.status, "stopped");
+		assert.ok(
+			fake.commands.some((c) => c.type === "abort"),
+			"abort was sent",
+		);
+		assert.equal(fake.endInputCalls, 1, "child was hard-stopped via stdin EOF");
+		assert.equal(agent.stoppedByControl, false, "timeout escalation is not a user-controlled stop");
+	});
+
+	it("does not hard-stop when the child settles within the abort grace window", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp", timeoutMs: 30, abortSettleGraceMs: 500 });
+		await agent.spawnAndSend("do it");
+
+		const completionPromise = agent.waitForCompletion();
+		await new Promise((r) => setTimeout(r, 40)); // deadline passes → abort
+		fake.emitSettled(); // settles inside the grace window
+
+		const completion = await completionPromise;
+		assert.equal(completion.status, "stopped");
+		assert.equal(fake.endInputCalls, 0, "grace settle avoids the hard stop");
+	});
+
 	it("marks failed when the child exits non-zero without settling", async () => {
 		const { agent, fake } = makeAgent({ cwd: "/tmp" });
 		await agent.spawnAndSend("do it");
@@ -364,6 +397,52 @@ describe("AgentProcess — latest activity", () => {
 	it("returns null before any message_update", async () => {
 		const { agent } = makeAgent({ cwd: "/tmp" });
 		assert.equal(agent.getLatestActivity(), null);
+	});
+
+	it("fires onActivityChange for thinking and tool transitions", async () => {
+		const events: AgentActivity[] = [];
+		const { fake } = makeAgent({ cwd: "/tmp", onActivityChange: (a) => events.push(a) });
+
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "thinking", thinking: "analyzing…" }] },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }] },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "text", text: "done" }] },
+		});
+
+		assert.deepEqual(events, [
+			{ kind: "thinking", text: "analyzing…" },
+			{ kind: "tool", text: "bash: ls" },
+		]);
+	});
+
+	it("does not refire onActivityChange for the same activity", async () => {
+		const events: AgentActivity[] = [];
+		const { fake } = makeAgent({ cwd: "/tmp", onActivityChange: (a) => events.push(a) });
+
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "toolCall", name: "read", arguments: { path: "a.ts" } }] },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "toolCall", name: "read", arguments: { path: "a.ts" } }] },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "toolCall", name: "read", arguments: { path: "b.ts" } }] },
+		});
+
+		assert.deepEqual(events, [
+			{ kind: "tool", text: "read: a.ts" },
+			{ kind: "tool", text: "read: b.ts" },
+		]);
 	});
 });
 
