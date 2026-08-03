@@ -47,8 +47,7 @@ export interface AgentProcessOptions {
 	tools?: string[];
 	/** Short task title (notification card). */
 	title?: string;
-	/** Display label (title ?? prompt first line) — widget rows only, NOT passed as --name.
-	 *  Sub-agent sessions follow pi's default naming (empty name → firstMessage). */
+	/** Session display name (--name) — what `pi -r` shows. Falls back to title. */
 	sessionName?: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
 	sessionDir?: string;
@@ -78,7 +77,7 @@ export const WRAP_UP_MESSAGE =
 export class AgentProcess {
 	readonly agentId: string = crypto.randomUUID();
 	readonly title: string | undefined;
-	/** Session display name ("<title>"), what the widget and session list show. */
+	/** Session display name ("sub: <title>"), what the widget and session list show. */
 	readonly sessionName: string | undefined;
 	readonly startedAt = Date.now();
 
@@ -114,10 +113,8 @@ export class AgentProcess {
 		const args: string[] = [];
 		if (options.model) args.push("--model", options.model);
 		if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
-		// An explicit title is a deliberate session name (pi supports renaming);
-		// without one the session follows pi's default (firstMessage) like any
-		// normal session — the prompt-first-line fallback is TUI display only.
-		if (options.title) args.push("--name", options.title.slice(0, 80));
+		const displayName = options.sessionName ?? options.title;
+		if (displayName) args.push("--name", displayName);
 		if (options.sessionDir) args.push("--session-dir", options.sessionDir);
 
 		const clientOptions: RpcClientOptions = {
@@ -194,6 +191,26 @@ export class AgentProcess {
 			tokens: data.tokens?.total ?? 0,
 			toolUses: data.toolCalls ?? 0,
 		};
+	}
+
+	/**
+	 * Latest session summary, if the child generated one (branch_summary from
+	 * navigation, or compaction summary from auto-compaction). Best-effort:
+	 * returns null when absent or on transport failure.
+	 */
+	async sessionSummary(): Promise<string | null> {
+		const response = await this.client.sendCommand({ id: this.agentId, type: "get_entries" }).catch(() => null);
+		if (!response?.success || !response.data) return null;
+		const data = response.data as { entries?: Array<{ type?: string; summary?: string }> };
+		const entries = data.entries;
+		if (!Array.isArray(entries)) return null;
+		for (let i = entries.length - 1; i >= 0; i--) {
+			const entry = entries[i];
+			if ((entry?.type === "branch_summary" || entry?.type === "compaction") && entry.summary) {
+				return entry.summary;
+			}
+		}
+		return null;
 	}
 
 	/**

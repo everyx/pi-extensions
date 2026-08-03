@@ -2,7 +2,7 @@
  * pi-subagent — AgentWidget.
  *
  * Persistent above-editor widget showing one status line per *background*
- * agent: `⠋ <title> · 42s`. Foreground agents are intentionally
+ * agent: `⠋ sub: <title> · 42s`. Foreground agents are intentionally
  * excluded — their live output already streams inline in the tool card
  * (mirrors tintinweb's default widget mode, which hides foreground runs).
  *
@@ -10,18 +10,18 @@
  * rendering. Full content arrives via the completion notification and
  * `pi --session <path>` review afterwards.
  *
- * Visual + animation follow pi's built-in working indicator (Loader):
- * same Braille frames, 80ms interval, accent spinner + muted message.
+ * Uses pi's setWidget callback form (registered once, refreshed via
+ * requestRender), 500ms tick for spinner + elapsed. Clears itself when the
+ * last agent finishes.
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentProcess } from "./agent-process.js";
 
-// Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
 const SPINNER = ["\u281b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
 
 const WIDGET_KEY = "subagents";
-const TICK_MS = 80;
+const TICK_MS = 500;
 
 interface WidgetRow {
 	agent: AgentProcess;
@@ -123,15 +123,18 @@ export class AgentWidget {
 	}
 
 	private render(theme: Theme): string[] {
-		// 1-char left padding matches pi's string[] widget form (Text(line, 1, 0)).
-		const lines: string[] = [` ${theme.fg("accent", `\u25cf ${theme.fg("accent", "Agents")}`)}`];
+		const lines: string[] = [theme.fg("toolTitle", `\u25cf ${theme.fg("toolTitle", "Agents")}`)];
 		for (const row of this.rows.values()) {
 			const { agent, frame } = row;
-			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
-			// Task label — same as the session display name (no prefix).
-			const name = agent.title ?? agent.sessionName ?? `sub-agent ${agent.agentId.slice(0, 8)}`;
+			const spinner = SPINNER[frame % SPINNER.length];
+			// Task label without the session-name "sub: " prefix (that prefix exists
+			// for the session display name, not for this widget).
+			const name =
+				agent.title ?? agent.sessionName?.replace(/^sub:\s*/, "") ?? `sub-agent ${agent.agentId.slice(0, 8)}`;
 			const elapsed = formatElapsed(Date.now() - agent.startedAt);
-			lines.push(` ${spinner} ${theme.fg("muted", `${name} \u00b7 ${elapsed}`)}`);
+			lines.push(
+				`${theme.fg("toolTitle", spinner)} ${theme.fg("toolOutput", name)} ${theme.fg("muted", `\u00b7 ${elapsed}`)}`,
+			);
 		}
 		return lines;
 	}

@@ -37,7 +37,7 @@ ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 
 两个最小原语：
 
-- **`Agent`** — spawn 一个隔离的 sub-agent：`{ prompt, title, model?, tools?, run_in_background? }`。`title`（3-5 词，**必填**）作为工具头、通知卡片、widget 行和会话名的标识——对齐 Claude Code 的 `description` / Codex 的 `task_name`。前台（默认）阻塞到结果就绪；`run_in_background: true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。
+- **`Agent`** — spawn 一个隔离的 sub-agent：`{ prompt, title?, model?, tools?, run_in_background? }`。`title`（3-5 词）作为通知卡片和工具头的标题——省略时用 prompt 首行。前台（默认）阻塞到结果就绪；`run_in_background: true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。
 - **`AgentControl`** — 干预运行中的后台 agent：`steer`（注入重定向消息）或 `stop`（终止）。
 
 LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使用指南：何时委派、prompt 必须自包含、绝不轮询、汇报前验证子 agent 的实际改动。
@@ -109,7 +109,6 @@ Sub-agent 是完整 pi 实例，若你全局安装了本扩展，它天然能再
 
 ## 成本与注意
 
-^- **Headless（`pi -p`）下后台 agent 随主进程退出。** 主 agent 响应结束即进程退出，后台子 agent 通过 stdin EOF 被清理（不会泄漏为孤儿进程）。后台工作流（等通知、steer、stop）是为常驻的 TUI 会话设计的。
 - **一 agent 一进程。** 前台和后台都是常驻 rpc 子进程。后台开多了 = 进程开多了——请节制。
 - **通知一次性投递。** 后台结果只投递一次；若投递前主会话崩溃，结果只存在于 session 文件（用 `pi --session <id>` attach 恢复）。
 - **Steer 需要活的 agent。** `AgentControl` 只在 agent 运行中（完成通知之前）有效。
