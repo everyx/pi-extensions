@@ -74,6 +74,37 @@ export function formatDuration(ms: number): string {
 }
 
 /** "bash: sleep 20" → { name: "bash", args: "sleep 20" }; null when no label. */
+/** Activity excerpt length cap; long tails get a leading ellipsis. */
+const ACTIVITY_EXCERPT_MAX = 60;
+
+/** Collapse whitespace, trim, and cut long tails to `max` chars (ellipsis prefix). */
+export function truncateTail(s: string, max: number = ACTIVITY_EXCERPT_MAX): string {
+	const clean = s.replace(/\s+/g, " ").trim();
+	if (clean.length <= max) return clean;
+	return `\u2026${clean.slice(clean.length - max + 1)}`;
+}
+
+/**
+ * One activity row: "Thinking..." (pi hidden-thinking style), a tool call
+ * (toolTitle name + ": " + muted args), or muted text. Shared by the tool
+ * card activity row and the Agents widget — single source of truth so the
+ * two surfaces can never drift apart. Pass `max` to truncate long tails
+ * (widget); the card passes none and shows the full text.
+ */
+export function activityRow(activity: AgentActivity, theme: Theme, max?: number): string {
+	if (activity.kind === "thinking") {
+		return theme.italic(theme.fg("thinkingText", "Thinking..."));
+	}
+	if (activity.kind === "tool") {
+		const tool = splitToolLabel(activity.text);
+		if (tool) {
+			return `${theme.fg("toolTitle", tool.name)}: ${theme.fg("muted", max === undefined ? tool.args : truncateTail(tool.args, max))}`;
+		}
+		return theme.fg("toolTitle", max === undefined ? activity.text : truncateTail(activity.text, max));
+	}
+	return theme.fg("muted", max === undefined ? activity.text : truncateTail(activity.text, max));
+}
+
 export function splitToolLabel(text: string): { name: string; args: string } | null {
 	const colon = text.indexOf(": ");
 	if (colon <= 0) return null;
@@ -114,7 +145,12 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 
 export function renderAgentControlCall(args: AgentControlParams, theme: Theme): Text {
 	const verb = args.action === "steer" ? "steer" : "stop";
-	return new Text(theme.fg("toolTitle", theme.bold(`Agent ${verb} ${args.agent_id}`)), 0, 0);
+	// Same header split as Agent cards: bold family word + plain entity.
+	return new Text(
+		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", `${verb} ${args.agent_id}`)}`,
+		0,
+		0,
+	);
 }
 
 // ── Render result (output body) ────────────────────────────────
@@ -186,17 +222,7 @@ export function renderAgentResult(
 	// Text is already streaming as the card body, so only non-text kinds show.
 	const activity = details.activity;
 	if (isPartial && activity && activity.kind !== "text") {
-		if (activity.kind === "thinking") {
-			// Same label/style as pi's hidden thinking and the Agents widget.
-			cmp.addChild(new Text(`\n${theme.italic(theme.fg("thinkingText", "Thinking..."))}`, 0, 0));
-		} else if (activity.kind === "tool") {
-			const tool = splitToolLabel(activity.text);
-			if (tool) {
-				cmp.addChild(new Text(`\n${theme.fg("toolTitle", tool.name)}: ${theme.fg("muted", tool.args)}`, 0, 0));
-			} else {
-				cmp.addChild(new Text(`\n${theme.fg("toolTitle", activity.text)}`, 0, 0));
-			}
-		}
+		cmp.addChild(new Text(`\n${activityRow(activity, theme)}`, 0, 0));
 	}
 
 	// Body: prompt (input) + blank line + final output.
@@ -232,9 +258,9 @@ export interface AgentControlDetails {
 }
 
 /**
- * Steer renders as a relay of the Agent card — same input/output body
- * structure (message → agent snapshot), confirmation as muted footer.
- * Stop stays a dim one-liner (no output to show).
+ * Steer and stop both render as full cards: header (renderCall) + optional
+ * body + muted confirmation footer. Bare errors (unknown agent, bad args)
+ * stay a dim one-liner — they are failures, not actions.
  */
 export function renderAgentControlResult(
 	result: { details?: AgentControlDetails; content: { type: string; text?: string }[] },
@@ -264,7 +290,16 @@ export function renderAgentControlResult(
 		return cmp;
 	}
 
-	// stop / errors — dim one-liner.
+	if (d?.action === "stop") {
+		const cmp = new Container();
+		// No body (nothing to show) — footer-only card, same structure as steer.
+		if (text) {
+			cmp.addChild(new Text(`\n${theme.fg("muted", text)}`, 0, 0));
+		}
+		return cmp;
+	}
+
+	// Errors — dim one-liner.
 	return dimOneLiner(text, theme);
 }
 
@@ -273,7 +308,8 @@ export function renderAgentControlResult(
 export interface NotificationDetails {
 	status: string;
 	agent_id: string;
-	title?: string;
+	/** Required — always passed by notifyCompletion (AgentProcess.title). */
+	title: string;
 	/** Final output — rendered as the card body (never enters LLM context). */
 	result?: string;
 	usage?: {
@@ -284,9 +320,6 @@ export interface NotificationDetails {
 	sessionPath?: string;
 	sessionId?: string;
 }
-
-/** How many lines of the result the expanded card shows (rest: session file). */
-const NOTIFICATION_EXPANDED_LINES = 30;
 
 function formatTokens(n: number): string {
 	return n.toLocaleString("en-US");
@@ -301,11 +334,12 @@ export function renderNotification(
 	const cmp = new Container();
 
 	if (!d) {
-		cmp.addChild(new Text(theme.fg("dim", "sub-agent notification (no details)"), 0, 0));
+		cmp.addChild(new Text(theme.fg("dim", "agent notification (no details)"), 0, 0));
 		return cmp;
 	}
 
 	// ── Header: Agent <icon> <title><status word> (<muted meta>) ──
+	// Same split as Agent tool cards: bold family word only; title in toolTitle.
 	const isError = d.status !== "completed";
 	const icon = d.status === "completed" ? "\u2713" : d.status === "failed" ? "\u2717" : "\u26d4";
 	const iconColor = isError ? "error" : "toolTitle";
@@ -317,31 +351,20 @@ export function renderNotification(
 	if (d.usage?.toolUses != null) metaParts.push(`${d.usage.toolUses} tool use${d.usage.toolUses === 1 ? "" : "s"}`);
 	const metaSuffix = metaParts.length > 0 ? theme.fg("muted", ` (${metaParts.join(" \u00b7 ")})`) : "";
 
-	const title = d.title ?? `sub-agent ${d.agent_id}`;
 	cmp.addChild(
 		new Text(
-			`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg(iconColor as "toolTitle" | "error", icon)} ${theme.bold(title)}${statusWord}${metaSuffix}`,
+			`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg(iconColor as "toolTitle" | "error", icon)} ${theme.fg("toolTitle", d.title)}${theme.fg(iconColor as "toolTitle" | "error", statusWord)}${metaSuffix}`,
 			0,
 			0,
 		),
 	);
 
-	// ── Body: result preview (collapsed: first line; expanded: up to 30 lines) ──
+	// ── Body: result preview — same fold policy as tool cards (5 lines,
+	// expand hint on top, full text when expanded). ──
 	const result = d.result?.trim();
 	if (result) {
-		const lines = result.split("\n");
-		const shown = expanded ? lines.slice(0, NOTIFICATION_EXPANDED_LINES) : lines.slice(0, 1);
-		const body = shown.map((l) => theme.fg("toolOutput", l)).join("\n");
-		cmp.addChild(new Text(`\n${body}`, 0, 0));
-		if (expanded && lines.length > NOTIFICATION_EXPANDED_LINES) {
-			cmp.addChild(
-				new Text(
-					theme.fg("muted", `\n... ${lines.length - NOTIFICATION_EXPANDED_LINES} more lines in session file`),
-					0,
-					0,
-				),
-			);
-		}
+		const body = renderBody([result], expanded, theme);
+		if (body) cmp.addChild(body);
 	}
 
 	// ── Footer: session path (resume entry, custom dir → path required) ──

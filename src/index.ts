@@ -308,14 +308,14 @@ export default function (pi: ExtensionAPI) {
 						});
 
 					onUpdate?.({
-						content: [{ type: "text", text: `Started sub-agent ${agent.agentId} (background)` }],
+						content: [{ type: "text", text: `Started agent ${agent.agentId} (background)` }],
 						details: { agentId: agent.agentId, runInBackground: true, startedAt },
 					});
 					return {
 						content: [
 							{
 								type: "text",
-								text: `Started background sub-agent ${agent.agentId} — completion notification will arrive; use AgentControl to steer/stop meanwhile.`,
+								text: `Started background agent ${agent.agentId} — completion notification will arrive; use AgentControl to steer/stop meanwhile.`,
 							},
 						],
 						details: { agentId: agent.agentId, runInBackground: true, startedAt },
@@ -333,7 +333,7 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				onUpdate?.({
-					content: [{ type: "text", text: "Running sub-agent\u2026" }],
+					content: [{ type: "text", text: "Working\u2026" }],
 					details: { task, startedAt },
 				});
 
