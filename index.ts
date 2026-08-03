@@ -2,12 +2,15 @@
  * pi-subagent — spawn isolated sub‑agent pi instances.
  *
  * Architecture (issue #10):
- *   index.ts        — tool registration (Agent / AgentControl), notifications, cleanup
- *   protocol.ts     — pure JSONL protocol layer (tested)
- *   rpc-client.ts   — stateful thin JSONL client (spawn + transport)
- *   agent-process.ts— AgentProcess: one resident `pi --mode rpc` child, semantic API
- *   model.ts        — model-spec → ResolvedModel (testable)
- *   render.ts       — TUI rendering + notification card renderer
+ *   index.ts          — tool registration (Agent / AgentControl) + parameter schemas
+ *   protocol.ts       — pure JSONL protocol layer (tested)
+ *   rpc-client.ts     — stateful thin JSONL client (spawn + transport)
+ *   event-interpret.ts— raw RpcEvent → AgentEvent adapter (pure, tested)
+ *   agent-process.ts  — AgentProcess: one resident `pi --mode rpc` child, semantic API
+ *   registry.ts       — AgentRegistry: running-agent lifecycle + completion policy (tested)
+ *   model.ts          — model-spec → ResolvedModel (testable)
+ *   render.ts         — TUI rendering + notification card renderer
+ *   widget.ts         — Agents status widget
  *
  * Every sub‑agent is a resident `pi --mode rpc` child with a persisted
  * session. Foreground Agent calls block until completion; background calls
