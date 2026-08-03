@@ -19,6 +19,7 @@
  */
 
 import * as crypto from "node:crypto";
+import { interpretEvent } from "./event-interpret.js";
 import type { RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
 
@@ -93,24 +94,6 @@ export const WRAP_UP_MESSAGE =
 	"Please wrap up now: do not start any new work. Finish summarizing your current task and stop.";
 
 /** Build a "<name>: <args summary>" label for a tool call (widget excerpt). */
-function summarizeToolCall(name: string, args: unknown): string {
-	if (args && typeof args === "object") {
-		const a = args as Record<string, unknown>;
-		const key =
-			name === "bash"
-				? "command"
-				: name === "read" || name === "write" || name === "edit"
-					? "path"
-					: name === "grep" || name === "find"
-						? "pattern"
-						: undefined;
-		if (key && typeof a[key] === "string" && a[key]) return `${name}: ${a[key]}`;
-		const json = JSON.stringify(a);
-		return json.length > 80 ? `${name}: ${json.slice(0, 80)}\u2026` : `${name}: ${json}`;
-	}
-	return name;
-}
-
 export class AgentProcess {
 	readonly agentId: string = crypto.randomUUID();
 	readonly title: string;
@@ -352,62 +335,32 @@ export class AgentProcess {
 	private lastNotifiedActivityKey: string | undefined;
 
 	private onEvent(event: RpcEvent): void {
-		if (event.type === "agent_settled") {
-			this.settle();
-			return;
-		}
-		// Stream assistant text deltas to the tool card (foreground live output).
-		if (event.type === "message_update") {
-			// Activity tracking first, so onDelta callbacks read the latest value.
-			const message = event.message as
-				| {
-						content?: Array<{ type?: string; text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>;
-				  }
-				| undefined;
-			const content = message?.content;
-			if (Array.isArray(content) && content.length > 0) {
-				const last = content[content.length - 1];
-				let next: AgentActivity | null = null;
-				if (last?.type === "thinking" && typeof last.thinking === "string" && last.thinking.trim()) {
-					next = { kind: "thinking", text: last.thinking };
-				} else if (last?.type === "text" && typeof last.text === "string" && last.text.trim()) {
-					next = { kind: "text", text: last.text };
-				} else if (last?.type === "toolCall" && typeof last.name === "string") {
-					next = { kind: "tool", text: summarizeToolCall(last.name, last.arguments) };
-				}
-				if (next) {
-					this.latestActivity = next;
+		// Raw protocol shapes are interpreted in event-interpret.ts — the only
+		// place pi's event vocabulary is mapped onto ours. This switch is the
+		// whole policy surface: settle bookkeeping, activity dedup + push, and
+		// streamed deltas.
+		for (const ev of interpretEvent(event)) {
+			switch (ev.type) {
+				case "settled":
+					this.settle();
+					break;
+				case "activity": {
+					this.latestActivity = ev.activity;
 					// Thinking/tool transitions carry no text deltas — the card would
 					// never refresh without this push (text keeps streaming via onDelta).
-					const key = `${next.kind}\u0000${next.text}`;
-					if (next.kind !== "text" && key !== this.lastNotifiedActivityKey) {
+					const key = `${ev.activity.kind}\u0000${ev.activity.text}`;
+					if (ev.activity.kind !== "text" && key !== this.lastNotifiedActivityKey) {
 						this.lastNotifiedActivityKey = key;
-						this.onActivityChange?.(next);
+						this.onActivityChange?.(ev.activity);
 					}
+					break;
 				}
-			}
-			const ae = event.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
-			if (ae?.type === "text_delta" && typeof ae.delta === "string" && this.onDelta) {
-				this.onDelta(ae.delta);
-			}
-			return;
-		}
-		// Capture model API errors: the final assistant message carries
-		// stopReason "error" (rate limit, network, auth…). Without this the
-		// turn settles normally and we'd report an empty success.
-		if (event.type === "agent_end") {
-			const messages = event.messages as
-				| Array<{ role?: string; stopReason?: string; errorMessage?: unknown }>
-				| undefined;
-			if (Array.isArray(messages)) {
-				for (let i = messages.length - 1; i >= 0; i--) {
-					const m = messages[i];
-					if (m?.role === "assistant" && m.stopReason === "error") {
-						this.agentError =
-							typeof m.errorMessage === "string" && m.errorMessage ? m.errorMessage : "Sub-agent model API error";
-						return;
-					}
-				}
+				case "text_delta":
+					this.onDelta?.(ev.delta);
+					break;
+				case "agent_failed":
+					this.agentError = ev.error;
+					break;
 			}
 		}
 	}
