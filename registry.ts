@@ -11,10 +11,13 @@
  * TUI. AgentProcess satisfies RegisteredAgent structurally; index.ts adapts
  * the TUI widget via WidgetSurface.
  *
- * Policy (kept verbatim from the previous inline wiring):
+ * Policy (mirroring the previous inline wiring):
  *   - AgentControl.stop is a deliberate user action → no notification (B6).
  *   - Timeout/hard-stop completions still notify with status "stopped" (B5).
  *   - Every terminal path cleans up exactly once (remove is idempotent).
+ * Ordering note: the original wiring stopped the child *before* notifying on
+ * the spawn-failure path (D15) but *after* notifying on the completion path;
+ * complete() unifies both to notify → cleanup — no observable difference.
  */
 
 import type { AgentCompletion } from "./agent-process.js";
@@ -76,11 +79,13 @@ export class AgentRegistry {
 		}
 	}
 
-	/** AgentControl.stop path: graceful stop + removal (no notification). */
+	/** AgentControl.stop path: graceful stop + removal (no notification).
+	 *  A rejecting stop() propagates — the caller (AgentControl.execute)
+	 *  surfaces it as a tool error, matching the original wiring. */
 	async stopAndRemove(agentId: string): Promise<void> {
 		const agent = this.agents.get(agentId);
 		if (!agent) return;
-		await agent.stop().catch(() => {});
+		await agent.stop();
 		this.remove(agentId);
 	}
 
