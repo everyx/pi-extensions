@@ -154,7 +154,7 @@ function notifyCompletion(pi: ExtensionAPI, agent: AgentProcess, completion: Age
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,
-		title: agent.title ?? "sub-agent",
+		title: agent.title,
 		// Card body (never enters LLM context — verified against convertToLlm).
 		result: completion.output,
 		usage: {

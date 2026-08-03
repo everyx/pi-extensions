@@ -140,7 +140,7 @@ export class AgentWidget {
 			const { agent, frame } = row;
 			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
 			// Task label — same as the session display name (no prefix).
-			const name = agent.title ?? agent.sessionName ?? `sub-agent ${agent.agentId.slice(0, 8)}`;
+			const name = agent.title;
 			const elapsed = formatDuration(Date.now() - agent.startedAt);
 			lines.push(` ${spinner} ${theme.fg("muted", `${name} \u00b7 ${elapsed}`)}`);
 

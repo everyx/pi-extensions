@@ -56,7 +56,6 @@ interface TimerState {
 	startedAt?: number;
 	endedAt?: number;
 	interval?: ReturnType<typeof setInterval>;
-	model?: string;
 }
 
 // ─── Render context (from pi framework) ────────────────────────
@@ -88,10 +87,10 @@ function firstLine(s: string): string {
 }
 
 /** Muted metadata suffix, mirroring bash's ` (timeout 10s)` pattern. */
-function buildMetaSuffix(state: TimerState, args: AgentParams, theme: Theme): string {
+function buildMetaSuffix(args: AgentParams, theme: Theme): string {
 	const parts: string[] = [];
 	if (args.run_in_background) parts.push("background");
-	const model = state.model ?? args.model;
+	const model = args.model;
 	if (model) parts.push(model);
 	if (parts.length === 0) return "";
 	return theme.fg("muted", ` (${parts.join(" \u00b7 ")})`);
@@ -107,7 +106,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 
 	const title = args.title.trim() || firstLine(args.prompt);
 	return new Text(
-		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", title)}${buildMetaSuffix(context.state, args, theme)}`,
+		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", title)}${buildMetaSuffix(args, theme)}`,
 		0,
 		0,
 	);
