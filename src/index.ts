@@ -100,6 +100,12 @@ const AgentParamsSchema = Type.Object({
 				"Omit to inherit your current model.",
 		}),
 	),
+	thinking: Type.Optional(
+		StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"], {
+			description:
+				'Reasoning intensity for the sub-agent ("off"…"max"). ' + "Omit to inherit your current thinking level.",
+		}),
+	),
 	tools: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
@@ -226,6 +232,7 @@ export default function (pi: ExtensionAPI) {
 			const agent = new AgentProcess({
 				cwd: ctx.cwd,
 				model: resolved.model,
+				thinking: params.thinking ?? pi.getThinkingLevel(),
 				tools: params.tools,
 				title: params.title,
 				sessionName,
@@ -235,7 +242,7 @@ export default function (pi: ExtensionAPI) {
 					streamed += delta;
 					onUpdate?.({
 						content: [{ type: "text", text: streamed }],
-						details: { task, startedAt },
+						details: { task, startedAt, activity: agent.getLatestActivity() ?? undefined },
 					});
 				},
 			});

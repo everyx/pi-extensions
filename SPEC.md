@@ -61,6 +61,8 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 ```
 Agent 检查 CI 配置 (sonnet)
+Thinking...                  ← 活动行（思考中：italic + thinkingText，pi 隐藏 thinking 同款）
+bash: pnpm check             ← 活动行（工具调用：工具名 toolTitle + 冒号 + muted 参数）
 <prompt 全文>            ← 输入
 <空行>
 <子 agent 输出>          ← 输出（前台流式：text_delta → onUpdate 逐字滚动）
@@ -69,8 +71,10 @@ session: /path/...jsonl
 ```
 
 - header：`Agent`（bold toolTitle）+ title（必填 3-5 词）+ muted meta `(background · model)`——只显非默认值，对齐 bash 的 ` (timeout 10s)`
+- 活动行（widget 对齐，仅前台流式期间）：`Thinking...`（italic + thinkingText）与工具调用（工具名 toolTitle + 参数），数据同 widget 的 `latestActivity`（不进 LLM context）；正文本身已流式，故不重复显示 text 活动
 - body：输入（prompt 全文）+ 输出（流式），整体 `toolOutput`，bash 同款折叠（`... N earlier lines, <key> to expand`）
 - footer：`Took/Elapsed X.Xs`（muted）+ `session: <path>`（前台完成时）
+- 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值（`pi.getThinkingLevel()`），经 `--thinking` 传给子进程
 
 ### AgentControl 卡片
 

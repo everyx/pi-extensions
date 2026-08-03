@@ -187,6 +187,16 @@ describe("AgentProcess — spawnAndSend", () => {
 		});
 		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--session-dir", "/home/u/.pi/agent/subagent-sessions"]);
 	});
+
+	it("passes thinking level through as --thinking", () => {
+		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", thinking: "high" });
+		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--thinking", "high"]);
+	});
+
+	it("omits --thinking when no level is given (inherit main session)", () => {
+		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x" });
+		assert.deepEqual(fake.args, ["--model", "google/gemini-x"]);
+	});
 });
 
 describe("AgentProcess — waitForCompletion", () => {

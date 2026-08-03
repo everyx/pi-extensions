@@ -14,6 +14,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
+import type { AgentActivity } from "./agent-process.js";
 
 // ─── Tool params ───────────────────────────────────────────
 
@@ -22,6 +23,8 @@ export interface AgentParams {
 	/** Required 3-5 word task label — header/notification title and session name. */
 	title: string;
 	model?: string;
+	/** Reasoning intensity ("off"…"max"); inherit the main session's level when omitted. */
+	thinking?: string;
 	tools?: string[];
 	run_in_background?: boolean;
 }
@@ -43,6 +46,8 @@ export interface SubagentDetails {
 	sessionPath?: string;
 	startedAt?: number;
 	endedAt?: number;
+	/** Latest activity (thinking/tool) for the live card rows — widget parity. */
+	activity?: AgentActivity;
 }
 
 // ─── Timer state persisted via context.state ───────────────────
@@ -67,6 +72,13 @@ interface RenderContext {
 /** Seconds with one decimal — shared by cards and the Agents widget. */
 export function formatDuration(ms: number): string {
 	return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** "bash: sleep 20" → { name: "bash", args: "sleep 20" }; null when no label. */
+export function splitToolLabel(text: string): { name: string; args: string } | null {
+	const colon = text.indexOf(": ");
+	if (colon <= 0) return null;
+	return { name: text.slice(0, colon), args: text.slice(colon + 2) };
 }
 
 /** Extract a one-line summary of a long string: first line, ellipsis if truncated. */
@@ -170,6 +182,23 @@ export function renderAgentResult(
 	const cmp = new Container();
 	const promptText = details.task.trim();
 	const output = text?.trim() ?? "";
+
+	// Live activity rows (widget parity): thinking status and tool calls.
+	// Text is already streaming as the card body, so only non-text kinds show.
+	const activity = details.activity;
+	if (isPartial && activity && activity.kind !== "text") {
+		if (activity.kind === "thinking") {
+			// Same label/style as pi's hidden thinking and the Agents widget.
+			cmp.addChild(new Text(`\n${theme.italic(theme.fg("thinkingText", "Thinking..."))}`, 0, 0));
+		} else if (activity.kind === "tool") {
+			const tool = splitToolLabel(activity.text);
+			if (tool) {
+				cmp.addChild(new Text(`\n${theme.fg("toolTitle", tool.name)}: ${theme.fg("muted", tool.args)}`, 0, 0));
+			} else {
+				cmp.addChild(new Text(`\n${theme.fg("toolTitle", activity.text)}`, 0, 0));
+			}
+		}
+	}
 
 	// Body: prompt (input) + blank line + final output.
 	const bodyParts: string[] = [];
