@@ -131,8 +131,10 @@ export class AgentWidget {
 	}
 
 	private render(theme: Theme): string[] {
-		// 1-char left padding matches pi's string[] widget form (Text(line, 1, 0)).
-		const lines: string[] = [` ${theme.fg("accent", `\u25cf ${theme.fg("accent", "Agents")}`)}`];
+		// Leading blank line isolates the widget from the chat above (mirrors
+		// pi's pending-messages Spacer); 1-char left padding matches pi's
+		// string[] widget form (Text(line, 1, 0)).
+		const lines: string[] = ["", ` ${theme.fg("accent", `\u25cf ${theme.fg("accent", "Agents")}`)}`];
 		for (const row of this.rows.values()) {
 			const { agent, frame } = row;
 			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
