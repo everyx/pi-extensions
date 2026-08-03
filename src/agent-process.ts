@@ -121,7 +121,11 @@ export class AgentProcess {
 	private readonly hardLimitTokens: number;
 
 	private settleWaiters = new Set<() => void>();
-	private settled = false;
+	/** Total agent_settled events seen; lets awaitSettled skip settles that
+	 *  arrived while no waiter was attached (synchronous test emit pattern). */
+	private settleCount = 0;
+	/** settleCount observed at the last awaitSettled() call. */
+	private lastSettledCount = 0;
 	private done = false;
 	private wrappedUp = false;
 	private hardAborted = false;
@@ -372,16 +376,27 @@ export class AgentProcess {
 	}
 
 	private settle(): void {
-		if (this.settled) return;
-		this.settled = true;
+		// Count-based: agent_settled fires when the child's run loop finishes —
+		// a wrap-up steer re-runs the loop and settles again, so each post-
+		// steer/post-abort turn must be awaited (no one-shot latch, D10). The
+		// count also survives settles that arrive while no waiter is attached.
+		this.settleCount++;
 		for (const waiter of this.settleWaiters) waiter();
 		this.settleWaiters.clear();
 	}
 
 	private awaitSettled(): Promise<void> {
-		if (this.settled || this.done) return Promise.resolve();
+		if (this.done) return Promise.resolve();
+		// A settle arrived since our last wait — pass through immediately.
+		if (this.settleCount > this.lastSettledCount) {
+			this.lastSettledCount = this.settleCount;
+			return Promise.resolve();
+		}
 		return new Promise((resolve) => {
-			this.settleWaiters.add(resolve);
+			this.settleWaiters.add(() => {
+				this.lastSettledCount = this.settleCount;
+				resolve();
+			});
 		});
 	}
 }
