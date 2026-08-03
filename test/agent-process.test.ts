@@ -1,5 +1,5 @@
 /**
- * Tests for AgentProcess semantics (src/agent-process.ts).
+ * Tests for AgentProcess semantics (agent-process.ts).
  *
  * The stateful transport (rpc-client.ts) is NOT tested — a fake client is
  * injected via the `createClient` seam so we can drive the state machine
@@ -9,8 +9,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type AgentActivity, AgentProcess, type AgentProcessOptions } from "../src/agent-process.js";
-import type { RpcClientOptions } from "../src/rpc-client.js";
+import { type AgentActivity, AgentProcess, type AgentProcessOptions } from "../agent-process.js";
+import type { RpcClientOptions } from "../rpc-client.js";
 
 /** Programmable fake standing in for RpcClient. */
 class FakeClient {

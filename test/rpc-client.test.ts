@@ -1,5 +1,5 @@
 /**
- * Tests for the stateful RPC transport (src/rpc-client.ts) against a mock
+ * Tests for the stateful RPC transport (rpc-client.ts) against a mock
  * child process (test/fixtures/rpc-mock.js).
  *
  * Covers the two real transport bugs found in code review:
@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { RpcClient } from "../src/rpc-client.js";
+import { RpcClient } from "../rpc-client.js";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "rpc-mock.js");
 

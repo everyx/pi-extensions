@@ -26,13 +26,13 @@
 		"*.ts": "biome check --write --no-errors-on-unmatched"
 	},
 	"files": [
-		"src/",
+		"*.ts",
 		"README.md",
 		"LICENSE"
 	],
 	"pi": {
 		"extensions": [
-			"./src/index.ts"
+			"./index.ts"
 		]
 	},
 	"peerDependencies": {
