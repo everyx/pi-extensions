@@ -131,10 +131,11 @@ export class AgentWidget {
 	}
 
 	private render(theme: Theme): string[] {
-		// Leading blank line isolates the widget from the chat above (mirrors
-		// pi's pending-messages Spacer); 1-char left padding matches pi's
-		// string[] widget form (Text(line, 1, 0)).
-		const lines: string[] = ["", ` ${theme.fg("accent", `\u25cf ${theme.fg("accent", "Agents")}`)}`];
+		// pi already adds a leading Spacer(1) above extension widgets
+		// (interactive-mode renderWidgetContainer, leadingSpacer=true) — no
+		// manual blank line. 1-char left padding matches pi's string[] widget
+		// form (Text(line, 1, 0)).
+		const lines: string[] = [` ${theme.fg("accent", `\u25cf ${theme.fg("accent", "Agents")}`)}`];
 		for (const row of this.rows.values()) {
 			const { agent, frame } = row;
 			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);

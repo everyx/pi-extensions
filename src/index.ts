@@ -245,6 +245,15 @@ export default function (pi: ExtensionAPI) {
 						details: { task, startedAt, activity: agent.getLatestActivity() ?? undefined },
 					});
 				},
+				onActivityChange: (activity) => {
+					if (params.run_in_background) return; // widget + notification cover background
+					// Thinking/tool transitions refresh the card's activity row even
+					// while no text delta is streaming.
+					onUpdate?.({
+						content: [{ type: "text", text: streamed }],
+						details: { task, startedAt, activity },
+					});
+				},
 			});
 
 			// Wire the execute AbortSignal (user cancel) to a graceful stop.
