@@ -19,7 +19,7 @@
  */
 
 import * as crypto from "node:crypto";
-import type { RpcEvent } from "./protocol.js";
+import type { RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
 
 export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
@@ -58,8 +58,8 @@ export interface AgentProcessOptions {
 	/** Tool allowlist (comma-joined into --tools). */
 	tools?: string[];
 	/** Short task title (notification card). */
-	title?: string;
-	/** Display label (title ?? prompt first line) — widget rows only, NOT passed as --name.
+	title: string;
+	/** Display label — widget rows only, NOT passed as --name.
 	 *  Sub-agent sessions follow pi's default naming (empty name → firstMessage). */
 	sessionName?: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
@@ -113,7 +113,7 @@ function summarizeToolCall(name: string, args: unknown): string {
 
 export class AgentProcess {
 	readonly agentId: string = crypto.randomUUID();
-	readonly title: string | undefined;
+	readonly title: string;
 	/** Session display name ("<title>"), what the widget and session list show. */
 	readonly sessionName: string | undefined;
 	readonly startedAt = Date.now();
@@ -183,14 +183,12 @@ export class AgentProcess {
 
 	/** Spawn + send the prompt; resolves once the prompt preflight succeeded. */
 	async spawnAndSend(prompt: string): Promise<{ ok: true } | { ok: false; error: string }> {
-		const response = await this.client
-			.sendCommand({ id: this.agentId, type: "prompt", message: prompt })
-			.catch((err: Error) => ({
-				type: "response" as const,
-				command: "prompt",
-				success: false as const,
-				error: err.message,
-			}));
+		const response = await this.client.sendCommand({ type: "prompt", message: prompt }).catch((err: Error) => ({
+			type: "response" as const,
+			command: "prompt",
+			success: false as const,
+			error: err.message,
+		}));
 
 		if (!response.success) {
 			this.status = "failed";
@@ -198,9 +196,8 @@ export class AgentProcess {
 		}
 
 		// Best-effort session info for the notification / attach (issue #10).
-		const state = await this.client.sendCommand({ id: this.agentId, type: "get_state" }).catch(() => null);
-		if (state?.success && state.data) {
-			const data = state.data as { sessionFile?: string; sessionId?: string };
+		const data = await this.sendData<{ sessionFile?: string; sessionId?: string }>({ type: "get_state" });
+		if (data) {
 			this.sessionPath = data.sessionFile;
 			this.sessionId = data.sessionId;
 		}
@@ -211,35 +208,37 @@ export class AgentProcess {
 
 	/** Inject a redirecting message; delivered after the current turn settles. */
 	async steer(message: string): Promise<void> {
-		await this.client.sendCommand({ id: this.agentId, type: "steer", message });
+		await this.client.sendCommand({ type: "steer", message });
 	}
 
 	/** Hard-interrupt the current turn. */
 	async abort(): Promise<void> {
-		await this.client.sendCommand({ id: this.agentId, type: "abort" }).catch(() => {});
+		await this.client.sendCommand({ type: "abort" }).catch(() => {});
 	}
 
 	/** Current final assistant text (rpc get_last_assistant_text). */
 	async lastOutput(): Promise<string> {
-		const response = await this.client
-			.sendCommand({ id: this.agentId, type: "get_last_assistant_text" })
-			.catch(() => null);
-		if (response?.success && response.data) {
-			const data = response.data as { text?: string | null };
-			if (data.text) return data.text;
-		}
-		return "";
+		const data = await this.sendData<{ text?: string | null }>({ type: "get_last_assistant_text" });
+		return data?.text ?? "";
 	}
 
 	/** Best-effort token/tool stats from get_session_stats. */
 	async getStats(): Promise<{ tokens: number; toolUses: number } | null> {
-		const response = await this.client.sendCommand({ id: this.agentId, type: "get_session_stats" }).catch(() => null);
-		if (!response?.success || !response.data) return null;
-		const data = response.data as { tokens?: { total?: number }; toolCalls?: number };
+		const data = await this.sendData<{ tokens?: { total?: number }; toolCalls?: number }>({
+			type: "get_session_stats",
+		});
+		if (!data) return null;
 		return {
 			tokens: data.tokens?.total ?? 0,
 			toolUses: data.toolCalls ?? 0,
 		};
+	}
+
+	/** sendCommand → typed response payload (null on failure/timeout/empty). */
+	private async sendData<T>(command: RpcCommand): Promise<T | null> {
+		const response = await this.client.sendCommand(command).catch(() => null);
+		if (!response?.success || !response.data) return null;
+		return response.data as T;
 	}
 
 	/**
@@ -315,10 +314,6 @@ export class AgentProcess {
 		};
 	}
 
-	/**
-	 * Graceful stop: stdin EOF → pi rpc shutdown(). If the child doesn't
-	 * exit within STOP_GRACE_MS, SIGTERM as a fallback.
-	 */
 	/**
 	 * Graceful stop: stdin EOF → pi rpc shutdown(). If the child doesn't
 	 * exit within STOP_GRACE_MS, SIGTERM as a fallback. Flags the stop as
