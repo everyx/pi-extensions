@@ -19,7 +19,8 @@ import { Container, Text } from "@earendil-works/pi-tui";
 
 export interface AgentParams {
 	prompt: string;
-	description?: string;
+	/** Optional 3-5 word task title — primary header/notification title, prompt first line as fallback. */
+	title?: string;
 	model?: string;
 	tools?: string[];
 	run_in_background?: boolean;
@@ -96,8 +97,6 @@ function buildMetaSuffix(state: TimerState, args: AgentParams, theme: Theme): st
 	if (args.run_in_background) parts.push("background");
 	const model = state.model ?? args.model;
 	if (model) parts.push(model);
-	const desc = args.description;
-	if (desc) parts.push(desc);
 	if (parts.length === 0) return "";
 	return theme.fg("muted", ` (${parts.join(" | ")})`);
 }
@@ -113,7 +112,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 		context.state.endedAt = undefined;
 	}
 
-	const summary = promptSummary(args.prompt);
+	const summary = args.title?.trim() || promptSummary(args.prompt);
 	const emoji = args.run_in_background ? "\ud83c\udfaf" : "\u26a1";
 	return new Text(
 		`${theme.fg("toolTitle", theme.bold("agent"))} ${theme.fg("toolTitle", emoji)} ${theme.fg("toolTitle", summary)}${buildMetaSuffix(context.state, args, theme)}`,
