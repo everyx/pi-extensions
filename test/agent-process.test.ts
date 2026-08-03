@@ -19,6 +19,8 @@ class FakeClient {
 	killCalls = 0;
 	exitCode: number | null = null;
 	isClosed = false;
+	/** argv captured at construction (--model/--tools/--session-dir). */
+	args: string[] = [];
 
 	private onEvent?: (event: { type: string }) => void;
 	private onExit?: () => void;
@@ -42,6 +44,7 @@ class FakeClient {
 	constructor(options: RpcClientOptions) {
 		this.onEvent = options.onEvent;
 		this.onExit = options.onExit;
+		this.args = options.args;
 	}
 
 	async sendCommand(command: { id: string; type: string; message?: string }) {
@@ -93,6 +96,14 @@ class FakeClient {
 
 	emitSettled(): void {
 		this.onEvent?.({ type: "agent_settled" });
+	}
+
+	emitEvent(event: {
+		type: string;
+		assistantMessageEvent?: { type: string; delta?: unknown };
+		messages?: Array<{ role?: string; stopReason?: string; errorMessage?: unknown; content?: unknown[] }>;
+	}): void {
+		this.onEvent?.(event as never);
 	}
 
 	emitExit(code: number): void {
@@ -154,11 +165,34 @@ describe("AgentProcess — spawnAndSend", () => {
 		assert.equal(agent.status, "failed");
 	});
 
-	it("passes model/tools/title through to the client argv", () => {
-		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", tools: ["read", "grep"], title: "explore" });
-		// The createClient seam receives RpcClientOptions — but FakeClient only
-		// captures event handlers, not args. Verify via the agent instead:
-		assert.ok(fake);
+	it("passes model/tools/sessionDir through and sets --name when title is given", () => {
+		const { fake } = makeAgent({
+			cwd: "/tmp",
+			model: "google/gemini-x",
+			tools: ["read", "grep"],
+			title: "explore",
+			sessionName: "explore",
+			sessionDir: "/home/u/.pi/agent/subagent-sessions",
+		});
+		assert.deepEqual(fake.args, [
+			"--model",
+			"google/gemini-x",
+			"--tools",
+			"read,grep",
+			"--name",
+			"explore",
+			"--session-dir",
+			"/home/u/.pi/agent/subagent-sessions",
+		]);
+	});
+
+	it("omits --name when no title is given (pi default firstMessage)", () => {
+		const { fake } = makeAgent({
+			cwd: "/tmp",
+			model: "google/gemini-x",
+			sessionDir: "/home/u/.pi/agent/subagent-sessions",
+		});
+		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--session-dir", "/home/u/.pi/agent/subagent-sessions"]);
 	});
 });
 
@@ -245,6 +279,69 @@ describe("AgentProcess — sessionSummary", () => {
 	it("returns null when entries are empty or transport fails", async () => {
 		const { agent } = makeAgent({ cwd: "/tmp" });
 		assert.equal(await agent.sessionSummary(), null);
+	});
+});
+
+describe("AgentProcess — onDelta", () => {
+	it("streams text_delta events from message_update", async () => {
+		const deltas: string[] = [];
+		const { fake } = makeAgent({ cwd: "/tmp", onDelta: (d) => deltas.push(d) });
+
+		fake.emitEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "Hello " },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "World" },
+		});
+		fake.emitEvent({ type: "agent_settled" });
+
+		assert.deepEqual(deltas, ["Hello ", "World"]);
+	});
+
+	it("ignores non-delta message updates", async () => {
+		const deltas: string[] = [];
+		const { fake } = makeAgent({ cwd: "/tmp", onDelta: (d) => deltas.push(d) });
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta" } });
+		assert.deepEqual(deltas, []);
+	});
+});
+
+describe("AgentProcess — agent API errors", () => {
+	it("marks failed with the API error when agent_end reports stopReason error", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		await agent.spawnAndSend("do it");
+		fake.lastText = ""; // error turn produces no assistant text
+
+		const completionPromise = agent.waitForCompletion();
+		fake.emitEvent({
+			type: "agent_end",
+			messages: [
+				{ role: "user", content: [{ type: "text", text: "hi" }] },
+				{ role: "assistant", content: [], stopReason: "error", errorMessage: "429 Rate limited" },
+			],
+		});
+		fake.emitSettled();
+
+		const completion = await completionPromise;
+		assert.equal(completion.status, "failed");
+		assert.equal(completion.output, "429 Rate limited");
+	});
+
+	it("stays completed when agent_end has no error stop reason", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		await agent.spawnAndSend("do it");
+
+		const completionPromise = agent.waitForCompletion();
+		fake.emitEvent({
+			type: "agent_end",
+			messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "end_turn" }],
+		});
+		fake.emitSettled();
+
+		const completion = await completionPromise;
+		assert.equal(completion.status, "completed");
 	});
 });
 

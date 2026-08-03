@@ -89,6 +89,11 @@ Ask a sub‑agent to research the project structure, but only let it use read an
 
 Sub‑agent won't see any other tools. Read-only exploration with a cheaper model is the recommended pattern for research tasks.
 
+## Observability
+
+- **Foreground** — the sub‑agent's output streams live into the tool card, word by word (rpc `text_delta` events forwarded to `onUpdate`).
+- **Background** — a persistent status widget sits above the editor with an `Agents` heading, one line per running agent: `⠋ <title> · 42s`. Status-only by design (no output preview — full content arrives via the completion notification, and via `pi --session <path>` for review). The widget clears itself when the last agent finishes.
+
 ## How it works
 
 Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
@@ -96,7 +101,7 @@ Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
 - **Foreground** — `Agent` waits for the child to settle, fetches the final output, then closes stdin (graceful shutdown).
 - **Background** — `Agent` returns immediately; on `agent_settled` the extension delivers a `subagent-notification` (JSON content to the LLM, rendered card to the user) and the child shuts down gracefully.
 - **Steer/stop** — `AgentControl` writes a `steer`/`abort` command (or closes stdin for `stop`) to the child's stdin.
-- **Attach** — sessions are persisted to `~/.pi/agent/sessions/` and are **never deleted**. Watch one from another terminal: `pi --session <id>` or `pi -r` to pick from the list. The notification card shows the session path.
+- **Attach / review** — sub‑agent sessions are stored in `<agent dir>/subagent-sessions/` (default `~/.pi/agent/subagent-sessions/`; override with `PI_SUBAGENT_SESSION_DIR`, and `PI_CODING_AGENT_DIR` is honored for the agent dir, same as pi), deliberately **outside** pi's standard session tree so `pi -r` stays clean. They are **never deleted**. To resume or review one, find the session path in the main conversation (the Agent call result or the completion notification card) and run `pi --session <path>` — or ask the LLM, the notification carries the path too.
 - **Graceful turn limits** — after each settled turn the extension checks token usage: at the wrap‑up threshold it steers a "wrap up" message; at the hard limit (or total timeout) it aborts, waits for the settle, then shuts down. No truncated output from an abrupt SIGTERM.
 
 ## Nested sub‑agents
@@ -105,6 +110,7 @@ Sub‑agents are full pi instances and therefore spawn sub‑agents of their own
 
 ## Costs & caveats
 
+- **Headless (`pi -p`) background agents die with the host.** The main process exits when the agent finishes its response — background children are then torn down via stdin EOF (they never leak as orphans). Background workflows (wait for notification, steer, stop) are designed for the TUI session, which stays alive.
 - **One process per agent.** Foreground and background are identical (resident rpc child). Many background agents = many processes — spawn them in moderation.
 - **Notification is one-shot.** A background result is delivered once; if the main session dies before delivery, the result survives only in the session file (attach it with `pi --session <id>`).
 - **Steer needs a live agent.** `AgentControl` only works while the agent is still running, before its completion notification.
