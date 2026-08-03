@@ -45,16 +45,15 @@ class FakeClient {
 		this.args = options.args;
 	}
 
-	async sendCommand(command: { id: string; type: string; message?: string }) {
+	async sendCommand(command: { type: string; message?: string }) {
 		this.commands.push(command);
 		switch (command.type) {
 			case "prompt":
 				return this.promptOk
-					? { id: command.id, type: "response", command: "prompt", success: true }
-					: { id: command.id, type: "response", command: "prompt", success: false, error: "preflight failed" };
+					? { type: "response", command: "prompt", success: true }
+					: { type: "response", command: "prompt", success: false, error: "preflight failed" };
 			case "get_state":
 				return {
-					id: command.id,
 					type: "response",
 					command: "get_state",
 					success: true,
@@ -62,7 +61,6 @@ class FakeClient {
 				};
 			case "get_session_stats":
 				return {
-					id: command.id,
 					type: "response",
 					command: "get_session_stats",
 					success: true,
@@ -70,7 +68,6 @@ class FakeClient {
 				};
 			case "get_last_assistant_text":
 				return {
-					id: command.id,
 					type: "response",
 					command: "get_last_assistant_text",
 					success: true,
@@ -78,9 +75,9 @@ class FakeClient {
 				};
 			case "steer":
 			case "abort":
-				return { id: command.id, type: "response", command: command.type, success: true };
+				return { type: "response", command: command.type, success: true };
 			default:
-				return { id: command.id, type: "response", command: command.type, success: true };
+				return { type: "response", command: command.type, success: true };
 		}
 	}
 
@@ -123,7 +120,7 @@ class FakeClient {
 function makeAgent(options: Partial<AgentProcessOptions> & { cwd: string }): { agent: AgentProcess; fake: FakeClient } {
 	let fake!: FakeClient;
 	const agent = new AgentProcess(
-		{ ...options },
+		{ ...options, title: options.title ?? "test agent" },
 		{
 			createClient: (opts: RpcClientOptions) => {
 				fake = new FakeClient(opts);
@@ -179,23 +176,31 @@ describe("AgentProcess — spawnAndSend", () => {
 		]);
 	});
 
-	it("omits --name when no title is given (pi default firstMessage)", () => {
+	it("uses title as --name when sessionName is not given (title is required)", () => {
 		const { fake } = makeAgent({
 			cwd: "/tmp",
 			model: "google/gemini-x",
+			title: "explore",
 			sessionDir: "/home/u/.pi/agent/subagent-sessions",
 		});
-		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--session-dir", "/home/u/.pi/agent/subagent-sessions"]);
+		assert.deepEqual(fake.args, [
+			"--model",
+			"google/gemini-x",
+			"--name",
+			"explore",
+			"--session-dir",
+			"/home/u/.pi/agent/subagent-sessions",
+		]);
 	});
 
 	it("passes thinking level through as --thinking", () => {
-		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", thinking: "high" });
-		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--thinking", "high"]);
+		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", title: "explore", thinking: "high" });
+		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--thinking", "high", "--name", "explore"]);
 	});
 
 	it("omits --thinking when no level is given (inherit main session)", () => {
-		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x" });
-		assert.deepEqual(fake.args, ["--model", "google/gemini-x"]);
+		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", title: "explore" });
+		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--name", "explore"]);
 	});
 });
 
