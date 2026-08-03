@@ -47,7 +47,7 @@ function expandTilde(p: string): string {
 }
 
 /**
- * Sub-agent sessions directory: `<agentDir>/subagent-sessions` by default
+ * Agent sessions directory: `<agentDir>/subagent-sessions` by default
  * (agentDir honors PI_CODING_AGENT_DIR like pi itself), overridable via
  * PI_SUBAGENT_SESSION_DIR. Kept outside pi's standard session tree so
  * `pi -r` stays clean; resume goes through the main session via the
@@ -201,7 +201,7 @@ export default function (pi: ExtensionAPI) {
 	// ── Agent ───────────────────────────────────────────
 	pi.registerTool({
 		name: "Agent",
-		label: "Sub-agent",
+		label: "Agent",
 		description:
 			"Spawn a sub-agent that works in its own isolated context window. " +
 			"The sub-agent starts with zero context from this conversation, so the prompt " +
@@ -241,6 +241,7 @@ export default function (pi: ExtensionAPI) {
 			// Foreground: stream assistant deltas into the tool card (live output).
 			let streamed = "";
 			const agent = new AgentProcess({
+				agentId: registry.nextAgentId(),
 				cwd: ctx.cwd,
 				model: resolved.model,
 				thinking: params.thinking ?? pi.getThinkingLevel(),
@@ -309,14 +310,14 @@ export default function (pi: ExtensionAPI) {
 						.catch(() => registry.stopAndRemove(agent.agentId));
 
 					onUpdate?.({
-						content: [{ type: "text", text: `Started agent ${agent.agentId} (background)` }],
+						content: [{ type: "text", text: `Started ${agent.title} (background)` }],
 						details: { agentId: agent.agentId, runInBackground: true, startedAt },
 					});
 					return {
 						content: [
 							{
 								type: "text",
-								text: `Started background agent ${agent.agentId} — completion notification will arrive; use AgentControl to steer/stop meanwhile.`,
+								text: `Started background agent ${agent.agentId}. Completion arrives as a notification.`,
 							},
 						],
 						details: { agentId: agent.agentId, runInBackground: true, startedAt },
@@ -373,7 +374,7 @@ export default function (pi: ExtensionAPI) {
 	// ── AgentControl ────────────────────────────────────
 	pi.registerTool({
 		name: "AgentControl",
-		label: "Control Sub-agent",
+		label: "Control Agent",
 		description:
 			"Intervene in a running sub-agent. steer: inject a message into its conversation to " +
 			"redirect its work mid-run (delivered after its current turn settles — only supported " +
@@ -413,7 +414,7 @@ export default function (pi: ExtensionAPI) {
 				await registry.stopAndRemove(params.agent_id);
 				return {
 					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
-					details: { agentId: params.agent_id },
+					details: { agentId: params.agent_id, action: "stop", title: agent.title },
 				};
 			}
 
@@ -440,12 +441,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			await agent.steer(message);
-			// TUI relay: capture the agent's current output as the card body snapshot
-			// (one get_last_assistant_text round-trip; details never enter LLM context).
-			const snapshot = await agent.lastOutput().catch(() => "");
 			return {
 				content: [{ type: "text", text: `Steered agent ${params.agent_id}.` }],
-				details: { agentId: agent.agentId, action: "steer", message, snapshot },
+				details: { agentId: agent.agentId, action: "steer", title: agent.title, message },
 			};
 		},
 

@@ -48,10 +48,22 @@ export class AgentRegistry {
 	private readonly agents = new Map<string, RegisteredAgent>();
 	private readonly notify: AgentRegistryDeps["notify"];
 	private readonly getWidget: NonNullable<AgentRegistryDeps["getWidget"]>;
+	private idCounter = 0;
 
 	constructor(deps: AgentRegistryDeps) {
 		this.notify = deps.notify;
 		this.getWidget = deps.getWidget ?? (() => null);
+	}
+
+	/**
+	 * Sequential short id (a1, a2, …) — the LLM-facing agent reference for
+	 * this session (AgentControl targets, notification JSON). Sequential
+	 * beats random here: short, trivially copy-safe for the model, and the
+	 * only uniqueness domain is this session's live set.
+	 */
+	nextAgentId(): string {
+		this.idCounter++;
+		return `a${this.idCounter}`;
 	}
 
 	/** Track a background agent: registry entry + widget row. */

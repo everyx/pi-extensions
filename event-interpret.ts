@@ -95,8 +95,7 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 					return [
 						{
 							type: "agent_failed",
-							error:
-								typeof m.errorMessage === "string" && m.errorMessage ? m.errorMessage : "Sub-agent model API error",
+							error: typeof m.errorMessage === "string" && m.errorMessage ? m.errorMessage : "Agent model API error",
 						},
 					];
 				}

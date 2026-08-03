@@ -90,6 +90,13 @@ describe("AgentRegistry — tracking", () => {
 		assert.equal(registry.lookup("a1")?.agentId, "a1");
 	});
 
+	it("nextAgentId yields sequential short ids (a1, a2, …)", () => {
+		const { registry } = makeRegistry(null);
+		assert.equal(registry.nextAgentId(), "a1");
+		assert.equal(registry.nextAgentId(), "a2");
+		assert.equal(registry.nextAgentId(), "a3");
+	});
+
 	it("lookup returns undefined for unknown ids", () => {
 		const { registry } = makeRegistry();
 		assert.equal(registry.lookup("nope"), undefined);

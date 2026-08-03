@@ -18,7 +18,6 @@
  *   window → hard-stop the child if it never settles (hung model call).
  */
 
-import * as crypto from "node:crypto";
 import { interpretEvent } from "./event-interpret.js";
 import type { RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
@@ -65,6 +64,8 @@ export interface AgentProcessOptions {
 	tools?: string[];
 	/** Short task title (notification card). */
 	title: string;
+	/** Sequential short id ("a1", "a2", …) assigned by the registry. */
+	agentId: string;
 	/** Display label — widget rows only, NOT passed as --name.
 	 *  Sub-agent sessions follow pi's default naming (empty name → firstMessage). */
 	sessionName?: string;
@@ -100,7 +101,7 @@ export const WRAP_UP_MESSAGE =
 
 /** Build a "<name>: <args summary>" label for a tool call (widget excerpt). */
 export class AgentProcess {
-	readonly agentId: string = crypto.randomUUID();
+	readonly agentId: string;
 	readonly title: string;
 	/** Session display name ("<title>"), what the widget and session list show. */
 	readonly sessionName: string | undefined;
@@ -135,6 +136,7 @@ export class AgentProcess {
 	sessionId?: string;
 
 	constructor(options: AgentProcessOptions, deps: AgentProcessDeps = {}) {
+		this.agentId = options.agentId;
 		this.title = options.title;
 		this.sessionName = options.sessionName ?? options.title;
 		this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;

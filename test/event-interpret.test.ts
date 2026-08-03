@@ -150,7 +150,7 @@ describe("interpretEvent — agent_end", () => {
 			type: "agent_end",
 			messages: [{ role: "assistant", content: [], stopReason: "error" }],
 		};
-		assert.deepEqual(interpretEvent(raw), [{ type: "agent_failed", error: "Sub-agent model API error" }]);
+		assert.deepEqual(interpretEvent(raw), [{ type: "agent_failed", error: "Agent model API error" }]);
 	});
 
 	it("ignores agent_end without an error stop reason", () => {

@@ -11,10 +11,26 @@
  * (verified against `convertToLlm` in pi's dist/core/messages.js).
  */
 
+import { homedir } from "node:os";
+import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Box, Container, Text } from "@earendil-works/pi-tui";
 import type { AgentActivity } from "./agent-process.js";
+
+/** Spinner frames shared by the Agents widget and the stop animation. */
+export const SPINNER = [
+	"\u281b",
+	"\u2819",
+	"\u2839",
+	"\u2838",
+	"\u283c",
+	"\u2834",
+	"\u2826",
+	"\u2827",
+	"\u2807",
+	"\u280f",
+];
 
 // ─── Tool params ───────────────────────────────────────────
 
@@ -56,6 +72,10 @@ interface TimerState {
 	startedAt?: number;
 	endedAt?: number;
 	interval?: ReturnType<typeof setInterval>;
+	/** Agent title for the AgentControl header (written by renderResult). */
+	title?: string;
+	/** Spinner frame index for the stop animation. */
+	stopFrame?: number;
 }
 
 // ─── Render context (from pi framework) ────────────────────────
@@ -136,14 +156,14 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 	);
 }
 
-export function renderAgentControlCall(args: AgentControlParams, theme: Theme): Text {
+export function renderAgentControlCall(args: AgentControlParams, theme: Theme, context: RenderContext): Text {
 	const verb = args.action === "steer" ? "steer" : "stop";
-	// Same header split as Agent cards: bold family word + plain entity.
-	return new Text(
-		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", `${verb} ${args.agent_id}`)}`,
-		0,
-		0,
-	);
+	// Header: action + object (the agent title, resolved via registry after
+	// execute and carried back through context.state — first frame has no
+	// title, completion frame does).
+	const title = context.state.title;
+	const target = title ? `${verb} ${title}` : verb;
+	return new Text(`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", target)}`, 0, 0);
 }
 
 // ── Render result (output body) ────────────────────────────────
@@ -259,7 +279,7 @@ export function renderAgentResult(
 
 	// Resume entry: sub-agent sessions live outside `pi -r` — show the path.
 	if (details?.sessionPath && !isPartial) {
-		cmp.addChild(new Text(theme.fg("muted", `session: ${details.sessionPath}`), 0, 0));
+		cmp.addChild(new Text(theme.fg("muted", `session: ${shortenHome(details.sessionPath)}`), 0, 0));
 	}
 
 	return cmp;
@@ -269,47 +289,68 @@ export interface AgentControlDetails {
 	agentId?: string;
 	/** "steer" | "stop" — validated at runtime in execute. */
 	action?: string;
+	/** Agent title (registered at spawn) — the UI's object identifier. */
+	title?: string;
 	/** The injected steer message (card body input). */
 	message?: string;
-	/** Agent's current output snapshot at steer time (card body output). */
-	snapshot?: string;
 }
 
 /**
- * Steer and stop both render as full cards: header (renderCall) + optional
- * body + muted confirmation footer. Bare errors (unknown agent, bad args)
- * stay a dim one-liner — they are failures, not actions.
+ * Steer renders a card: header (action + title) + single-line message body +
+ * muted "Steered" footer (blank line between body and footer). Stop is a
+ * bare dim one-liner — no card, widget style. Errors stay dim one-liners.
  */
 export function renderAgentControlResult(
 	result: { details?: AgentControlDetails; content: { type: string; text?: string }[] },
-	{ expanded }: { expanded: boolean; isPartial: boolean },
+	{ expanded, isPartial }: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
+	context: RenderContext,
 ): Container | Text {
 	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 	const d = result.details;
 
+	// Carry the title back to the header renderer (one extra refresh).
+	if (d?.title && context.state.title !== d.title) {
+		context.state.title = d.title;
+		context.invalidate();
+	}
+
 	if (d?.action === "steer" && d.message) {
 		const cmp = new Container();
 
-		// Body: steer message (input, full) + blank line + agent output
-		// snapshot (folded to the tail, bash-card style).
-		const body = renderBody(d.message, d.snapshot, expanded, theme);
-		if (body) cmp.addChild(body);
-
-		// Footer: confirmation, muted.
-		if (text) {
-			cmp.addChild(new Text(`\n${theme.fg("muted", text)}`, 0, 0));
+		// Body: steer message as a single truncated line (widget-style).
+		const message = d.message.trim().split(/\n/)[0];
+		const line = truncateTail(message, 60);
+		if (line) {
+			cmp.addChild(new Text(theme.fg("toolOutput", line), 0, 0));
 		}
+
+		// Footer: confirmation, muted, blank line before it.
+		cmp.addChild(new Text(`\n\n${theme.fg("muted", "Steered")}`, 0, 0));
 		return cmp;
 	}
 
 	if (d?.action === "stop") {
-		const cmp = new Container();
-		// No body (nothing to show) — footer-only card, same structure as steer.
-		if (text) {
-			cmp.addChild(new Text(`\n${theme.fg("muted", text)}`, 0, 0));
+		const target = d.title ?? text ?? "";
+		const state = context.state;
+		if (isPartial) {
+			// Widget-style loading animation while the child is being stopped.
+			if (state.stopFrame === undefined) state.stopFrame = 0;
+			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
+			const spinner = SPINNER[state.stopFrame % SPINNER.length];
+			state.stopFrame++;
+			return new Text(
+				`${theme.fg("accent", spinner)} ${theme.fg("muted", "Stopping")} ${theme.fg("toolTitle", target)} ${theme.fg("muted", "\u2026")}`,
+				0,
+				0,
+			);
 		}
-		return cmp;
+		if (state.interval) {
+			clearInterval(state.interval);
+			state.interval = undefined;
+		}
+		// Bare one-liner (widget style), like "Working…" — no card.
+		return new Text(`${theme.fg("muted", "Stopped")} ${theme.fg("toolTitle", target)}.`, 0, 0);
 	}
 
 	// Errors — dim one-liner.
@@ -334,6 +375,16 @@ export interface NotificationDetails {
 	sessionId?: string;
 }
 
+/** Expand `~`-style home prefix to a display path (cross-platform). */
+function shortenHome(p: string): string {
+	// `~` is not understood by Windows terminals (cmd/PowerShell) — keep the
+	// full path there so the printed path stays copy-paste runnable.
+	if (process.platform === "win32") return p;
+	const home = homedir();
+	if (p === home) return "~";
+	return p.startsWith(home + sep) ? `~${p.slice(home.length)}` : p;
+}
+
 function formatTokens(n: number): string {
 	return n.toLocaleString("en-US");
 }
@@ -344,19 +395,25 @@ export function renderNotification(
 	theme: Theme,
 ): Container {
 	const d = message.details;
-	const cmp = new Container();
 
 	if (!d) {
-		cmp.addChild(new Text(theme.fg("dim", "agent notification (no details)"), 0, 0));
+		const cmp = new Container();
+		cmp.addChild(new Text(theme.fg("dim", "no details"), 0, 0));
 		return cmp;
 	}
 
-	// ── Header: Agent <icon> <title><status word> (<muted meta>) ──
-	// Same split as Agent tool cards: bold family word only; title in toolTitle.
+	// ── Header: Agent <title> <status word> (<muted meta>) ──
+	// No icon — the card background already conveys state (Pi native);
+	// status words are colored like bash's `(exit N)` / `(cancelled)`.
 	const isError = d.status !== "completed";
-	const icon = d.status === "completed" ? "\u2713" : d.status === "failed" ? "\u2717" : "\u26d4";
-	const iconColor = isError ? "error" : "toolTitle";
-	const statusWord = isError ? ` ${d.status}` : "";
+	const cmp = new Box(1, 1, (text: string) => theme.bg(isError ? "toolErrorBg" : "toolSuccessBg", text));
+
+	const statusWord =
+		d.status === "failed"
+			? ` ${theme.fg("error", d.status)}`
+			: d.status === "stopped"
+				? ` ${theme.fg("warning", d.status)}`
+				: "";
 
 	const metaParts: string[] = [];
 	if (d.usage?.durationMs != null) metaParts.push(`Took ${formatDuration(d.usage.durationMs)}`);
@@ -366,7 +423,7 @@ export function renderNotification(
 
 	cmp.addChild(
 		new Text(
-			`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg(iconColor as "toolTitle" | "error", icon)} ${theme.fg("toolTitle", d.title)}${theme.fg(iconColor as "toolTitle" | "error", statusWord)}${metaSuffix}`,
+			`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", d.title)}${statusWord}${metaSuffix}`,
 			0,
 			0,
 		),
@@ -382,7 +439,7 @@ export function renderNotification(
 
 	// ── Footer: session path (resume entry, custom dir → path required) ──
 	if (d.sessionPath) {
-		cmp.addChild(new Text(`\n${theme.fg("muted", `session: ${d.sessionPath}`)}`, 0, 0));
+		cmp.addChild(new Text(`\n${theme.fg("muted", `session: ${shortenHome(d.sessionPath)}`)}`, 0, 0));
 	}
 
 	return cmp;

@@ -120,7 +120,7 @@ class FakeClient {
 function makeAgent(options: Partial<AgentProcessOptions> & { cwd: string }): { agent: AgentProcess; fake: FakeClient } {
 	let fake!: FakeClient;
 	const agent = new AgentProcess(
-		{ ...options, title: options.title ?? "test agent" },
+		{ ...options, agentId: options.agentId ?? "a1", title: options.title ?? "test agent" },
 		{
 			createClient: (opts: RpcClientOptions) => {
 				fake = new FakeClient(opts);
