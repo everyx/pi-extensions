@@ -12,36 +12,34 @@
  */
 
 // ─── Commands we send on stdin ──────────────────────────────
+//
+// Commands carry NO caller-supplied id: RpcClient assigns a unique command
+// id per request (correlation key for the pending map / response echo). The
+// child (pi rpc-mode) only echoes command.id back — it never routes on it.
 
 export interface RpcCommandPrompt {
-	id: string;
 	type: "prompt";
 	message: string;
 }
 
 export interface RpcCommandSteer {
-	id: string;
 	type: "steer";
 	message: string;
 }
 
 export interface RpcCommandAbort {
-	id: string;
 	type: "abort";
 }
 
 export interface RpcCommandGetLastAssistantText {
-	id: string;
 	type: "get_last_assistant_text";
 }
 
 export interface RpcCommandGetState {
-	id: string;
 	type: "get_state";
 }
 
 export interface RpcCommandGetSessionStats {
-	id: string;
 	type: "get_session_stats";
 }
 
