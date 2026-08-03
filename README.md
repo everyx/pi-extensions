@@ -132,12 +132,11 @@ pnpm test       # node:test
 Layout:
 
 ```
-src/
-  index.ts         — tool registration (Agent / AgentControl), notifications, cleanup
-  protocol.ts      — pure JSONL protocol layer (unit tested)
-  rpc-client.ts    — stateful thin JSONL client (spawn + transport)
-  agent-process.ts — AgentProcess: one resident rpc child, semantic API (tested via seam)
-  model.ts         — model resolution (tested)
-  render.ts        — TUI rendering + notification card renderer
-  widget.ts        — Agents status widget (setWidget, above the editor)
+index.ts         — tool registration (Agent / AgentControl), notifications, cleanup
+protocol.ts      — pure JSONL protocol layer (unit tested)
+rpc-client.ts    — stateful thin JSONL client (spawn + transport)
+agent-process.ts — AgentProcess: one resident rpc child, semantic API (tested via seam)
+model.ts         — model resolution (tested)
+render.ts        — TUI rendering + notification card renderer
+widget.ts        — Agents status widget (setWidget, above the editor)
 ```
