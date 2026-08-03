@@ -55,7 +55,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 ### 统一视觉语法
 
-`<bold 工具名> + <icon?> + <title> + <muted 括号 meta>` → 1 空行 → `toolOutput body（bash 折叠）` → 1 空行 → `muted footer`。
+`<bold 工具名> + <icon?> + <title> + <muted 括号 meta>` → 1 空行 → `toolOutput body（输入固定全显，输出折叠为尾部）` → 1 空行 → `muted footer`。
 
 ### Agent 工具卡片
 
@@ -63,16 +63,19 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 Agent 检查 CI 配置 (sonnet)
 Thinking...                  ← 活动行（思考中：italic + thinkingText，pi 隐藏 thinking 同款）
 bash: pnpm check             ← 活动行（工具调用：工具名 toolTitle + 冒号 + muted 参数）
-<prompt 全文>            ← 输入
 <空行>
-<子 agent 输出>          ← 输出（前台流式：text_delta → onUpdate 逐字滚动）
+<prompt 全文>            ← 输入（固定全显——bash 命令头同款，不参与折叠）
+<空行>
+... 12 earlier lines (ctrl+o to expand)   ← 折叠提示（muted + keyHint，位于输入与输出之间）
+<子 agent 输出尾部 5 行>          ← 输出（前台流式逐字滚动；折叠时只显示最新尾部，展开全显）
+<空行>
 Took 27.5s
 session: /path/...jsonl
 ```
 
-- header：`Agent`（bold toolTitle）+ title（必填 3-5 词）+ muted meta `(background · model)`——只显非默认值，对齐 bash 的 ` (timeout 10s)`
+- header：`Agent`（bold toolTitle）+ title（必填 3-5 词）+ muted meta `(background · model)`——只显示显式参数（run_in_background / model），对齐 bash 的 ` (timeout 10s)`
 - 活动行（widget 对齐，仅前台流式期间）：`Thinking...`（italic + thinkingText）与工具调用（工具名 toolTitle + 参数），数据同 widget 的 `latestActivity`（不进 LLM context）；正文本身已流式，故不重复显示 text 活动
-- body：输入（prompt 全文）+ 输出（流式），整体 `toolOutput`，bash 同款折叠（`... N earlier lines, <key> to expand`）
+- body：输入（prompt 全文，固定不折叠）+ 输出（流式，折叠为尾部 5 行——最新输出持续可见，bash 同款折叠，`... N earlier lines (<key> to expand)`）；展开全显；折叠/展开经 keyHint 绑定键切换
 - footer：`Took/Elapsed X.Xs`（muted）+ `session: <path>`（前台完成时）
 - 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值（`pi.getThinkingLevel()`），经 `--thinking` 传给子进程
 
@@ -80,25 +83,30 @@ session: /path/...jsonl
 
 ```
 Agent steer a1b2c3
-<注入的 steer 消息全文>            ← 输入
 <空行>
-<agent 当前输出快照>              ← 输出（steer 时刻 get_last_assistant_text，details 专用）
+<注入的 steer 消息全文>            ← 输入（固定全显，同 Agent 卡）
+<空行>
+<agent 当前输出快照尾部 5 行>      ← 输出（steer 时刻 get_last_assistant_text，details 专用；折叠同 Agent 卡）
+<空行>
 Steered agent a1b2c3.            ← muted 确认
 ```
 
 - steer 是 Agent 卡片的**接力**：同一输入/输出 body 结构（LLM 语义不变——立即返回，结果仍由完成通知送达）
-- stop：一行 dim 确认（无输出可显示）
+- stop：footer-only 完整卡（header + muted 确认 `Stopped agent a1b2c3.`），与 steer 同构；无输出可展示，错误路径（未知 agent 等）仍为 dim 一行
 
 ### 完成通知卡片（registerMessageRenderer）
 
 ```
 Agent ✓ 检查 CI 配置 (Took 27.5s · 1,250 tokens · 3 tool uses)
+<空行>
+... 3 earlier lines (ctrl+o to expand)      ← 折叠提示（同工具卡；muted + keyHint）
 Found 5 files handling authentication: src/auth/*.ts …
+<空行>
 session: /path/...jsonl
 ```
 
 - header：`Agent` + 状态 icon（✓ completed / ✗ failed / ⛔ stopped）+ title + muted meta（usage 并入括号）；状态词仅在失败时显示（`failed` / `stopped`）
-- body：结果预览（collapsed 1 行 / expanded 30 行 + 剩余提示）
+- body：结果预览，同一折叠策略（输出尾部 5 行 + `... N earlier lines (<key> to expand)`；展开全显）
 - footer：session 路径
 - 渲染数据在 `details`，不进 LLM 上下文
 
@@ -107,7 +115,7 @@ session: /path/...jsonl
 ```
 （容器级 1 空行，pi 自动）
   ● Agents                    ← accent 标题
-  ⠋ 检查 CI 配置 · 42s         ← 每行：accent spinner（80ms 帧）+ muted 文本；1 空格左 padding（对齐 pi string[] widget 形式）
+  ⠋ 检查 CI 配置 · 42.0s       ← 每行：accent spinner（80ms 帧）+ muted 文本；1 空格左 padding（对齐 pi string[] widget 形式）
 ```
 
 - 仅跟踪后台 agent（前台已 inline 流式，不重复）
