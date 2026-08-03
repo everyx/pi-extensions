@@ -91,7 +91,7 @@ Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失�
 ## 可观测性
 
 - **前台** — sub-agent 的输出逐字流式进入工具卡片（rpc `text_delta` 事件转发到 `onUpdate`）。
-- **后台** — 编辑器上方常驻状态 widget：`Agents` 标题下每个运行中的 agent 一行 `⠋ <标题> · 42s`。纯状态设计（无输出预览——完整内容由完成通知携带，复盘走 `pi --session <path>`）。最后一个 agent 结束后 widget 自动清除。
+- **后台** — 编辑器上方常驻状态 widget，每个运行中的 agent 一行：`⠋ sub: <标题> · 42s`。纯状态设计（无输出预览——完整内容由完成通知携带，复盘走 `pi --session <path>`）。最后一个 agent 结束后 widget 自动清除。
 
 ## 工作原理
 
@@ -109,7 +109,6 @@ Sub-agent 是完整 pi 实例，若你全局安装了本扩展，它天然能再
 
 ## 成本与注意
 
-^- **Headless（`pi -p`）下后台 agent 随主进程退出。** 主 agent 响应结束即进程退出，后台子 agent 通过 stdin EOF 被清理（不会泄漏为孤儿进程）。后台工作流（等通知、steer、stop）是为常驻的 TUI 会话设计的。
 - **一 agent 一进程。** 前台和后台都是常驻 rpc 子进程。后台开多了 = 进程开多了——请节制。
 - **通知一次性投递。** 后台结果只投递一次；若投递前主会话崩溃，结果只存在于 session 文件（用 `pi --session <id>` attach 恢复）。
 - **Steer 需要活的 agent。** `AgentControl` 只在 agent 运行中（完成通知之前）有效。

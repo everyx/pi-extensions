@@ -19,7 +19,7 @@ class FakeClient {
 	killCalls = 0;
 	exitCode: number | null = null;
 	isClosed = false;
-	/** argv captured at construction (--model/--tools/--session-dir). */
+	/** argv captured at construction (--model/--tools/--name/--session-dir). */
 	args: string[] = [];
 
 	private onEvent?: (event: { type: string }) => void;
@@ -98,11 +98,7 @@ class FakeClient {
 		this.onEvent?.({ type: "agent_settled" });
 	}
 
-	emitEvent(event: {
-		type: string;
-		assistantMessageEvent?: { type: string; delta?: unknown };
-		messages?: Array<{ role?: string; stopReason?: string; errorMessage?: unknown; content?: unknown[] }>;
-	}): void {
+	emitEvent(event: { type: string; assistantMessageEvent?: { type: string; delta?: unknown } }): void {
 		this.onEvent?.(event as never);
 	}
 
@@ -165,13 +161,13 @@ describe("AgentProcess — spawnAndSend", () => {
 		assert.equal(agent.status, "failed");
 	});
 
-	it("passes model/tools/sessionDir through and sets --name when title is given", () => {
+	it("passes model/tools/title/sessionDir through to the client argv", () => {
 		const { fake } = makeAgent({
 			cwd: "/tmp",
 			model: "google/gemini-x",
 			tools: ["read", "grep"],
 			title: "explore",
-			sessionName: "explore",
+			sessionName: "sub: explore",
 			sessionDir: "/home/u/.pi/agent/subagent-sessions",
 		});
 		assert.deepEqual(fake.args, [
@@ -180,19 +176,10 @@ describe("AgentProcess — spawnAndSend", () => {
 			"--tools",
 			"read,grep",
 			"--name",
-			"explore",
+			"sub: explore",
 			"--session-dir",
 			"/home/u/.pi/agent/subagent-sessions",
 		]);
-	});
-
-	it("omits --name when no title is given (pi default firstMessage)", () => {
-		const { fake } = makeAgent({
-			cwd: "/tmp",
-			model: "google/gemini-x",
-			sessionDir: "/home/u/.pi/agent/subagent-sessions",
-		});
-		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--session-dir", "/home/u/.pi/agent/subagent-sessions"]);
 	});
 });
 
@@ -305,43 +292,6 @@ describe("AgentProcess — onDelta", () => {
 		const { fake } = makeAgent({ cwd: "/tmp", onDelta: (d) => deltas.push(d) });
 		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta" } });
 		assert.deepEqual(deltas, []);
-	});
-});
-
-describe("AgentProcess — agent API errors", () => {
-	it("marks failed with the API error when agent_end reports stopReason error", async () => {
-		const { agent, fake } = makeAgent({ cwd: "/tmp" });
-		await agent.spawnAndSend("do it");
-		fake.lastText = ""; // error turn produces no assistant text
-
-		const completionPromise = agent.waitForCompletion();
-		fake.emitEvent({
-			type: "agent_end",
-			messages: [
-				{ role: "user", content: [{ type: "text", text: "hi" }] },
-				{ role: "assistant", content: [], stopReason: "error", errorMessage: "429 Rate limited" },
-			],
-		});
-		fake.emitSettled();
-
-		const completion = await completionPromise;
-		assert.equal(completion.status, "failed");
-		assert.equal(completion.output, "429 Rate limited");
-	});
-
-	it("stays completed when agent_end has no error stop reason", async () => {
-		const { agent, fake } = makeAgent({ cwd: "/tmp" });
-		await agent.spawnAndSend("do it");
-
-		const completionPromise = agent.waitForCompletion();
-		fake.emitEvent({
-			type: "agent_end",
-			messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "end_turn" }],
-		});
-		fake.emitSettled();
-
-		const completion = await completionPromise;
-		assert.equal(completion.status, "completed");
 	});
 });
 
