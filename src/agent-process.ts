@@ -52,6 +52,8 @@ export interface AgentProcessOptions {
 	cwd: string;
 	/** Resolved "provider/id" model string, or inherit when omitted. */
 	model?: string;
+	/** Reasoning intensity ("off"…"max"), passed as --thinking. */
+	thinking?: string;
 	/** Tool allowlist (comma-joined into --tools). */
 	tools?: string[];
 	/** Short task title (notification card). */
@@ -147,6 +149,7 @@ export class AgentProcess {
 
 		const args: string[] = [];
 		if (options.model) args.push("--model", options.model);
+		if (options.thinking) args.push("--thinking", options.thinking);
 		if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
 		// An explicit title is a deliberate session name (pi supports renaming);
 		// without one the session follows pi's default (firstMessage) like any
@@ -331,12 +334,7 @@ export class AgentProcess {
 		}
 		// Stream assistant text deltas to the tool card (foreground live output).
 		if (event.type === "message_update") {
-			const ae = event.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
-			if (ae?.type === "text_delta" && typeof ae.delta === "string" && this.onDelta) {
-				this.onDelta(ae.delta);
-			}
-			// Activity tracking: the accumulated message content exposes the latest
-			// part (thinking / text / toolCall) — powers the widget excerpt.
+			// Activity tracking first, so onDelta callbacks read the latest value.
 			const message = event.message as
 				| {
 						content?: Array<{ type?: string; text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>;
@@ -352,6 +350,10 @@ export class AgentProcess {
 				} else if (last?.type === "toolCall" && typeof last.name === "string") {
 					this.latestActivity = { kind: "tool", text: summarizeToolCall(last.name, last.arguments) };
 				}
+			}
+			const ae = event.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
+			if (ae?.type === "text_delta" && typeof ae.delta === "string" && this.onDelta) {
+				this.onDelta(ae.delta);
 			}
 			return;
 		}

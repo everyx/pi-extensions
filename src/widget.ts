@@ -18,7 +18,7 @@
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity, AgentProcess } from "./agent-process.js";
-import { formatDuration } from "./render.js";
+import { formatDuration, splitToolLabel } from "./render.js";
 
 // Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
 const SPINNER = ["\u281b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
@@ -160,11 +160,9 @@ export class AgentWidget {
 		}
 		if (activity.kind === "tool") {
 			// "bash: sleep 20" — tool name in toolTitle, args muted.
-			const colon = activity.text.indexOf(": ");
-			if (colon > 0) {
-				const toolName = activity.text.slice(0, colon);
-				const args = activity.text.slice(colon + 2);
-				return `${EXCERPT_INDENT}${theme.fg("toolTitle", toolName)}: ${theme.fg("muted", truncateTail(args))}`;
+			const tool = splitToolLabel(activity.text);
+			if (tool) {
+				return `${EXCERPT_INDENT}${theme.fg("toolTitle", tool.name)}: ${theme.fg("muted", truncateTail(tool.args))}`;
 			}
 			return `${EXCERPT_INDENT}${theme.fg("toolTitle", truncateTail(activity.text))}`;
 		}
