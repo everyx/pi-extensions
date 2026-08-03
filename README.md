@@ -37,7 +37,7 @@ Restart pi and just tell it "ask a sub‑agent to…".
 
 Two primitive tools:
 
-- **`Agent`** — spawn an isolated sub‑agent: `{ prompt, title?, model?, tools?, run_in_background? }`. `title` (3‑5 words) labels the notification card and tool header — omit it and the first line of the prompt is used. Foreground (default) blocks until the result is ready; `run_in_background: true` returns an `agent_id` immediately and delivers a completion notification carrying the final output.
+- **`Agent`** — spawn an isolated sub‑agent: `{ prompt, title, model?, tools?, run_in_background? }`. `title` (3‑5 words, required) labels the tool header, notification card, widget row, and session name — like Claude Code's `description` / Codex's `task_name`. Foreground (default) blocks until the result is ready; `run_in_background: true` returns an `agent_id` immediately and delivers a completion notification carrying the final output.
 - **`AgentControl`** — intervene in a running background agent: `steer` (inject a redirecting message) or `stop` (terminate).
 
 The LLM is guided by `promptSnippet` + `promptGuidelines` (system-prompt injection): when to delegate, to keep prompts self-contained, to never poll, and to verify a sub‑agent's actual changes before reporting done.
@@ -92,7 +92,8 @@ Sub‑agent won't see any other tools. Read-only exploration with a cheaper mode
 ## Observability
 
 - **Foreground** — the sub‑agent's output streams live into the tool card, word by word (rpc `text_delta` events forwarded to `onUpdate`).
-- **Background** — a persistent status widget sits above the editor with an `Agents` heading, one line per running agent: `⠋ <title> · 42s`. Status-only by design (no output preview — full content arrives via the completion notification, and via `pi --session <path>` for review). The widget clears itself when the last agent finishes.
+- **Background** — a persistent status widget sits above the editor with an `Agents` heading, one line per running agent: `⠋ <title> · 42s` (spinner + muted text, same visual language as pi's built-in working indicator). Status-only by design (no output preview — full content arrives via the completion notification, and via `pi --session <path>` for review). The widget clears itself when the last agent finishes.
+- **Completion notification** — rendered as a card in the Agent family style: `Agent ✓ <title> (Took 12.3s · 1,250 tokens · 3 tool uses)` with a result preview body and the session path footer (status word appears only on failure).
 
 ## How it works
 
@@ -100,7 +101,7 @@ Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
 
 - **Foreground** — `Agent` waits for the child to settle, fetches the final output, then closes stdin (graceful shutdown).
 - **Background** — `Agent` returns immediately; on `agent_settled` the extension delivers a `subagent-notification` (JSON content to the LLM, rendered card to the user) and the child shuts down gracefully.
-- **Steer/stop** — `AgentControl` writes a `steer`/`abort` command (or closes stdin for `stop`) to the child's stdin.
+- **Steer/stop** — `AgentControl.steer` writes a `steer` command to the child's stdin (delivered after its current turn settles); `stop` closes stdin for a graceful shutdown.
 - **Attach / review** — sub‑agent sessions are stored in `<agent dir>/subagent-sessions/` (default `~/.pi/agent/subagent-sessions/`; override with `PI_SUBAGENT_SESSION_DIR`, and `PI_CODING_AGENT_DIR` is honored for the agent dir, same as pi), deliberately **outside** pi's standard session tree so `pi -r` stays clean. They are **never deleted**. To resume or review one, find the session path in the main conversation (the Agent call result or the completion notification card) and run `pi --session <path>` — or ask the LLM, the notification carries the path too.
 - **Graceful turn limits** — after each settled turn the extension checks token usage: at the wrap‑up threshold it steers a "wrap up" message; at the hard limit (or total timeout) it aborts, waits for the settle, then shuts down. No truncated output from an abrupt SIGTERM.
 
@@ -110,6 +111,7 @@ Sub‑agents are full pi instances and therefore spawn sub‑agents of their own
 
 ## Costs & caveats
 
+- **Headless (`pi -p`) background agents die with the host.** The main process exits when the agent finishes its response — background children are then torn down via stdin EOF (they never leak as orphans). Background workflows (wait for notification, steer, stop) are designed for the TUI session, which stays alive.
 - **One process per agent.** Foreground and background are identical (resident rpc child). Many background agents = many processes — spawn them in moderation.
 - **Notification is one-shot.** A background result is delivered once; if the main session dies before delivery, the result survives only in the session file (attach it with `pi --session <id>`).
 - **Steer needs a live agent.** `AgentControl` only works while the agent is still running, before its completion notification.
@@ -137,4 +139,5 @@ src/
   agent-process.ts — AgentProcess: one resident rpc child, semantic API (tested via seam)
   model.ts         — model resolution (tested)
   render.ts        — TUI rendering + notification card renderer
+  widget.ts        — Agents status widget (setWidget, above the editor)
 ```
