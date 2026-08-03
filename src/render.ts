@@ -162,27 +162,56 @@ function dimOneLiner(text: string | undefined, theme: Theme): Text {
 }
 
 /**
- * Shared output body: colored toolOutput lines, collapsed to 5 lines with
- * an expand hint (bash-style), or full when expanded. Returns null when
- * there is nothing to show.
+ * Shared output body, mirroring pi's bash card: the input block (prompt /
+ * steer message) is always shown in full — it's the card's "command header",
+ * like `$ cmd` on the bash card. The output block folds to the last
+ * PREVIEW_LINES with an "N earlier lines" hint on top (bash parity); expanded
+ * shows everything. Returns null when there is nothing to show.
  */
 type BodyComponent = Text | { invalidate: () => void; render: (w: number) => string[] };
 
-function renderBody(bodyParts: string[], expanded: boolean, theme: Theme): BodyComponent | null {
-	const rawBody = bodyParts.filter((p) => p).join("\n");
-	if (!rawBody) return null;
-	const bodyContent = rawBody
-		.split("\n")
-		.map((l) => theme.fg("toolOutput", l))
-		.join("\n");
-	if (expanded) return new Text(`\n${bodyContent}`, 0, 0);
+/** Output preview line limit when collapsed (bash's PREVIEW_LINES analog). */
+const PREVIEW_LINES = 5;
+
+function renderBody(
+	input: string | undefined,
+	output: string | undefined,
+	expanded: boolean,
+	theme: Theme,
+): BodyComponent | null {
+	const inputText = input?.trim();
+	const outputText = output?.trim();
+	if (!inputText && !outputText) return null;
+
+	const styledInput = inputText ? theme.fg("toolOutput", inputText) : "";
+	const outputLines = outputText ? outputText.split("\n") : [];
+	const outputBlock = outputLines.map((l) => theme.fg("toolOutput", l)).join("\n");
+
+	if (expanded) {
+		const rows = [""];
+		if (styledInput) rows.push(styledInput, "");
+		if (outputBlock) rows.push(outputBlock);
+		return new Text(rows.join("\n"), 0, 0);
+	}
+
+	// Collapsed: input in full; output tail preview with the hint on top.
+	const previewLines = outputLines.slice(-PREVIEW_LINES);
+	const hiddenCount = outputLines.length - previewLines.length;
+	const styledPreview = previewLines.map((l) => theme.fg("toolOutput", l)).join("\n");
+	const hint =
+		hiddenCount > 0
+			? `${theme.fg("muted", `... ${hiddenCount} earlier lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
+			: "";
+
 	return {
 		invalidate: () => {},
 		render: (w: number) => {
-			const preview = truncateToVisualLines(bodyContent, 5, w, 0);
-			if (preview.skippedCount === 0) return ["", ...preview.visualLines];
-			const hint = `${theme.fg("muted", `... ${preview.skippedCount} more lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-			return ["", hint, ...preview.visualLines];
+			const preview = truncateToVisualLines(styledPreview ? `\n${styledPreview}` : "", PREVIEW_LINES, w, 0);
+			const rows: string[] = [""];
+			if (styledInput) rows.push(styledInput, "");
+			if (hint) rows.push(hint);
+			rows.push(...preview.visualLines);
+			return rows;
 		},
 	};
 }
@@ -226,11 +255,7 @@ export function renderAgentResult(
 	}
 
 	// Body: prompt (input) + blank line + final output.
-	const bodyParts: string[] = [];
-	if (promptText) bodyParts.push(promptText);
-	if (promptText && output) bodyParts.push("");
-	if (output) bodyParts.push(output);
-	const body = renderBody(bodyParts, expanded, theme);
+	const body = renderBody(promptText, output, expanded, theme);
 	if (body) cmp.addChild(body);
 
 	if (state.startedAt !== undefined) {
@@ -273,14 +298,9 @@ export function renderAgentControlResult(
 	if (d?.action === "steer" && d.message) {
 		const cmp = new Container();
 
-		// Body: steer message (input) + blank line + agent output snapshot.
-		const bodyParts: string[] = [];
-		if (d.message.trim()) bodyParts.push(d.message.trim());
-		if (d.snapshot?.trim()) {
-			bodyParts.push("");
-			bodyParts.push(d.snapshot.trim());
-		}
-		const body = renderBody(bodyParts, expanded, theme);
+		// Body: steer message (input, full) + blank line + agent output
+		// snapshot (folded to the tail, bash-card style).
+		const body = renderBody(d.message, d.snapshot, expanded, theme);
 		if (body) cmp.addChild(body);
 
 		// Footer: confirmation, muted.
@@ -359,11 +379,11 @@ export function renderNotification(
 		),
 	);
 
-	// ── Body: result preview — same fold policy as tool cards (5 lines,
-	// expand hint on top, full text when expanded). ──
+	// ── Body: result preview — same fold policy as tool cards (input full,
+	// output tail + "earlier lines" hint, full text when expanded). ──
 	const result = d.result?.trim();
 	if (result) {
-		const body = renderBody([result], expanded, theme);
+		const body = renderBody(undefined, result, expanded, theme);
 		if (body) cmp.addChild(body);
 	}
 
