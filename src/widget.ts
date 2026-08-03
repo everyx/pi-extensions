@@ -18,7 +18,7 @@
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity, AgentProcess } from "./agent-process.js";
-import { formatDuration, splitToolLabel } from "./render.js";
+import { activityRow, formatDuration } from "./render.js";
 
 // Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
 const SPINNER = ["\u281b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
@@ -28,15 +28,6 @@ const TICK_MS = 80;
 
 /** Widget line indent: 1 (widget padding) + ⠋ + space → excerpt aligns with the title. */
 const EXCERPT_INDENT = "   ";
-
-/** Excerpt length cap; long tails get a leading ellipsis. */
-const EXCERPT_MAX = 60;
-
-function truncateTail(s: string): string {
-	const clean = s.replace(/\s+/g, " ").trim();
-	if (clean.length <= EXCERPT_MAX) return clean;
-	return `\u2026${clean.slice(clean.length - EXCERPT_MAX + 1)}`;
-}
 
 interface WidgetRow {
 	agent: AgentProcess;
@@ -151,22 +142,10 @@ export class AgentWidget {
 	}
 
 	/**
-	 * Latest-activity excerpt, aligned to the title column (pi's hidden-thinking
-	 * style for thinking; colored tool name for tool calls; plain text otherwise).
+	 * Latest-activity excerpt, aligned to the title column — shared format
+	 * with the tool card activity row (activityRow in render.ts).
 	 */
 	private renderExcerpt(activity: AgentActivity, theme: Theme): string {
-		if (activity.kind === "thinking") {
-			// Identical to pi's hidden-thinking label: italic + thinkingText.
-			return `${EXCERPT_INDENT}${theme.italic(theme.fg("thinkingText", "Thinking..."))}`;
-		}
-		if (activity.kind === "tool") {
-			// "bash: sleep 20" — tool name in toolTitle, args muted.
-			const tool = splitToolLabel(activity.text);
-			if (tool) {
-				return `${EXCERPT_INDENT}${theme.fg("toolTitle", tool.name)}: ${theme.fg("muted", truncateTail(tool.args))}`;
-			}
-			return `${EXCERPT_INDENT}${theme.fg("toolTitle", truncateTail(activity.text))}`;
-		}
-		return `${EXCERPT_INDENT}${theme.fg("muted", truncateTail(activity.text))}`;
+		return `${EXCERPT_INDENT}${activityRow(activity, theme, 60)}`;
 	}
 }
