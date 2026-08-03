@@ -128,13 +128,15 @@ session: /path/...jsonl
 ### 架构
 
 ```
-index.ts         — 工具注册（Agent / AgentControl）、通知投递、widget 生命周期、清理
-protocol.ts      — 纯函数 JSONL 协议层（serializeCommand / parseLine）
-rpc-client.ts    — 状态化薄 JSONL 客户端（spawn + pending map + 事件流 + 退出）
-agent-process.ts — AgentProcess：一个常驻 rpc 子进程的语义封装
-model.ts         — model spec → resolved model（纯函数）
-render.ts        — TUI 渲染（工具卡 / 通知卡 / 接力卡）
-widget.ts        — Agents 状态 widget
+index.ts           — 工具注册（Agent / AgentControl）+ 参数 schema
+protocol.ts        — 纯函数 JSONL 协议层（serializeCommand / parseLine）
+rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + pending map + 事件流 + 退出）
+event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数，单测）
+agent-process.ts   — AgentProcess：一个常驻 rpc 子进程的语义封装
+registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 完成策略（测试）
+model.ts           — model spec → resolved model（纯函数）
+render.ts          — TUI 渲染（工具卡 / 通知卡 / 接力卡）
+widget.ts          — Agents 状态 widget
 ```
 
 ### RPC 协议（自写薄客户端，方案 II）
