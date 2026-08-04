@@ -150,7 +150,7 @@ event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数）
 agent-process.ts   — AgentProcess：一个常驻 rpc 子进程的语义封装
 registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 完成策略
 model.ts           — model spec → resolved model（纯函数）
-types.ts           — 共享协议类型（RenderEvent / SubagentDetails / NotificationDetails / Truncation）
+types.ts           — 共享协议类型（RenderEvent / SubagentDetails / NotificationDetails）
 format.ts          — 纯函数格式化工具（SPINNER / formatDuration / safeTitle / activityRow 等）
 render.ts          — TUI 渲染（工具卡 / 控制卡 / 通知卡）
 widget.ts          — Agents 状态 widget

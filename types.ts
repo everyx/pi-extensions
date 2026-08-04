@@ -21,16 +21,6 @@ export type RenderEvent =
 	| { kind: "tool"; name: string; args?: string; id?: string }
 	| { kind: "text"; text: string };
 
-/** LLM-context truncation info (aligns with bash tool truncateTail). */
-export interface Truncation {
-	truncated: boolean;
-	truncatedBy: "lines" | "bytes" | null;
-	outputLines: number;
-	totalLines: number;
-	maxLines: number;
-	maxBytes: number;
-}
-
 /**
  * Tool-output details for the Agent tool (carried in pi's `details` field).
  * renderAgentCall / renderAgentResult read from here; index.ts populates
@@ -55,13 +45,11 @@ export interface SubagentDetails {
 	activity?: AgentActivity;
 	/** Ordered activity stream (thinking/tool events) for the card body. */
 	events?: RenderEvent[];
-	/** LLM-context truncation info — the card warns when set; intact data in the session file. */
-	truncation?: Truncation;
 }
 
 /**
  * Notification-delivery details (rendering side). Populated by
- * notifyCompletion() in index.ts, consUmed by renderNotification().
+ * notifyCompletion() in index.ts, consumed by renderNotification().
  * The LLM sees only the JSON `content` block; `details` never enter
  * context (verified against pi's convertToLlm).
  */
@@ -83,5 +71,4 @@ export interface NotificationDetails {
 	};
 	sessionPath?: string;
 	sessionId?: string;
-	truncation?: Truncation;
 }

@@ -168,7 +168,6 @@ describe("AgentProcess — spawnAndSend", () => {
 			model: "google/gemini-x",
 			tools: ["read", "grep"],
 			title: "explore",
-			sessionName: "explore",
 			sessionDir: "/home/u/.pi/agent/subagent-sessions",
 		});
 		assert.deepEqual(fake.args, [
@@ -176,23 +175,6 @@ describe("AgentProcess — spawnAndSend", () => {
 			"google/gemini-x",
 			"--tools",
 			"read,grep",
-			"--name",
-			"explore",
-			"--session-dir",
-			"/home/u/.pi/agent/subagent-sessions",
-		]);
-	});
-
-	it("uses title as --name when sessionName is not given (title is required)", () => {
-		const { fake } = makeAgent({
-			cwd: "/tmp",
-			model: "google/gemini-x",
-			title: "explore",
-			sessionDir: "/home/u/.pi/agent/subagent-sessions",
-		});
-		assert.deepEqual(fake.args, [
-			"--model",
-			"google/gemini-x",
 			"--name",
 			"explore",
 			"--session-dir",

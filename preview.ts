@@ -222,7 +222,7 @@ const acStoppedLines = () =>
 		renderAgentControlResult(
 			{
 				content: [{ type: "text", text: "Stopped agent a1." }],
-				details: { agentId: "a1", action: "stop", title: params.title },
+				details: { action: "stop", title: params.title },
 			},
 			{ expanded: false, isPartial: false },
 			theme,
@@ -236,7 +236,6 @@ const acSteeredLines = () =>
 			{
 				content: [{ type: "text", text: 'Steered agent a1: "…"' }],
 				details: {
-					agentId: "a1",
 					action: "steer",
 					title: params.title,
 					message: "重点看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
@@ -253,7 +252,7 @@ const acStopFailedLines = () =>
 		renderAgentControlResult(
 			{
 				content: [{ type: "text", text: "Agent a1 already finished." }],
-				details: { agentId: "a1", action: "stop", title: params.title, error: "Agent a1 already finished." },
+				details: { action: "stop", title: params.title, error: "Agent a1 already finished." },
 			},
 			{ expanded: false, isPartial: false },
 			theme,
@@ -267,7 +266,7 @@ const acSpin = (t: number) => {
 		renderAgentControlResult(
 			{
 				content: [{ type: "text", text: "Stopping…" }],
-				details: { agentId: "a1", action: "stop", title: params.title },
+				details: { action: "stop", title: params.title },
 			},
 			{ expanded: false, isPartial: true },
 			theme,

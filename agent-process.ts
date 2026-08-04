@@ -65,9 +65,6 @@ export interface AgentProcessOptions {
 	title: string;
 	/** Sequential short id ("a1", "a2", …) assigned by the registry. */
 	agentId: string;
-	/** Display label — widget rows only, NOT passed as --name.
-	 *  Sub-agent sessions follow pi's default naming (empty name → firstMessage). */
-	sessionName?: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
 	sessionDir?: string;
 	/** Total wall-clock timeout for the whole task (incl. multi-turn).
@@ -98,8 +95,6 @@ export const STOP_GRACE_MS = 5_000;
 export class AgentProcess {
 	readonly agentId: string;
 	readonly title: string;
-	/** Session display name ("<title>"), what the widget and session list show. */
-	readonly sessionName: string | undefined;
 	readonly startedAt = Date.now();
 	readonly model: string | undefined;
 	readonly thinking: string | undefined;
@@ -134,7 +129,6 @@ export class AgentProcess {
 	constructor(options: AgentProcessOptions, deps: AgentProcessDeps = {}) {
 		this.agentId = options.agentId;
 		this.title = options.title;
-		this.sessionName = options.sessionName ?? options.title;
 		this.timeoutMs = options.timeoutMs;
 		this.abortSettleGraceMs = options.abortSettleGraceMs ?? DEFAULT_ABORT_SETTLE_GRACE_MS;
 		this.model = options.model;
@@ -146,10 +140,8 @@ export class AgentProcess {
 		if (options.model) args.push("--model", options.model);
 		if (options.thinking) args.push("--thinking", options.thinking);
 		if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
-		// An explicit title is a deliberate session name (pi supports renaming);
-		// without one the session follows pi's default (firstMessage) like any
-		// normal session — the prompt-first-line fallback is TUI display only.
-		if (options.title) args.push("--name", options.title.slice(0, 80));
+		// The (required) title names the session (pi supports renaming).
+		args.push("--name", options.title.slice(0, 80));
 		if (options.sessionDir) args.push("--session-dir", options.sessionDir);
 
 		const clientOptions: RpcClientOptions = {
@@ -381,7 +373,7 @@ export class AgentProcess {
 						this.lastNotifiedActivityKey = key;
 						if (ev.activity.kind === "thinking") {
 							const last = this.events[this.events.length - 1];
-							if (!last || last.kind !== "thinking") {
+							if (last?.kind !== "thinking") {
 								this.events.push({ kind: "thinking" });
 							}
 						} else if (ev.activity.kind === "tool") {

@@ -22,10 +22,9 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { type AgentCompletion, AgentProcess } from "./agent-process.js";
-import { safeTitle } from "./format.js";
+import { type AgentActivity, type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { resolveModel } from "./model.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import {
@@ -37,7 +36,7 @@ import {
 	renderAgentResult,
 	renderNotification,
 } from "./render.js";
-import type { NotificationDetails, RenderEvent, Truncation } from "./types.js";
+import type { NotificationDetails } from "./types.js";
 import { AgentWidget } from "./widget.js";
 
 // ─── Running background agents registry ─────────────────────
@@ -155,25 +154,14 @@ const AgentControlParamsSchema = Type.Object({
 
 /**
  * LLM-context protection for result content, aligned with pi's bash tool:
- * truncateTail keeps the tail (DEFAULT_MAX_LINES=2000 lines / 50KB) and we
- * surface the fact via details.truncation (the card warns, the full session
- * file has everything). Rendering events (details.events) stay complete —
- * folding never loses content for the user; this only caps what the LLM sees.
+ * truncateTail keeps the tail (2000 lines / 50KB). Only LLM-visible content
+ * is capped — details.events stay complete, so folding/expansion never
+ * loses content for the user; the session file has everything. Single exit
+ * for every path that produces LLM-visible output (foreground result,
+ * background notification).
  */
-export function truncateForContext(text: string): { text: string; truncation?: Truncation } {
-	const result = truncateTail(text);
-	if (!result.truncated) return { text };
-	return {
-		text: result.content,
-		truncation: {
-			truncated: true,
-			truncatedBy: result.truncatedBy,
-			outputLines: result.outputLines,
-			totalLines: result.totalLines,
-			maxLines: result.maxLines,
-			maxBytes: result.maxBytes,
-		},
-	};
+export function truncateForContext(text: string): string {
+	return truncateTail(text).content;
 }
 
 function toErrorResult(err: unknown): {
@@ -189,6 +177,18 @@ function toErrorResult(err: unknown): {
 	};
 }
 
+/** Spawn-failure tool result: isError + the reason (LLM + user card share it). */
+function spawnErrorResult(
+	started: { error: string },
+	extra: Record<string, unknown> = {},
+): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: true } {
+	return {
+		content: [{ type: "text", text: started.error }],
+		details: { error: started.error, ...extra },
+		isError: true as const,
+	};
+}
+
 /** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
 function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: AgentCompletion): void {
 	const details: NotificationDetails = {
@@ -198,6 +198,7 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 		model: agent.model,
 		thinking: agent.thinking,
 		// Card body (never enters LLM context — verified against convertToLlm).
+		// The full output; the LLM-visible content below is capped (truncateTail).
 		result: completion.output,
 		usage: {
 			tokens: completion.stats.tokens || null,
@@ -214,7 +215,10 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 			content: JSON.stringify({
 				status: completion.status,
 				agent_id: agent.agentId,
-				result: completion.output,
+				// LLM-context protection: cap the visible result (tail 2000 lines /
+				// 50KB, bash parity) — the full text lives in details.result (card
+				// body, never enters LLM context) and the session file.
+				result: truncateForContext(completion.output),
 				// Resume entry point: sub-agent sessions live outside `pi -r`;
 				// attach with `pi --session <path>`.
 				session_path: completion.sessionPath ?? null,
@@ -297,16 +301,21 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const startedAt = Date.now();
-			// Widget label + session name: the (required) title, rendered safe
-			// (flattened, quote-neutral, capped) — same treatment as every other
-			// surface the title appears on.
-			const sessionName = safeTitle(params.title);
 
 			// Foreground: stream the sub-agent's session as an ordered activity
 			// stream. AgentProcess accumulates RenderEvents internally at the
 			// source (RPC event handler); the callbacks here only refresh the
 			// live card via onUpdate.
 			let streamed = "";
+			// Live-card details: the shared slice every foreground update carries.
+			const liveDetails = (activity?: AgentActivity) => ({
+				task,
+				startedAt,
+				model: agent.model,
+				thinking: agent.thinking,
+				activity,
+				events: agent.getEvents(),
+			});
 			const agent = new AgentProcess({
 				agentId: registry.nextAgentId(),
 				cwd: ctx.cwd,
@@ -314,7 +323,6 @@ export default function (pi: ExtensionAPI) {
 				thinking: params.thinking ?? pi.getThinkingLevel(),
 				tools: params.tools,
 				title: params.title,
-				sessionName,
 				sessionDir: SUBAGENT_SESSION_DIR,
 				timeoutMs: params.timeoutMs,
 				onDelta: (delta) => {
@@ -322,30 +330,13 @@ export default function (pi: ExtensionAPI) {
 					streamed += delta;
 					onUpdate?.({
 						content: [{ type: "text", text: streamed }],
-						details: {
-							task,
-							startedAt,
-							model: agent.model,
-							thinking: agent.thinking,
-							activity: agent.getLatestActivity() ?? undefined,
-							events: agent.getEvents(),
-						},
+						details: liveDetails(agent.getLatestActivity() ?? undefined),
 					});
 				},
 				onActivityChange: (activity) => {
 					if (params.run_in_background) return;
 					if (activity.kind === "text") return; // covered by onDelta
-					onUpdate?.({
-						content: [{ type: "text", text: streamed }],
-						details: {
-							task,
-							startedAt,
-							model: agent.model,
-							thinking: agent.thinking,
-							activity,
-							events: agent.getEvents(),
-						},
-					});
+					onUpdate?.({ content: [{ type: "text", text: streamed }], details: liveDetails(activity) });
 				},
 			});
 
@@ -382,11 +373,7 @@ export default function (pi: ExtensionAPI) {
 					if (!started.ok) {
 						signal?.removeEventListener("abort", onAbort);
 						await agent.stop().catch(() => {});
-						return {
-							content: [{ type: "text", text: started.error }],
-							details: { runInBackground: true, title: agent.title, error: started.error },
-							isError: true,
-						};
+						return spawnErrorResult(started, { runInBackground: true, title: agent.title });
 					}
 
 					// Abort is wired to stop while spawning only; once the spawn
@@ -406,7 +393,6 @@ export default function (pi: ExtensionAPI) {
 					onUpdate?.({
 						content: [{ type: "text", text: `Started ${agent.title} (background)` }],
 						details: {
-							agentId: agent.agentId,
 							runInBackground: true,
 							title: agent.title,
 							model: agent.model,
@@ -422,7 +408,6 @@ export default function (pi: ExtensionAPI) {
 							},
 						],
 						details: {
-							agentId: agent.agentId,
 							runInBackground: true,
 							title: agent.title,
 							model: agent.model,
@@ -436,11 +421,7 @@ export default function (pi: ExtensionAPI) {
 				if (!started.ok) {
 					await agent.stop().catch(() => {});
 					signal?.removeEventListener("abort", onAbort);
-					return {
-						content: [{ type: "text", text: started.error }],
-						details: { error: started.error },
-						isError: true,
-					};
+					return spawnErrorResult(started);
 				}
 
 				onUpdate?.({
@@ -458,34 +439,34 @@ export default function (pi: ExtensionAPI) {
 				// workaround hook restores the error background. A stopped agent
 				// is also what a user cancel (abort) produces — don't blame that
 				// on the limits.
-				const sessionHint = `\n\n[Full output available in the sub-agent session — use \`read\` on session_path to inspect.]`;
 				if (completion.status === "failed" || completion.status === "stopped") {
 					const message =
 						completion.status === "failed"
-							? (completion.output || "Sub-agent failed.") + sessionHint
+							? completion.output || "Sub-agent failed."
 							: agent.stoppedByControl
-								? (completion.output || "Sub-agent stopped.") + sessionHint
-								: `${completion.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)${sessionHint}`;
-					const { text: finalText, truncation } = truncateForContext(message);
+								? completion.output || "Sub-agent stopped."
+								: `${completion.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)`;
 					return {
-						content: [{ type: "text", text: finalText }],
+						content: [{ type: "text", text: truncateForContext(message) }],
 						details: {
 							task,
 							startedAt,
 							endedAt: Date.now(),
+							// Full message (uncapped) — the user reads it on the card,
+							// folded but never dropped; the LLM sees the capped copy.
 							error: message,
 							model: agent.model,
 							thinking: agent.thinking,
-							truncation,
 							sessionPath: completion.sessionPath,
 							events: agent.getEvents(),
 						},
 						isError: true,
 					};
 				}
-				const { text: finalText, truncation } = truncateForContext(completion.output);
 				return {
-					content: [{ type: "text", text: finalText + sessionHint }],
+					// Pure text result — no session hint: the output stands alone
+					// (the session path is the card footer, recoverable by the user).
+					content: [{ type: "text", text: truncateForContext(completion.output) }],
 					details: {
 						task,
 						sessionPath: completion.sessionPath,
@@ -494,7 +475,6 @@ export default function (pi: ExtensionAPI) {
 						endedAt: Date.now(),
 						model: agent.model,
 						thinking: agent.thinking,
-						truncation,
 						events: agent.getEvents(),
 					},
 				};
@@ -637,7 +617,7 @@ export default function (pi: ExtensionAPI) {
 			if (steerError) {
 				return {
 					content: [{ type: "text", text: steerError }],
-					details: { agentId: agent.agentId, action: "steer", title: agent.title, error: steerError },
+					details: { action: "steer", title: agent.title, error: steerError },
 					isError: true,
 				};
 			}
@@ -647,7 +627,6 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Agent ${params.agent_id} finished before the steer arrived.` }],
 					details: {
-						agentId: agent.agentId,
 						action: "steer",
 						title: agent.title,
 						error: `finished before the steer arrived (status: ${agent.status})`,
@@ -659,7 +638,7 @@ export default function (pi: ExtensionAPI) {
 				// The injected message rides in the tool content so the LLM keeps
 				// it across compaction; the user sees it as the quote line on the card.
 				content: [{ type: "text", text: `Steered agent ${params.agent_id}: "${message}".` }],
-				details: { agentId: agent.agentId, action: "steer", title: agent.title, message },
+				details: { action: "steer", title: agent.title, message },
 			};
 		},
 

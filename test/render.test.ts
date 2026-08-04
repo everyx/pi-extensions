@@ -297,7 +297,7 @@ test("control failures keep the status-line shape with error color", () => {
 	);
 });
 
-test("control failures show the full error, never truncated", () => {
+test("control failures render the full error text (under the uniform fold)", () => {
 	const longError = `模型 "no-such-model-xyz-very-long-name-\u2026" not available in the registry. `
 		.concat("This is a deliberately long error message that must survive rendering ".repeat(3))
 		.trim();
@@ -313,7 +313,43 @@ test("control failures show the full error, never truncated", () => {
 	const lines = render(cmp, 120).map(strip);
 	assert.ok(
 		lines.some((l) => l.includes("survive rendering")),
-		"full error text visible",
+		"full error text visible (short enough to skip the fold)",
+	);
+});
+
+test("control failures over the fold cap show the tail + expand hint, full text when expanded", () => {
+	// 12 distinct lines — past the 5-line preview cap.
+	const lines12 = Array.from({ length: 12 }, (_, i) => `error line ${i}`).join("\n");
+	const collapsed = render(
+		renderAgentControlResult(
+			{ content: [{ type: "text", text: lines12 }], details: { action: "stop", title: "probe", error: lines12 } },
+			{ expanded: false, isPartial: false },
+			theme,
+			context,
+		),
+		120,
+	).map(strip);
+	assert.ok(
+		collapsed.some((l) => l.includes("error line 11")) && !collapsed.some((l) => l.includes("error line 0")),
+		"tail preview only",
+	);
+	assert.ok(
+		collapsed.some((l) => l.includes("earlier lines")),
+		"expand hint present",
+	);
+
+	const expanded = render(
+		renderAgentControlResult(
+			{ content: [{ type: "text", text: lines12 }], details: { action: "stop", title: "probe", error: lines12 } },
+			{ expanded: true, isPartial: false },
+			theme,
+			context,
+		),
+		120,
+	).map(strip);
+	assert.ok(
+		expanded.some((l) => l.includes("error line 0")),
+		"full text when expanded (content never dropped)",
 	);
 });
 
@@ -388,28 +424,20 @@ test("notification header carries the status icon", () => {
 	assert.ok(renderText(stopped, 120).includes('■ Agent "slow query probe" stopped'), "stopped icon + word");
 });
 
-// ── context truncation warning (bash parity) ──
+// ── Foreground failure reason ──
 
-test("foreground card warns about context truncation below the body", () => {
-	const text = Array.from({ length: 7 }, (_, i) => `line ${i}`).join("\n");
+test("foreground card shows the failure reason below the body", () => {
 	const out = renderText(
 		renderAgentResult(
 			{
-				content: [{ type: "text", text }],
+				content: [{ type: "text", text: "model not found" }],
 				details: {
 					task: "probe",
 					startedAt: 0,
 					endedAt: 100,
 					sessionPath: "/tmp/sess",
-					truncation: {
-						truncated: true,
-						truncatedBy: "lines",
-						outputLines: 42,
-						totalLines: 5000,
-						maxLines: 2000,
-						maxBytes: 51200,
-					},
-					events: [{ kind: "text", text }],
+					error: "model not found",
+					events: [{ kind: "text", text: "working…" }],
 				},
 			},
 			{ expanded: false, isPartial: false },
@@ -418,61 +446,11 @@ test("foreground card warns about context truncation below the body", () => {
 		),
 		120,
 	);
-	assert.ok(out.includes("[Truncated: showing 42 of 5000 lines]"), "lines variant");
-	// warning sits between body and footer
-	const idxWarn = out.indexOf("Truncated:");
+	assert.ok(out.includes("model not found"), "reason visible on the card");
+	// reason sits between body and footer
+	const idxErr = out.indexOf("model not found");
 	const idxSess = out.indexOf("session: /tmp/sess");
-	assert.ok(idxWarn > -1 && idxSess > idxWarn, "warning above footer");
-});
-
-test("notification warns with the bytes variant when truncation hit the size cap", () => {
-	const out = renderText(
-		renderNotification(
-			{
-				details: {
-					status: "completed",
-					agent_id: "a1",
-					title: "probe",
-					result: "x",
-					sessionPath: "/tmp/sess",
-					truncation: {
-						truncated: true,
-						truncatedBy: "bytes",
-						outputLines: 42,
-						totalLines: 5000,
-						maxLines: 2000,
-						maxBytes: 51200,
-					},
-				},
-			},
-			{ expanded: false },
-			theme,
-		),
-		120,
-	);
-	assert.ok(out.includes("Truncated: 42 lines shown (50.0KB limit)"), "bytes variant");
-});
-
-test("no truncation warning when details lack truncation", () => {
-	const out = renderText(
-		renderAgentResult(
-			{
-				content: [{ type: "text", text: "fine" }],
-				details: {
-					task: "probe",
-					startedAt: 0,
-					endedAt: 100,
-					sessionPath: "/tmp/sess",
-					events: [{ kind: "text", text: "fine" }],
-				},
-			},
-			{ expanded: false, isPartial: false },
-			theme,
-			context,
-		),
-		120,
-	);
-	assert.ok(!out.includes("Truncated:"), "no warning without truncation");
+	assert.ok(idxErr > -1 && idxSess > idxErr, "reason above footer");
 });
 
 // ── safeTitle (title rendered safe for a single quoted line) ──

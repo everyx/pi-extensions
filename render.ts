@@ -14,10 +14,10 @@
 import { homedir } from "node:os";
 import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { formatSize, keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
+import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { firstLine, formatDuration, SPINNER, safeTitle } from "./format.js";
-import type { NotificationDetails, RenderEvent, SubagentDetails, Truncation } from "./types.js";
+import type { NotificationDetails, RenderEvent, SubagentDetails } from "./types.js";
 
 // ─── Tool params ───────────────────────────────────────────
 
@@ -118,14 +118,14 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 			? undefined
 			: `${context.isPartial ? "Elapsed" : "Took"} ${formatDuration((context.state.endedAt ?? Date.now()) - (context.state.startedAt as number))}`;
 
-	const title = safeTitle(args.title.trim() || firstLine(args.prompt));
+	const title = args.title.trim() || firstLine(args.prompt);
 	const state = context.state as TimerState;
 	// Resolved model/thinking from the first onUpdate carry-back (renderCall
 	// runs before execute() so args.model/thinking are the raw user inputs).
 	const metaModel = state.resolvedModel ?? args.model;
 	const metaThinking = state.resolvedThinking ?? args.thinking;
 	return new Text(
-		`${icon} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${title}"`)}${buildMetaSuffix(metaModel, metaThinking, timePart, theme)}`,
+		`${icon} ${agentTitle(title, theme)}${buildMetaSuffix(metaModel, metaThinking, timePart, theme)}`,
 		0,
 		0,
 	);
@@ -163,7 +163,7 @@ function statusLine(
 	theme: Theme,
 	spinner?: string,
 ): string {
-	const agent = `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : ""}`;
+	const agent = agentTitle(title, theme);
 	const marker =
 		phase === "running"
 			? theme.fg("accent", spinner ?? "")
@@ -214,17 +214,40 @@ function contentRow(styled: string, x = 0): Text {
 	return new Text(`\n${styled}`, x, 0);
 }
 
-/**
- * Context-truncation warning (bash parity): only the Truncated clause —
- * the session path lives separately in the card footer so the warning
- * never duplicates it.
- */
-function truncationWarning(truncation: Truncation, theme: Theme): string {
-	if (!truncation.truncated) return "";
-	if (truncation.truncatedBy === "lines") {
-		return `[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines]`;
+/** Shared `Agent "title"` segment — toolTitle bold name + bashMode quoted title. */
+function agentTitle(title: string | undefined, theme: Theme): string {
+	return `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : ""}`;
+}
+
+/** Start the 100ms invalidate loop (if not running); returns the current spinner frame. */
+function startSpinner(state: TimerState, invalidate: () => void): string {
+	if (state.frame === undefined) state.frame = 0;
+	if (!state.interval) state.interval = setInterval(() => invalidate(), 100);
+	const spinner = SPINNER[state.frame % SPINNER.length];
+	state.frame++;
+	return spinner;
+}
+
+/** Stop the invalidate loop (if running). */
+function stopSpinner(state: TimerState): void {
+	if (state.interval) {
+		clearInterval(state.interval);
+		state.interval = undefined;
 	}
-	return `[Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes)} limit)]`;
+}
+
+/** Error card: status line on toolErrorBg + dim reason body (uniform fold). */
+function statusErrorCard(
+	title: string | undefined,
+	verb: "start" | "steer" | "stop" | "control",
+	theme: Theme,
+	error: string,
+	expanded: boolean,
+): Box {
+	const cmp = new Box(1, 1, (t: string) => theme.bg("toolErrorBg", t));
+	cmp.addChild(new Text(statusLine(title, verb, "failed", theme), 0, 0));
+	cmp.addChild(contentBlock(error, (l) => theme.fg("dim", l), expanded, theme));
+	return cmp;
 }
 
 /**
@@ -255,6 +278,23 @@ function foldedBlock(styledRows: string[], theme: Theme): BodyComponent {
 /** foldedBlock over a single colored string (split per line so colors survive folding). */
 function foldedContent(styled: string, color: (line: string) => string, theme: Theme): BodyComponent {
 	return foldedBlock(styled.split("\n").map(color), theme);
+}
+
+/**
+ * Content block that honors the expanded flag: collapsed uses the uniform
+ * fold (tail preview + expand hint); expanded renders every line in full
+ * (blank-line prefix preserved in both modes — bash card parity). Content is
+ * never dropped in either mode.
+ */
+function contentBlock(styled: string, color: (line: string) => string, expanded: boolean, theme: Theme): BodyComponent {
+	if (expanded) {
+		const lines = styled.split("\n");
+		const cmp = new Container();
+		cmp.addChild(contentRow(color(lines[0])));
+		for (const line of lines.slice(1)) cmp.addChild(new Text(color(line), 0, 0));
+		return cmp;
+	}
+	return foldedContent(styled, color, theme);
 }
 
 /** Style one body row per its kind (pi-native colors). */
@@ -337,26 +377,28 @@ export function renderAgentResult(
 		const state = context.state;
 		if (isPartial && !details.error) {
 			// Spinner animation inside the pending card (in-place, no new lines).
-			if (state.frame === undefined) state.frame = 0;
-			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
-			const spinner = SPINNER[state.frame % SPINNER.length];
-			state.frame++;
 			const cmp = new Box(1, 1, (t: string) => theme.bg("toolPendingBg", t));
-			cmp.addChild(new Text(statusLine(details.title, "start", "running", theme, spinner), 0, 0));
+			cmp.addChild(
+				new Text(
+					statusLine(
+						details.title,
+						"start",
+						"running",
+						theme,
+						startSpinner(state, () => context.invalidate()),
+					),
+					0,
+					0,
+				),
+			);
 			return cmp;
 		}
-		if (state.interval) {
-			clearInterval(state.interval);
-			state.interval = undefined;
-		}
+		stopSpinner(state);
 		if (details.error) {
-			const cmp = new Box(1, 1, (t: string) => theme.bg("toolErrorBg", t));
-			cmp.addChild(new Text(statusLine(details.title, "start", "failed", theme), 0, 0));
-			// Full reason, never truncated — wraps inside the card instead. A
-			// blank line separates content from the header like every other card;
-			// content starts at the card edge (no header-column alignment).
-			cmp.addChild(foldedContent(details.error, (l) => theme.fg("dim", l), theme));
-			return cmp;
+			// Full reason under the uniform fold — content is never dropped, only
+			// capped to the tail preview + expand hint; a blank line separates it
+			// from the header like every other card.
+			return statusErrorCard(details.title, "start", theme, details.error, expanded);
 		}
 		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
 		cmp.addChild(new Text(statusLine(details.title, "start", "done", theme), 0, 0));
@@ -379,10 +421,7 @@ export function renderAgentResult(
 	}
 	if (!isPartial || context.isError) {
 		state.endedAt ??= details?.endedAt ?? Date.now();
-		if (state.interval) {
-			clearInterval(state.interval);
-			state.interval = undefined;
-		}
+		stopSpinner(state);
 	}
 
 	const cmp = new Container();
@@ -393,9 +432,11 @@ export function renderAgentResult(
 	const body = renderBody(promptText, details.events, expanded, theme);
 	if (body) cmp.addChild(body);
 
-	// Context-truncation warning (below body, before the session footer).
-	if (details?.truncation?.truncated && !isPartial) {
-		cmp.addChild(contentRow(theme.fg("warning", truncationWarning(details.truncation, theme))));
+	// Failure reason (below the body, before the session footer) — the ✗
+	// header alone doesn't say why; same dim folded style as the
+	// background-start failure card.
+	if (details?.error && !isPartial) {
+		cmp.addChild(contentBlock(details.error, (l) => theme.fg("dim", l), expanded, theme));
 	}
 	// Footer: session path — resume entry (sub-agent sessions live outside
 	// `pi -r`). Shown for both success and failure so the user (and LLM)
@@ -408,7 +449,6 @@ export function renderAgentResult(
 }
 
 export interface AgentControlDetails {
-	agentId?: string;
 	/** "steer" | "stop" — validated at runtime in execute. */
 	action?: string;
 	/** Agent title (registered at spawn) — the UI's object identifier. */
@@ -427,9 +467,7 @@ export interface AgentControlDetails {
  */
 export function renderAgentControlResult(
 	result: { details?: AgentControlDetails; content: { type: string; text?: string }[] },
-	// `expanded` is accepted by the renderer contract but unused here — status
-	// lines never fold.
-	{ isPartial }: { expanded: boolean; isPartial: boolean },
+	{ expanded, isPartial }: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
 	context: RenderContext,
 ): Container | Text {
@@ -447,19 +485,11 @@ export function renderAgentControlResult(
 		// A stop that failed mid-animation must stop the spinner: the partial
 		// stop frame started a 100ms interval that would otherwise invalidate
 		// the display forever.
-		const state = context.state;
-		if (state.interval) {
-			clearInterval(state.interval);
-			state.interval = undefined;
-		}
-		const cmp = new Box(1, 1, (t: string) => theme.bg("toolErrorBg", t));
-		cmp.addChild(new Text(statusLine(d.title, verb, "failed", theme), 0, 0));
-		// Full error, never truncated — a truncated reason hides the very
-		// detail the user needs (e.g. the offending model name). Wraps across
-		// lines inside the card, with a blank line separating it from the
-		// header like every other card; content starts at the card edge.
-		cmp.addChild(foldedContent(d.error, (l) => theme.fg("dim", l), theme));
-		return cmp;
+		stopSpinner(context.state);
+		// The reason rides the uniform fold (never dropped, only capped to a
+		// tail preview + expand hint) — wrapping inside the card, blank line
+		// separating it from the header like every other card.
+		return statusErrorCard(d.title, verb, theme, d.error, expanded);
 	}
 
 	// Steer: status line + the injected message as a plain content line
@@ -467,9 +497,9 @@ export function renderAgentControlResult(
 	if (d?.action === "steer" && d.message) {
 		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
 		cmp.addChild(new Text(statusLine(d.title, "steer", "done", theme), 0, 0));
-		// The full message, never truncated; blank line separates it from the
-		// header, content starts at the card edge (same layout as bodies).
-		cmp.addChild(foldedContent(d.message, (l) => theme.fg("toolOutput", l), theme));
+		// The full message under the uniform fold (never dropped); blank line
+		// separates it from the header, content starts at the card edge.
+		cmp.addChild(contentBlock(d.message, (l) => theme.fg("toolOutput", l), expanded, theme));
 		return cmp;
 	}
 
@@ -480,17 +510,22 @@ export function renderAgentControlResult(
 			// Pending card: spinner + "Agent <title> stopping…" — the card shell
 			// is present in every phase, never a bare Loader-style spinner.
 			const cmp = new Box(1, 1, (t: string) => theme.bg("toolPendingBg", t));
-			if (state.frame === undefined) state.frame = 0;
-			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
-			const spinner = SPINNER[state.frame % SPINNER.length];
-			state.frame++;
-			cmp.addChild(new Text(statusLine(d.title, "stop", "running", theme, spinner), 0, 0));
+			cmp.addChild(
+				new Text(
+					statusLine(
+						d.title,
+						"stop",
+						"running",
+						theme,
+						startSpinner(state, () => context.invalidate()),
+					),
+					0,
+					0,
+				),
+			);
 			return cmp;
 		}
-		if (state.interval) {
-			clearInterval(state.interval);
-			state.interval = undefined;
-		}
+		stopSpinner(state);
 		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
 		cmp.addChild(new Text(statusLine(d.title, "stop", "done", theme), 0, 0));
 		return cmp;
@@ -559,7 +594,7 @@ export function renderNotification(
 
 	cmp.addChild(
 		new Text(
-			`${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${safeTitle(d.title)}"`)}${statusWord}${metaSuffix}`,
+			`${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${agentTitle(d.title, theme)}${statusWord}${metaSuffix}`,
 			0,
 			0,
 		),
@@ -574,10 +609,6 @@ export function renderNotification(
 		if (body) cmp.addChild(body);
 	}
 
-	// ── Context-truncation warning (below body, before the session footer) ──
-	if (d.truncation?.truncated) {
-		cmp.addChild(contentRow(theme.fg("warning", truncationWarning(d.truncation, theme))));
-	}
 	// ── Footer: session path (resume entry, custom dir → path required) ──
 	if (d.sessionPath) {
 		cmp.addChild(contentRow(theme.fg("muted", `session: ${shortenHome(d.sessionPath)}`)));
