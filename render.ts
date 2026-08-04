@@ -14,8 +14,8 @@
 import { homedir } from "node:os";
 import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { getMarkdownTheme, keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { formatSize, keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
+import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentActivity } from "./agent-process.js";
 
 /** Spinner frames shared by the Agents widget and the stop animation. */
@@ -68,8 +68,19 @@ export interface SubagentDetails {
 	sessionPath?: string;
 	startedAt?: number;
 	endedAt?: number;
-	/** Latest activity (thinking/tool) for the live card rows — widget parity. */
+	/** Latest activity (thinking/tool) for the widget — widget parity. */
 	activity?: AgentActivity;
+	/** Ordered activity stream (thinking/tool events) for the card body. */
+	events?: RenderEvent[];
+	/** LLM-context truncation info (aligns with bash tool truncateTail) — the card warns when set. */
+	truncation?: {
+		truncated: boolean;
+		truncatedBy: "lines" | "bytes" | null;
+		outputLines: number;
+		totalLines: number;
+		maxLines: number;
+		maxBytes: number;
+	};
 }
 
 // ─── Timer state persisted via context.state ───────────────────
@@ -89,6 +100,7 @@ interface RenderContext {
 	invalidate: () => void;
 	executionStarted: boolean;
 	isError: boolean;
+	isPartial?: boolean;
 	toolCallId?: string;
 }
 
@@ -102,7 +114,7 @@ export function formatDuration(ms: number): string {
 const ACTIVITY_EXCERPT_MAX = 60;
 
 /** Collapse whitespace, trim, and cut long tails to `max` chars (ellipsis prefix). */
-export function truncateTail(s: string, max: number = ACTIVITY_EXCERPT_MAX): string {
+export function clipTail(s: string, max: number = ACTIVITY_EXCERPT_MAX): string {
 	const clean = s.replace(/\s+/g, " ").trim();
 	if (clean.length <= max) return clean;
 	return `\u2026${clean.slice(clean.length - max + 1)}`;
@@ -120,12 +132,12 @@ export function activityRow(activity: AgentActivity, theme: Theme, max?: number)
 		return theme.italic(theme.fg("thinkingText", "Thinking..."));
 	}
 	if (activity.kind === "tool") {
-		const args = max === undefined ? activity.args : truncateTail(activity.args, max);
+		const args = max === undefined ? activity.args : clipTail(activity.args, max);
 		return args
 			? `${theme.fg("toolTitle", activity.name)}: ${theme.fg("muted", args)}`
 			: theme.fg("toolTitle", activity.name);
 	}
-	return theme.fg("muted", max === undefined ? activity.text : truncateTail(activity.text, max));
+	return theme.fg("muted", max === undefined ? activity.text : clipTail(activity.text, max));
 }
 
 /** Extract a one-line summary of a long string: first line, ellipsis if truncated. */
@@ -150,10 +162,11 @@ export function safeTitle(title: string | undefined, max = 40): string {
 }
 
 /** Muted metadata suffix, mirroring bash's ` (timeout 10s)` pattern. */
-function buildMetaSuffix(args: AgentParams, theme: Theme): string {
+function buildMetaSuffix(args: AgentParams, theme: Theme, time?: string): string {
 	const parts: string[] = [];
 	const model = args.model;
 	if (model) parts.push(model);
+	if (time) parts.push(time);
 	if (parts.length === 0) return "";
 	return theme.fg("muted", ` (${parts.join(" \u00b7 ")})`);
 }
@@ -170,9 +183,30 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 	// renderResult (Text("") renders zero lines); the title lives on the line.
 	if (args.run_in_background) return new Text("", 0, 0);
 
+	// Status icon, fronted like every other surface: the accent spinner while
+	// running (same width as ✓/✗, so the `Agent` column never shifts), then
+	// ✓/✗ on completion (the framework marks the result via isError).
+	const icon = context.isPartial
+		? (() => {
+				const state = context.state as TimerState & { frame?: number };
+				state.frame = (state.frame ?? 0) + 1;
+				return theme.fg("accent", SPINNER[state.frame % SPINNER.length]);
+			})()
+		: context.isError
+			? theme.fg("error", "\u2717")
+			: theme.fg("success", "\u2713");
+
+	// Elapsed/Took rides the header meta (shared state carries the timestamps;
+	// the endedAt fallback keeps the first final frame correct even though the
+	// result renderer writes the precise value one render later).
+	const timePart =
+		context.state.startedAt === undefined
+			? undefined
+			: `${context.isPartial ? "Elapsed" : "Took"} ${formatDuration((context.state.endedAt ?? Date.now()) - (context.state.startedAt as number))}`;
+
 	const title = safeTitle(args.title.trim() || firstLine(args.prompt));
 	return new Text(
-		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${title}"`)}${buildMetaSuffix(args, theme)}`,
+		`${icon} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${title}"`)}${buildMetaSuffix(args, theme, timePart)}`,
 		0,
 		0,
 	);
@@ -236,57 +270,144 @@ function statusLine(
 }
 
 /**
- * Shared output body: the prompt and the output are one stream — the prompt
- * rides at the head and flows away as output grows (terminal-scroll feel;
- * the header title is the card's fixed identifier). Collapsed folds the
- * stream to the tail PREVIEW_LINES with an "N earlier lines" hint; expanded
- * shows everything. Returns null when there is nothing to show.
+ * One step of the sub-agent's session as shown in the card body: a thinking
+ * marker, a tool call, or a chunk of streamed text. The body renders these in
+ * event order — like replaying the sub-agent's session in pi — instead of a
+ * single latest-activity row.
  */
-type BodyComponent = Text | { invalidate: () => void; render: (w: number) => string[] };
+export type RenderEvent =
+	| { kind: "thinking" }
+	| { kind: "tool"; name: string; args?: string }
+	| { kind: "text"; text: string };
+
+/**
+ * Shared output body: the prompt and the sub-agent's activity stream are one
+ * stream — the prompt rides at the head and flows away as output grows
+ * (terminal-scroll feel; the header title is the card's fixed identifier).
+ * Events render in order with their pi-native styles (Thinking... italic,
+ * tool calls toolTitle, text in toolOutput). Collapsed folds the stream to
+ * the tail PREVIEW_LINES with an "N earlier lines" hint; expanded shows
+ * everything. Returns null when there is nothing to show.
+ */
+type BodyComponent = Text | Container | { invalidate: () => void; render: (w: number) => string[] };
 
 /** Output preview line limit when collapsed. */
 const PREVIEW_LINES = 5;
 
-function renderBody(
-	input: string | undefined,
-	output: string | undefined,
-	expanded: boolean,
-	theme: Theme,
-): BodyComponent | null {
-	const inputText = input?.trim();
-	const outputText = output?.trim();
+/**
+ * Content row below a header/footer: a leading blank line separates it
+ * (bash card parity). Must be a literal `\n` inside the text — an empty
+ * Text (Text("")/Text("\n")) renders ZERO lines in pi-tui, so a bare gap
+ * would vanish; `\n` + content renders "blank line + content".
+ */
+function contentRow(styled: string, x = 0): Text {
+	return new Text(`\n${styled}`, x, 0);
+}
 
-	// One stream: prompt (input) + blank line + output. The prompt is not
-	// pinned — it flows off the top of the fold/scroll once output grows.
-	const parts: string[] = [];
-	if (inputText) parts.push(inputText);
-	if (inputText && outputText) parts.push("");
-	if (outputText) parts.push(outputText);
-	const rawBody = parts.join("\n");
-	if (!rawBody) return null;
-
-	const styledBody = rawBody
-		.split("\n")
-		.map((l) => theme.fg("toolOutput", l))
-		.join("\n");
-
-	if (expanded) {
-		// \n prefix gives 1 blank line between header and body (bash parity).
-		return new Text(`\n${styledBody}`, 0, 0);
+/**
+ * Context-truncation warning (bash parity): only the Truncated clause —
+ * the session path lives separately in the card footer so the warning
+ * never duplicates it.
+ */
+function truncationWarning(truncation: NonNullable<SubagentDetails["truncation"]>, theme: Theme): string {
+	if (!truncation.truncated) return "";
+	if (truncation.truncatedBy === "lines") {
+		return `[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines]`;
 	}
+	return `[Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes)} limit)]`;
+}
 
+/**
+ * Card content block with uniform folding: short content renders in full
+ * (blank line + content); content past PREVIEW_LINES folds to a tail preview
+ * with the expand hint (Ctrl+O to expand reveals everything — folding never
+ * loses content, it only caps how much fills the screen). Shared by every
+ * card body so the fold behavior is identical across surfaces.
+ */
+function foldedBlock(styledRows: string[], theme: Theme): BodyComponent {
+	// Short content resolves through truncateToVisualLines with zero skipped
+	// lines (so a single prompt that wraps across many visual rows still folds
+	// correctly); only the fold hint distinguishes short from long.
+	const body = styledRows.join("\n");
 	return {
 		invalidate: () => {},
 		render: (w: number) => {
-			// Tail preview of the whole stream — goes through truncateToVisualLines
-			// so long input wraps instead of crashing the TUI with an overflowing
-			// rendered line.
-			const preview = truncateToVisualLines(styledBody, PREVIEW_LINES, w, 0);
+			const preview = truncateToVisualLines(body, PREVIEW_LINES, w, 0);
 			if (preview.skippedCount === 0) return ["", ...preview.visualLines];
-			const hint = `${theme.fg("muted", `... ${preview.skippedCount} earlier lines (`)}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-			return ["", hint, ...preview.visualLines];
+			// Same hint as pi's core/tools/bash.js result card:
+			// `... (N earlier lines, KEY to expand)` — paren wraps the whole phrase.
+			const hint = `${theme.fg("muted", `... (${preview.skippedCount} earlier lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+			return ["", truncateToWidth(hint, w, "..."), ...preview.visualLines];
 		},
 	};
+}
+
+/** foldedBlock over a single colored string (split per line so colors survive folding). */
+function foldedContent(styled: string, color: (line: string) => string, theme: Theme): BodyComponent {
+	return foldedBlock(styled.split("\n").map(color), theme);
+}
+
+/** Style one body row per its kind (pi-native colors). */
+function styleRow(row: { style: "prompt" | "thinking" | "tool" | "text"; content: string }, theme: Theme): string {
+	switch (row.style) {
+		case "thinking":
+			return theme.italic(theme.fg("thinkingText", "Thinking..."));
+		case "tool": {
+			const sepIdx = row.content.indexOf(":");
+			if (sepIdx === -1) return theme.fg("toolTitle", row.content);
+			return `${theme.fg("toolTitle", row.content.slice(0, sepIdx))}${theme.fg("muted", row.content.slice(sepIdx))}`;
+		}
+		default:
+			return theme.fg("toolOutput", row.content);
+	}
+}
+
+/** Flatten prompt + events into styled rows (text chunks split per line). */
+function bodyRows(
+	input: string | undefined,
+	events: RenderEvent[] | undefined,
+): { style: "prompt" | "thinking" | "tool" | "text"; content: string }[] {
+	const rows: { style: "prompt" | "thinking" | "tool" | "text"; content: string }[] = [];
+	const promptText = input?.trim();
+	if (promptText) {
+		rows.push({ style: "prompt", content: promptText });
+		if (events?.length) rows.push({ style: "text", content: "" }); // blank line after the prompt
+	}
+	for (const ev of events ?? []) {
+		if (ev.kind === "thinking") {
+			rows.push({ style: "thinking", content: "Thinking..." });
+		} else if (ev.kind === "tool") {
+			rows.push({ style: "tool", content: `${ev.name}:${ev.args ? ` ${ev.args}` : ""}` });
+		} else {
+			for (const line of ev.text.split("\n")) rows.push({ style: "text", content: line });
+		}
+	}
+	return rows;
+}
+
+function renderBody(
+	input: string | undefined,
+	events: RenderEvent[] | undefined,
+	expanded: boolean,
+	theme: Theme,
+): BodyComponent | null {
+	const rows = bodyRows(input, events);
+	if (rows.length === 0) return null;
+
+	if (expanded) {
+		const cmp = new Container();
+		// First row carries the blank-line prefix (blank + content).
+		cmp.addChild(contentRow(styleRow(rows[0], theme)));
+		for (const row of rows.slice(1)) cmp.addChild(new Text(styleRow(row, theme), 0, 0));
+		return cmp;
+	}
+
+	// Collapsed: uniform fold — short content in full, long content tail-5
+	// preview + expand hint (same foldedBlock as every other card).
+	return foldedBlock(
+		rows.map((r) => styleRow(r, theme)),
+		theme,
+	);
 }
 
 export function renderAgentResult(
@@ -298,19 +419,21 @@ export function renderAgentResult(
 	const details = result.details;
 	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
-	// Background spawn: `starting…` spinner (bare, Loader style) → a small
-	// result card (`✓ started` / `✗ start failed` + dim reason). The agent id
-	// stays in the tool content (the LLM's AgentControl handle); users only
-	// ever see the title.
+	// Background spawn: `starting…` spinner in a pending card → a result card
+	// (`✓ started` / `✗ start failed` + dim reason). Every phase carries the
+	// card shell (pending → success/error) so the tool never flashes a bare
+	// Loader-style spinner that could be mistaken for pi's own.
 	if (details?.runInBackground && !details.task) {
 		const state = context.state;
 		if (isPartial && !details.error) {
-			// Spinner animation while the child spawns (in-place, no new lines).
+			// Spinner animation inside the pending card (in-place, no new lines).
 			if (state.frame === undefined) state.frame = 0;
 			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
 			const spinner = SPINNER[state.frame % SPINNER.length];
 			state.frame++;
-			return new Text(statusLine(details.title, "start", "running", theme, spinner), 0, 0);
+			const cmp = new Box(1, 1, (t: string) => theme.bg("toolPendingBg", t));
+			cmp.addChild(new Text(statusLine(details.title, "start", "running", theme, spinner), 0, 0));
+			return cmp;
 		}
 		if (state.interval) {
 			clearInterval(state.interval);
@@ -319,8 +442,10 @@ export function renderAgentResult(
 		if (details.error) {
 			const cmp = new Box(1, 1, (t: string) => theme.bg("toolErrorBg", t));
 			cmp.addChild(new Text(statusLine(details.title, "start", "failed", theme), 0, 0));
-			// Full reason, never truncated — wraps inside the card instead.
-			cmp.addChild(new Text(theme.fg("dim", details.error), 1, 0));
+			// Full reason, never truncated — wraps inside the card instead. A
+			// blank line separates content from the header like every other card;
+			// content starts at the card edge (no header-column alignment).
+			cmp.addChild(foldedContent(details.error, (l) => theme.fg("dim", l), theme));
 			return cmp;
 		}
 		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
@@ -336,7 +461,7 @@ export function renderAgentResult(
 		state.startedAt = details.startedAt;
 	}
 	if (state.startedAt !== undefined && isPartial && !state.interval) {
-		state.interval = setInterval(() => context.invalidate(), 1000);
+		state.interval = setInterval(() => context.invalidate(), 100);
 	}
 	if (!isPartial || context.isError) {
 		state.endedAt ??= details?.endedAt ?? Date.now();
@@ -348,28 +473,21 @@ export function renderAgentResult(
 
 	const cmp = new Container();
 	const promptText = details.task.trim();
-	const output = text?.trim() ?? "";
 
-	// Live activity rows (widget parity): thinking status and tool calls.
-	// Text is already streaming as the card body, so only non-text kinds show.
-	const activity = details.activity;
-	if (isPartial && activity && activity.kind !== "text") {
-		cmp.addChild(new Text(`\n${activityRow(activity, theme)}`, 0, 0));
-	}
-
-	// Body: prompt (input) + blank line + final output.
-	const body = renderBody(promptText, output, expanded, theme);
+	// Body: the prompt plus the ordered activity stream (thinking / tool
+	// calls / streamed text) — like replaying the sub-agent's session.
+	const body = renderBody(promptText, details.events, expanded, theme);
 	if (body) cmp.addChild(body);
 
-	if (state.startedAt !== undefined) {
-		const label = isPartial ? "Elapsed" : "Took";
-		const endTime = state.endedAt ?? Date.now();
-		cmp.addChild(new Text(`\n${theme.fg("muted", `${label} ${formatDuration(endTime - state.startedAt)}`)}`, 0, 0));
+	// Context-truncation warning (below body, before the session footer).
+	if (details?.truncation?.truncated && !isPartial) {
+		cmp.addChild(contentRow(theme.fg("warning", truncationWarning(details.truncation, theme))));
 	}
-
-	// Resume entry: sub-agent sessions live outside `pi -r` — show the path.
+	// Footer: session path — resume entry (sub-agent sessions live outside
+	// `pi -r`). Shown for both success and failure so the user (and LLM)
+	// can always recover the full output.
 	if (details?.sessionPath && !isPartial) {
-		cmp.addChild(new Text(theme.fg("muted", `session: ${shortenHome(details.sessionPath)}`), 0, 0));
+		cmp.addChild(contentRow(theme.fg("muted", `session: ${shortenHome(details.sessionPath)}`)));
 	}
 
 	return cmp;
@@ -424,23 +542,20 @@ export function renderAgentControlResult(
 		cmp.addChild(new Text(statusLine(d.title, verb, "failed", theme), 0, 0));
 		// Full error, never truncated — a truncated reason hides the very
 		// detail the user needs (e.g. the offending model name). Wraps across
-		// lines inside the card instead.
-		cmp.addChild(new Text(theme.fg("dim", d.error), 1, 0));
+		// lines inside the card, with a blank line separating it from the
+		// header like every other card; content starts at the card edge.
+		cmp.addChild(foldedContent(d.error, (l) => theme.fg("dim", l), theme));
 		return cmp;
 	}
 
-	// Steer: status line + the injected message as a pi-native markdown quote.
+	// Steer: status line + the injected message as a plain content line
+	// (no quote styling — content renders uniformly across cards).
 	if (d?.action === "steer" && d.message) {
 		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
 		cmp.addChild(new Text(statusLine(d.title, "steer", "done", theme), 0, 0));
-		// The full message, quoted line-by-line — steer instructions must be
-		// readable in full, not clipped to a first-line preview.
-		const quoted = d.message
-			.trim()
-			.split(/\r?\n/)
-			.map((l) => `> ${l}`)
-			.join("\n");
-		cmp.addChild(new Markdown(quoted, 0, 0, getMarkdownTheme()));
+		// The full message, never truncated; blank line separates it from the
+		// header, content starts at the card edge (same layout as bodies).
+		cmp.addChild(foldedContent(d.message, (l) => theme.fg("toolOutput", l), theme));
 		return cmp;
 	}
 
@@ -448,15 +563,14 @@ export function renderAgentControlResult(
 	if (d?.action === "stop") {
 		const state = context.state;
 		if (isPartial) {
-			// Working-indicator style: bare spinner + "Agent <title> stopping…"
-			// (same accent spinner / cadence as pi's Loader).
-			const cmp = new Container();
+			// Pending card: spinner + "Agent <title> stopping…" — the card shell
+			// is present in every phase, never a bare Loader-style spinner.
+			const cmp = new Box(1, 1, (t: string) => theme.bg("toolPendingBg", t));
 			if (state.frame === undefined) state.frame = 0;
 			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
 			const spinner = SPINNER[state.frame % SPINNER.length];
 			state.frame++;
-			cmp.addChild(new Text(statusLine(d.title, "stop", "running", theme, spinner), 1, 0));
-			cmp.addChild(new Spacer(1));
+			cmp.addChild(new Text(statusLine(d.title, "stop", "running", theme, spinner), 0, 0));
 			return cmp;
 		}
 		if (state.interval) {
@@ -488,6 +602,7 @@ export interface NotificationDetails {
 	};
 	sessionPath?: string;
 	sessionId?: string;
+	truncation?: SubagentDetails["truncation"];
 }
 
 /** Expand `~`-style home prefix to a display path (cross-platform). */
@@ -553,13 +668,18 @@ export function renderNotification(
 	// output tail + "earlier lines" hint, full text when expanded). ──
 	const result = d.result?.trim();
 	if (result) {
-		const body = renderBody(undefined, result, expanded, theme);
+		// Notification body is plain text — a single text event.
+		const body = renderBody(undefined, [{ kind: "text", text: result }], expanded, theme);
 		if (body) cmp.addChild(body);
 	}
 
+	// ── Context-truncation warning (below body, before the session footer) ──
+	if (d.truncation?.truncated) {
+		cmp.addChild(contentRow(theme.fg("warning", truncationWarning(d.truncation, theme))));
+	}
 	// ── Footer: session path (resume entry, custom dir → path required) ──
 	if (d.sessionPath) {
-		cmp.addChild(new Text(`\n${theme.fg("muted", `session: ${shortenHome(d.sessionPath)}`)}`, 0, 0));
+		cmp.addChild(contentRow(theme.fg("muted", `session: ${shortenHome(d.sessionPath)}`)));
 	}
 
 	return cmp;

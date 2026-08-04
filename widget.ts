@@ -2,7 +2,7 @@
  * pi-subagent — AgentWidget.
  *
  * Persistent above-editor widget showing one status line per *background*
- * agent: `⠋ <title> · 42.0s`, plus a latest-activity excerpt line aligned
+ * agent: `⠋ <title> (42.0s)`, plus a latest-activity excerpt line aligned
  * under the title (tool call / Thinking... / text tail). Foreground agents
  * are intentionally excluded — their live output already streams inline in
  * the tool card (mirrors tintinweb's default widget mode, which hides
@@ -18,7 +18,7 @@
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity, AgentProcess } from "./agent-process.js";
-import { activityRow, formatDuration, SPINNER } from "./render.js";
+import { activityRow, formatDuration, SPINNER, safeTitle } from "./render.js";
 
 // Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
 // (SPINNER lives in render.ts — shared with the stop animation.)
@@ -126,20 +126,19 @@ export class AgentWidget {
 		// (interactive-mode renderWidgetContainer, leadingSpacer=true) — no
 		// manual blank line. 1-char left padding matches pi's string[] widget
 		// form (Text(line, 1, 0)).
-		const lines: string[] = [` ${theme.fg("accent", `\u25cf Agents`)}`];
+		const lines: string[] = [` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold("Agents"))}`];
 		for (const row of this.rows.values()) {
 			const { agent, frame } = row;
 			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
-			// Task label (quoted, bashMode-style like the card header titles) —
-			// same as the session display name. Rendered safe for one line:
-			// newlines/quotes flattened, capped (mirrors safeTitle in render.ts).
-			const name = (agent.title ?? "")
-				.replace(/[\r\n\t]+/g, " ")
-				.replace(/"/g, "'")
-				.trim();
-			const label = (name || "(untitled)").length > 40 ? `${name.slice(0, 39)}\u2026` : name || "(untitled)";
+			// Task label — same colors as the card header title (bashMode quotes),
+			// rendered safe for one line: newlines/quotes flattened, capped
+			// (mirrors safeTitle in render.ts).
+			const label = safeTitle(agent.title, 40);
 			const elapsed = formatDuration(Date.now() - agent.startedAt);
-			lines.push(` ${spinner} ${theme.fg("muted", `"${label}" \u00b7 ${elapsed}`)}`);
+			// Meta is parenthesized like every other component's meta (bash
+			// `(timeout 10s)`, notification `(Took …)`); `·` only separates
+			// multiple meta items, so a lone elapsed time drops it.
+			lines.push(` ${spinner} ${theme.fg("bashMode", `"${label}"`)} ${theme.fg("muted", `(${elapsed})`)}`);
 
 			const activity = agent.getLatestActivity();
 			if (activity) lines.push(this.renderExcerpt(activity, theme));

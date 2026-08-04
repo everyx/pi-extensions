@@ -22,7 +22,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { resolveModel } from "./model.js";
@@ -31,11 +31,13 @@ import {
 	type AgentControlParams,
 	type AgentParams,
 	type NotificationDetails,
+	type RenderEvent,
 	renderAgentCall,
 	renderAgentControlCall,
 	renderAgentControlResult,
 	renderAgentResult,
 	renderNotification,
+	type SubagentDetails,
 	safeTitle,
 } from "./render.js";
 import { AgentWidget } from "./widget.js";
@@ -152,6 +154,29 @@ const AgentControlParamsSchema = Type.Object({
 });
 
 // ─── Helpers ─────────────────────────────────────────────────
+
+/**
+ * LLM-context protection for result content, aligned with pi's bash tool:
+ * truncateTail keeps the tail (DEFAULT_MAX_LINES=2000 lines / 50KB) and we
+ * surface the fact via details.truncation (the card warns, the full session
+ * file has everything). Rendering events (details.events) stay complete —
+ * folding never loses content for the user; this only caps what the LLM sees.
+ */
+export function truncateForContext(text: string): { text: string; truncation?: SubagentDetails["truncation"] } {
+	const result = truncateTail(text);
+	if (!result.truncated) return { text };
+	return {
+		text: result.content,
+		truncation: {
+			truncated: true,
+			truncatedBy: result.truncatedBy,
+			outputLines: result.outputLines,
+			totalLines: result.totalLines,
+			maxLines: result.maxLines,
+			maxBytes: result.maxBytes,
+		},
+	};
+}
 
 function toErrorResult(err: unknown): {
 	content: { type: "text"; text: string }[];
@@ -277,8 +302,18 @@ export default function (pi: ExtensionAPI) {
 			// surface the title appears on.
 			const sessionName = safeTitle(params.title);
 
-			// Foreground: stream assistant deltas into the tool card (live output).
+			// Foreground: stream the sub-agent's session as an ordered activity
+			// stream — text deltas and thinking/tool events are pushed into the
+			// card body in event order (like watching a pi session replay).
 			let streamed = "";
+			const events: RenderEvent[] = [];
+			const pushEvents = () => {
+				if (params.run_in_background) return;
+				onUpdate?.({
+					content: [{ type: "text", text: streamed }],
+					details: { task, startedAt, activity: agent.getLatestActivity() ?? undefined, events: [...events] },
+				});
+			};
 			const agent = new AgentProcess({
 				agentId: registry.nextAgentId(),
 				cwd: ctx.cwd,
@@ -290,21 +325,24 @@ export default function (pi: ExtensionAPI) {
 				sessionDir: SUBAGENT_SESSION_DIR,
 				timeoutMs: params.timeoutMs,
 				onDelta: (delta) => {
-					if (params.run_in_background) return; // widget + notification cover background
+					if (params.run_in_background) return;
 					streamed += delta;
-					onUpdate?.({
-						content: [{ type: "text", text: streamed }],
-						details: { task, startedAt, activity: agent.getLatestActivity() ?? undefined },
-					});
+					// Fold consecutive deltas into the current text event.
+					const last = events[events.length - 1];
+					if (last?.kind === "text") last.text += delta;
+					else events.push({ kind: "text", text: delta });
+					pushEvents();
 				},
 				onActivityChange: (activity) => {
-					if (params.run_in_background) return; // widget + notification cover background
-					// Thinking/tool transitions refresh the card's activity row even
-					// while no text delta is streaming.
-					onUpdate?.({
-						content: [{ type: "text", text: streamed }],
-						details: { task, startedAt, activity },
-					});
+					if (params.run_in_background) return;
+					// Thinking/tool transitions become events in the body stream.
+					if (activity.kind === "text") return; // covered by onDelta
+					events.push(
+						activity.kind === "thinking"
+							? { kind: "thinking" }
+							: { kind: "tool", name: activity.name, args: activity.args },
+					);
+					pushEvents();
 				},
 			});
 
@@ -403,27 +441,39 @@ export default function (pi: ExtensionAPI) {
 				// workaround hook restores the error background. A stopped agent
 				// is also what a user cancel (abort) produces — don't blame that
 				// on the limits.
+				const sessionHint = `\n\n[Full output available in the sub-agent session — use \`read\` on session_path to inspect.]`;
 				if (completion.status === "failed" || completion.status === "stopped") {
 					const message =
 						completion.status === "failed"
-							? completion.output || "Sub-agent failed."
+							? (completion.output || "Sub-agent failed.") + sessionHint
 							: agent.stoppedByControl
-								? completion.output || "Sub-agent stopped."
-								: `${completion.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)`;
+								? (completion.output || "Sub-agent stopped.") + sessionHint
+								: `${completion.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)${sessionHint}`;
+					const { text: finalText, truncation } = truncateForContext(message);
 					return {
-						content: [{ type: "text", text: message }],
-						details: { task, startedAt, endedAt: Date.now(), error: message },
+						content: [{ type: "text", text: finalText }],
+						details: {
+							task,
+							startedAt,
+							endedAt: Date.now(),
+							error: message,
+							truncation,
+							sessionPath: completion.sessionPath,
+							events: [...events],
+						},
 						isError: true,
 					};
 				}
+				const { text: finalText, truncation } = truncateForContext(completion.output);
 				return {
-					content: [{ type: "text", text: completion.output }],
+					content: [{ type: "text", text: finalText + sessionHint }],
 					details: {
 						task,
 						sessionPath: completion.sessionPath,
 						sessionId: completion.sessionId,
 						startedAt,
 						endedAt: Date.now(),
+						truncation,
 					},
 				};
 			} catch (err) {

@@ -55,37 +55,40 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 ### 统一视觉语法
 
-- **内容型**（前台 Agent、通知卡）：`<status icon?> + <bold 工具名> + <"title" 引号 bashMode> + <muted 括号 meta>` → 1 空行 → `toolOutput body（prompt 与输出同一流，折叠为尾部预览）` → 1 空行 → `muted footer`。
-- **控制型**（后台 spawn / steer / stop）：单行状态行 `[marker] Agent "title" <状态词>`（marker = accent spinner / success ✓ / error ✗，原地切换不追加新行），颜色与卡片 header 同构。状态词是自然语言动词短语（`started` / `starting…`），空格直接连接；**`·` 只用于数据分隔**（widget 计时、通知卡 meta 列表），不分割动词短语
-- **title 视觉约定**：任务名始终以**引号包裹、bashMode 色**出现（对齐 bash 卡 `$ cmd` 的命令色）——与工具名 `Agent`（toolTitle bold）区分；widget 状态区里 title 保持 muted（避免与 accent spinner 撞色）。
+- **内容型**（前台 Agent、通知卡）：`<status icon ✓/✗> + <bold 工具名> + <"title" 引号 bashMode> + <muted 括号 meta（model · Took/Elapsed）>` → 1 空行 → `toolOutput body（prompt 与输出同一流，折叠为尾部预览）` → 1 空行 → `muted footer（仅 session）`。**body/footer 从卡片左边缘起，不对齐 header 文字**（pi bash 卡惯例：空行即分隔）。
+- **控制型**（后台 spawn / steer / stop）：状态行 `[marker] Agent "title" <状态词>`（marker = accent spinner / success ✓ / error ✗），**全阶段包 Box 壳**（pending → success/error 底色）——工具从不显示无壳 spinner，不与 pi 原生 Loader 混淆。状态词是自然语言动词短语（`started` / `starting…`），空格直接连接；**`·` 只用于 meta 列表分隔**，不分割动词短语
+- **统一折叠**：所有卡内容（前台/通知 body、控制卡消息/原因）超过 5 行一律折叠为尾部预览 + `... (N earlier lines, <key> to expand)` 提示，快捷键展开全显——折叠不丢内容（展开可见全部），只限屏幕占用
+- **LLM context 截断保护**（对齐 bash 工具）：进 LLM 的 content 经 truncateTail（尾部 2000 行 / 50KB）截断——截断时卡片在 body 下方显示警告 `[Truncated: showing X of Y lines]`（bytes 变体 `[Truncated: X lines shown (<size> limit)]`），完整输出在 session 文件（卡片 footer 已标 `session: <path>`，警告不重复）；**UI 渲染源（events）不截断**——用户展开看全部，只有 LLM 看到截断版；content 尾部附 `[Full output available in the sub-agent session — use ...read... on session_path to inspect.]` 引导 LLM 排查
+- **title 视觉约定**：任务名始终以**引号包裹、bashMode 色**出现（对齐 bash 卡 `$ cmd` 的命令色）——与工具名 `Agent`（toolTitle bold）区分；widget 里 `Agents` 用 toolTitle bold、title 用 bashMode（与卡片同色系）。
 - **占位/兜底**：`dim` 色 + 括号（如 `(no details)`，对齐 pi bash 卡的 `(no output)`）。
 
 ### Agent 工具卡片
 
 ```
-Agent "检查 CI 配置" (sonnet)
+✓ Agent "检查 CI 配置" (sonnet · Took 27.5s)   ← header：icon（进行中 spinner / 完成 ✓✗）+ Agent + "title" + meta（model · 时间）
+⠙ Agent "检查 CI 配置" (claude-sonnet · Elapsed 12.3s)  ← 进行中：accent spinner（与 ✓ 同宽，Agent 列恒定）+ Elapsed 动态
 Thinking...                  ← 活动行（思考中：italic + thinkingText，pi 隐藏 thinking 同款）
 bash: pnpm check             ← 活动行（工具调用：工具名 toolTitle + 冒号 + muted 参数）
 <空行>
-... 12 earlier lines (ctrl+o to expand)   ← 折叠提示（muted + keyHint；被折叠的是流的头部：prompt + 早期输出）
+... (12 earlier lines, ctrl+o to expand)   ← 折叠提示（与 bash 工具卡同款；muted + keyHint；被折叠的是流的头部：prompt + 早期输出）
 <子 agent 输出尾部 5 行>          ← 输出（前台流式逐字滚动；折叠时只显示最新尾部，展开全显）
 <空行>
-Took 27.5s
-session: /path/...jsonl
+session: /path/...jsonl       ← footer 仅 session
 ```
 
-- header：`Agent`（bold toolTitle）+ `"title"`（bashMode 色，引号同色）+ muted meta `(model)`——title 用 bash 命令同款色系，与工具名区分；`run_in_background` 时 renderCall 返回空，只渲染单行状态行（见下）
-- 活动行（widget 对齐，仅前台流式期间）：`Thinking...`（italic + thinkingText）与工具调用（工具名 toolTitle + 参数），数据同 widget 的 `latestActivity`（不进 LLM context）；正文本身已流式，故不重复显示 text 活动
-- body：prompt 与输出**同一流**——prompt 在流头、header 的 title 承担固定标识，折叠时整流截为尾部 5 行（`... N earlier lines (<key> to expand)`，N 含被折叠的 prompt 与早期输出）；展开全显（prompt 在顶部随滚动流逝）；折叠/展开经 keyHint 绑定键切换
-- footer：`Took/Elapsed X.Xs`（muted）+ `session: <path>`（前台完成时）
+- header：`⠋/✓/✗`（进行中 accent spinner，与 ✓ 同宽故 Agent 列恒定；final 由框架 isError 决定 ✓/✗）+ `Agent`（bold toolTitle）+ `"title"`（bashMode 色，引号同色）+ muted meta `(model · Took/Elapsed X.Xs)`——title 用 bash 命令同款色系，与工具名区分；时间从 state 共享（final 首帧用 Date.now() 兜底，无可见延迟）；`run_in_background` 时 renderCall 返回空（见下）
+- body：**混合活动流**——prompt 在流头，随后按事件顺序渲染子 agent 的会话（像回放 pi 会话）：`Thinking...`（italic thinkingText）、工具调用（toolTitle 名 + muted 参数）、流式文本（toolOutput）；随输出增长 prompt 与早期活动滚出折叠区（terminal-scroll 感，header title 是固定标识）
+- 折叠时整流截为尾部 5 行（`... (N earlier lines, <key> to expand)`——括号包整句、逗号分隔、提示在尾部预览之前，与 bash 工具卡完全一致；N 含被折叠的 prompt/活动/早期输出）；展开全显；折叠/展开经 keyHint 绑定键切换
+- 数据：`details.events`（RenderEvent[]：thinking/tool/text 事件序）——**不进 LLM context**（LLM 看到的是 content text 累积）
+- footer：**仅** `session: <path>`（前台完成时）——时间已在 header meta
 - 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值（`pi.getThinkingLevel()`），经 `--thinking` 传给子进程
 - **后台 spawn 结果卡**（renderResult，Box 壳，原地切换）：
 
 ```
-⠋ Agent "检查 CI 配置" starting…        ← 进行中：accent spinner（100ms 帧）
-✓ Agent "检查 CI 配置" started          ← 成功：success ✓ + muted 状态词
-✗ Agent "检查 CI 配置" start failed     ← 失败：error ✗ + error 状态词
-  Model not found                          ← 原因：dim 第二行（缩进对齐）
+⠋ Agent "检查 CI 配置" starting…        ← 进行中：pending 底卡片 + accent spinner（100ms 帧）
+✓ Agent "检查 CI 配置" started          ← 成功：success 底卡片 + success ✓
+✗ Agent "检查 CI 配置" start failed     ← 失败：error 底卡片 + error ✗
+  Model not found                          ← 原因：dim（空行分隔，卡片左边缘起）
 ```
 
 - 状态一眼可辨（icon 前置），失败原因独立 dim 行**完整显示**（不截断——错误里的模型名/堆栈不能丢），新手读状态不用啃长句
@@ -94,19 +97,19 @@ session: /path/...jsonl
 ### AgentControl 结果卡（renderShell "self"，Box 壳）
 
 ```
-✓ Agent "research db schema" steered      ← 成功：success ✓ + muted 状态词
-│ 重点看 orders 表的索引和慢查询             ← 消息行：pi 原生 markdown quote（│ mdQuoteBorder + italic mdQuote）
-│ 第二行指令也完整显示                      ← **完整多行**（逐行 quote 前缀，不截断首行）
+✓ Agent "research db schema" steered      ← 成功：success 底卡片
+  重点看 orders 表的索引和慢查询             ← 消息：普通文本（toolOutput，空行分隔，卡片左边缘起）
+  第二行指令也完整显示                      ← 完整多行，不截断
 
-⠹ Agent "slow query probe" stopping…      ← stop 进行中：accent spinner（原地动画）
-✓ Agent "slow query probe" stopped        ← stop 完成：success ✓ + muted
+⠹ Agent "slow query probe" stopping…      ← stop 进行中：pending 底卡片 + accent spinner
+✓ Agent "slow query probe" stopped        ← stop 完成：success 底卡片
 
-✗ Agent "slow query probe" stop failed    ← 失败：error ✗ + error 状态词
-  agent not found                            ← 原因：dim 第二行
+✗ Agent "slow query probe" stop failed    ← 失败：error 底卡片
+  agent not found                            ← 原因：dim（空行分隔，卡片左边缘起）
 ```
 
-- steer/stop 的**完成态是结果卡**（Box 壳，success/error 底色同通知卡）：状态行元素原样进卡片；**进行中**（spinner）保持无壳（贴 pi working 指示器/Loader）——统一原则：完成态全部卡片，进行中无壳动画
-- steer 注入的消息以 markdown quote **完整多行**显示在卡片内（逐行 `> ` 前缀，不截断）——用户看到的与注入子 agent 的内容一致；消息同时进 LLM 的 tool content（compaction 后不丢）
+- steer/stop **全阶段都是结果卡**（Box 壳）：pending（进行中 spinner）→ success/error 底色——统一原则：工具任何阶段都不出现无壳 spinner
+- steer 注入的消息以**普通文本**显示在卡片内（toolOutput 色，空行分隔、卡片左边缘起，与其他卡 body 一致）；超 5 行按统一折叠规则折叠（展开快捷键可见全部）——用户看到的与注入子 agent 的内容一致；消息同时进 LLM 的 tool content（compaction 后不丢）
 - 动画帧在**同一行内**切换（spinner 帧 + 状态词），绝不追加新行
 - 错误保持同一形态：`✗ Agent "title" <verb> failed`（error 色）+ dim 原因行；完整错误仍在 LLM content
 
@@ -115,7 +118,7 @@ session: /path/...jsonl
 ```
 ✓ Agent "检查 CI 配置" (Took 27.5s · 1,250 tokens · 3 tool uses)
 <空行>
-... 3 earlier lines (ctrl+o to expand)      ← 折叠提示（同工具卡；muted + keyHint）
+... (3 earlier lines, ctrl+o to expand)      ← 折叠提示（同工具卡；muted + keyHint）
 Found 5 files handling authentication: src/auth/*.ts …
 <空行>
 session: /path/...jsonl
@@ -123,7 +126,7 @@ session: /path/...jsonl
 
 - header：**状态 icon 在最前**（`✓` success / `✗` error / `■` warning）+ `Agent` + `"title"`（bashMode）+ muted meta（usage 并入括号）；失败/停止时追加彩色状态词（`failed` error / `stopped` warning，同 bash `(exit N)` 语言）
 - icon 把**完成通知卡**与 **Agent 工具卡**区分开（工具卡无 icon）——背景色不再单独承担状态传达
-- body：结果预览，同一流折叠策略（尾部 5 行 + `... N earlier lines (<key> to expand)`；展开全显）
+- body：结果预览，同一流折叠策略（尾部 5 行 + `... (N earlier lines, <key> to expand)`；展开全显）
 - footer：session 路径
 - 渲染数据在 `details`，不进 LLM 上下文
 
@@ -131,13 +134,12 @@ session: /path/...jsonl
 
 ```
 （容器级 1 空行，pi 自动）
-  ● Agents                    ← accent 标题
-  ⠋ "检查 CI 配置" · 42.0s      ← 运行中：accent spinner（80ms 帧）+ muted 文本；1 空格左 padding（对齐 pi string[] widget 形式）
+  ● Agents                    ← accent ● + toolTitle bold "Agents"（与卡片 Agent 词同色）
+  ⠋ "检查 CI 配置" (42.0s)      ← 运行中：accent spinner + bashMode "title"（与卡片标题同色）+ muted meta (时长)；1 空格左 padding
 ```
 
 - 仅跟踪后台 agent（前台已 inline 流式，不重复）
 - **完成/停止立即移除**——完成结果由通知卡（followUp，立即出现）承担，widget 不留冗余确认行
-- 与 pi 内置 working 指示器（Loader）同一视觉语言
 - 每行下方追加**最新活动摘录**（缩进 3 字符，与标题左对齐）：工具调用（工具名 toolTitle 色 + 冒号 + muted 参数摘要）、`Thinking...`（italic + thinkingText，pi 隐藏 thinking 同款）、或最新正文尾部（muted，截断 60 字符）；数据取自 `message_update` 累积消息的最新 content 部分，不进 LLM context
 
 ## 实现决策

@@ -20,6 +20,7 @@
 		"fix": "biome check --write .",
 		"typecheck": "tsc --noEmit",
 		"test": "tsx --test test/*.test.ts",
+		"preview": "tsx preview.ts",
 		"prepare": "husky"
 	},
 	"lint-staged": {

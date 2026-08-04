@@ -103,7 +103,7 @@ test("collapsed folds the prompt away once output fills the preview", () => {
 	const cmp = renderAgentResult(
 		{
 			content: [{ type: "text", text: output }],
-			details: { task, startedAt: 0, endedAt: 0 },
+			details: { task, startedAt: 0, endedAt: 0, events: [{ kind: "text", text: output }] },
 		},
 		{ expanded: false, isPartial: false },
 		theme,
@@ -129,7 +129,7 @@ test("collapsed keeps the whole stream when it fits", () => {
 	const cmp = renderAgentResult(
 		{
 			content: [{ type: "text", text: output }],
-			details: { task, startedAt: 0, endedAt: 0 },
+			details: { task, startedAt: 0, endedAt: 0, events: [{ kind: "text", text: output }] },
 		},
 		{ expanded: false, isPartial: false },
 		theme,
@@ -235,7 +235,7 @@ test("stop animates stopping then settles on stopped", () => {
 	}
 });
 
-test("steer renders the status line plus the message as a quote", () => {
+test("steer renders the status line plus the message as plain content", () => {
 	const cmp = renderAgentControlResult(
 		{
 			content: [{ type: "text", text: 'Steered agent a1: "focus on orders".' }],
@@ -251,9 +251,10 @@ test("steer renders the status line plus the message as a quote", () => {
 		"steered state",
 	);
 	assert.ok(
-		lines.some((l) => l.includes("│ 重点看 orders 表的索引和慢查询")),
-		"message as a quote line",
+		lines.some((l) => l.includes("重点看 orders 表的索引和慢查询")),
+		"message as a content line",
 	);
+	assert.ok(!lines.some((l) => l.includes("│ 重点看")), "no quote border");
 });
 
 test("steer shows the full multi-line message, not a first-line preview", () => {
@@ -384,6 +385,93 @@ test("notification header carries the status icon", () => {
 		theme,
 	);
 	assert.ok(renderText(stopped, 120).includes('■ Agent "slow query probe" stopped'), "stopped icon + word");
+});
+
+// ── context truncation warning (bash parity) ──
+
+test("foreground card warns about context truncation below the body", () => {
+	const text = Array.from({ length: 7 }, (_, i) => `line ${i}`).join("\n");
+	const out = renderText(
+		renderAgentResult(
+			{
+				content: [{ type: "text", text }],
+				details: {
+					task: "probe",
+					startedAt: 0,
+					endedAt: 100,
+					sessionPath: "/tmp/sess",
+					truncation: {
+						truncated: true,
+						truncatedBy: "lines",
+						outputLines: 42,
+						totalLines: 5000,
+						maxLines: 2000,
+						maxBytes: 51200,
+					},
+					events: [{ kind: "text", text }],
+				},
+			},
+			{ expanded: false, isPartial: false },
+			theme,
+			context,
+		),
+		120,
+	);
+	assert.ok(out.includes("[Truncated: showing 42 of 5000 lines]"), "lines variant");
+	// warning sits between body and footer
+	const idxWarn = out.indexOf("Truncated:");
+	const idxSess = out.indexOf("session: /tmp/sess");
+	assert.ok(idxWarn > -1 && idxSess > idxWarn, "warning above footer");
+});
+
+test("notification warns with the bytes variant when truncation hit the size cap", () => {
+	const out = renderText(
+		renderNotification(
+			{
+				details: {
+					status: "completed",
+					agent_id: "a1",
+					title: "probe",
+					result: "x",
+					sessionPath: "/tmp/sess",
+					truncation: {
+						truncated: true,
+						truncatedBy: "bytes",
+						outputLines: 42,
+						totalLines: 5000,
+						maxLines: 2000,
+						maxBytes: 51200,
+					},
+				},
+			},
+			{ expanded: false },
+			theme,
+		),
+		120,
+	);
+	assert.ok(out.includes("Truncated: 42 lines shown (50.0KB limit)"), "bytes variant");
+});
+
+test("no truncation warning when details lack truncation", () => {
+	const out = renderText(
+		renderAgentResult(
+			{
+				content: [{ type: "text", text: "fine" }],
+				details: {
+					task: "probe",
+					startedAt: 0,
+					endedAt: 100,
+					sessionPath: "/tmp/sess",
+					events: [{ kind: "text", text: "fine" }],
+				},
+			},
+			{ expanded: false, isPartial: false },
+			theme,
+			context,
+		),
+		120,
+	);
+	assert.ok(!out.includes("Truncated:"), "no warning without truncation");
 });
 
 // ── safeTitle (title rendered safe for a single quoted line) ──
