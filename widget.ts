@@ -18,7 +18,7 @@
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity, AgentProcess } from "./agent-process.js";
-import { activityRow, formatDuration, SPINNER, safeTitle } from "./render.js";
+import { activityRow, formatDuration, SPINNER, safeTitle } from "./format.js";
 
 // Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
 // (SPINNER lives in render.ts — shared with the stop animation.)

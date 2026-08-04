@@ -25,21 +25,19 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
+import { safeTitle } from "./format.js";
 import { resolveModel } from "./model.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import {
 	type AgentControlParams,
 	type AgentParams,
-	type NotificationDetails,
-	type RenderEvent,
 	renderAgentCall,
 	renderAgentControlCall,
 	renderAgentControlResult,
 	renderAgentResult,
 	renderNotification,
-	type SubagentDetails,
-	safeTitle,
 } from "./render.js";
+import type { NotificationDetails, RenderEvent, Truncation } from "./types.js";
 import { AgentWidget } from "./widget.js";
 
 // ─── Running background agents registry ─────────────────────
@@ -162,7 +160,7 @@ const AgentControlParamsSchema = Type.Object({
  * file has everything). Rendering events (details.events) stay complete —
  * folding never loses content for the user; this only caps what the LLM sees.
  */
-export function truncateForContext(text: string): { text: string; truncation?: SubagentDetails["truncation"] } {
+export function truncateForContext(text: string): { text: string; truncation?: Truncation } {
 	const result = truncateTail(text);
 	if (!result.truncated) return { text };
 	return {
@@ -303,17 +301,10 @@ export default function (pi: ExtensionAPI) {
 			const sessionName = safeTitle(params.title);
 
 			// Foreground: stream the sub-agent's session as an ordered activity
-			// stream — text deltas and thinking/tool events are pushed into the
-			// card body in event order (like watching a pi session replay).
+			// stream. AgentProcess accumulates RenderEvents internally at the
+			// source (RPC event handler); the callbacks here only refresh the
+			// live card via onUpdate.
 			let streamed = "";
-			const events: RenderEvent[] = [];
-			const pushEvents = () => {
-				if (params.run_in_background) return;
-				onUpdate?.({
-					content: [{ type: "text", text: streamed }],
-					details: { task, startedAt, activity: agent.getLatestActivity() ?? undefined, events: [...events] },
-				});
-			};
 			const agent = new AgentProcess({
 				agentId: registry.nextAgentId(),
 				cwd: ctx.cwd,
@@ -327,22 +318,18 @@ export default function (pi: ExtensionAPI) {
 				onDelta: (delta) => {
 					if (params.run_in_background) return;
 					streamed += delta;
-					// Fold consecutive deltas into the current text event.
-					const last = events[events.length - 1];
-					if (last?.kind === "text") last.text += delta;
-					else events.push({ kind: "text", text: delta });
-					pushEvents();
+					onUpdate?.({
+						content: [{ type: "text", text: streamed }],
+						details: { task, startedAt, activity: agent.getLatestActivity() ?? undefined, events: agent.getEvents() },
+					});
 				},
 				onActivityChange: (activity) => {
 					if (params.run_in_background) return;
-					// Thinking/tool transitions become events in the body stream.
 					if (activity.kind === "text") return; // covered by onDelta
-					events.push(
-						activity.kind === "thinking"
-							? { kind: "thinking" }
-							: { kind: "tool", name: activity.name, args: activity.args },
-					);
-					pushEvents();
+					onUpdate?.({
+						content: [{ type: "text", text: streamed }],
+						details: { task, startedAt, activity, events: agent.getEvents() },
+					});
 				},
 			});
 
@@ -459,7 +446,7 @@ export default function (pi: ExtensionAPI) {
 							error: message,
 							truncation,
 							sessionPath: completion.sessionPath,
-							events: [...events],
+							events: agent.getEvents(),
 						},
 						isError: true,
 					};

@@ -21,6 +21,7 @@
 import { interpretEvent } from "./event-interpret.js";
 import type { RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
+import type { RenderEvent } from "./types.js";
 
 export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
 
@@ -125,6 +126,8 @@ export class AgentProcess {
 	private agentError: string | null = null;
 	/** Latest activity excerpt for the widget. */
 	private latestActivity: AgentActivity | null = null;
+	/** Ordered activity stream — accumulated from RPC events at the source. */
+	private events: RenderEvent[] = [];
 
 	sessionPath?: string;
 	sessionId?: string;
@@ -315,6 +318,16 @@ export class AgentProcess {
 	/** Latest activity excerpt for the widget (null until the first message_update). */
 	getLatestActivity(): AgentActivity | null {
 		return this.latestActivity;
+	}
+
+	/**
+	 * Ordered activity stream accumulated from every RPC event this agent
+	 * processed. Thinking and tool-call events are recorded as they arrive;
+	 * text_delta events are folded into the current text event (consecutive
+	 * deltas append). The stream mirrors pi's session replay order.
+	 */
+	getEvents(): RenderEvent[] {
+		return this.events;
 	}
 
 	// ── Internal ───────────────────────────────────────────

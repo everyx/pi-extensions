@@ -16,21 +16,8 @@ import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { formatSize, keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
-import type { AgentActivity } from "./agent-process.js";
-
-/** Spinner frames shared by the Agents widget and the stop animation. */
-export const SPINNER = [
-	"\u281b",
-	"\u2819",
-	"\u2839",
-	"\u2838",
-	"\u283c",
-	"\u2834",
-	"\u2826",
-	"\u2827",
-	"\u2807",
-	"\u280f",
-];
+import { activityRow, clipTail, firstLine, formatDuration, SPINNER, safeTitle } from "./format.js";
+import type { NotificationDetails, RenderEvent, SubagentDetails, Truncation } from "./types.js";
 
 // ─── Tool params ───────────────────────────────────────────
 
@@ -56,32 +43,7 @@ export interface AgentControlParams {
 
 // ─── Tool details (returned to pi's details: T) ────────────────
 
-export interface SubagentDetails {
-	task?: string;
-	agentId?: string;
-	/** Agent title — used by the background-start status line (the tool header is empty for background). */
-	title?: string;
-	model?: string;
-	runInBackground?: boolean;
-	/** Spawn failure reason — rendered as `start failed: <reason>` on the status line. */
-	error?: string;
-	sessionPath?: string;
-	startedAt?: number;
-	endedAt?: number;
-	/** Latest activity (thinking/tool) for the widget — widget parity. */
-	activity?: AgentActivity;
-	/** Ordered activity stream (thinking/tool events) for the card body. */
-	events?: RenderEvent[];
-	/** LLM-context truncation info (aligns with bash tool truncateTail) — the card warns when set. */
-	truncation?: {
-		truncated: boolean;
-		truncatedBy: "lines" | "bytes" | null;
-		outputLines: number;
-		totalLines: number;
-		maxLines: number;
-		maxBytes: number;
-	};
-}
+export type { SubagentDetails } from "./types.js";
 
 // ─── Timer state persisted via context.state ───────────────────
 
@@ -102,63 +64,6 @@ interface RenderContext {
 	isError: boolean;
 	isPartial?: boolean;
 	toolCallId?: string;
-}
-
-/** Seconds with one decimal — shared by cards and the Agents widget. */
-export function formatDuration(ms: number): string {
-	return `${(ms / 1000).toFixed(1)}s`;
-}
-
-/** "bash: sleep 20" → { name: "bash", args: "sleep 20" }; null when no label. */
-/** Activity excerpt length cap; long tails get a leading ellipsis. */
-const ACTIVITY_EXCERPT_MAX = 60;
-
-/** Collapse whitespace, trim, and cut long tails to `max` chars (ellipsis prefix). */
-export function clipTail(s: string, max: number = ACTIVITY_EXCERPT_MAX): string {
-	const clean = s.replace(/\s+/g, " ").trim();
-	if (clean.length <= max) return clean;
-	return `\u2026${clean.slice(clean.length - max + 1)}`;
-}
-
-/**
- * One activity row: "Thinking..." (pi hidden-thinking style), a tool call
- * (toolTitle name + ": " + muted args), or muted text. Shared by the tool
- * card activity row and the Agents widget — single source of truth so the
- * two surfaces can never drift apart. Pass `max` to truncate long tails
- * (widget); the card passes none and shows the full text.
- */
-export function activityRow(activity: AgentActivity, theme: Theme, max?: number): string {
-	if (activity.kind === "thinking") {
-		return theme.italic(theme.fg("thinkingText", "Thinking..."));
-	}
-	if (activity.kind === "tool") {
-		const args = max === undefined ? activity.args : clipTail(activity.args, max);
-		return args
-			? `${theme.fg("toolTitle", activity.name)}: ${theme.fg("muted", args)}`
-			: theme.fg("toolTitle", activity.name);
-	}
-	return theme.fg("muted", max === undefined ? activity.text : clipTail(activity.text, max));
-}
-
-/** Extract a one-line summary of a long string: first line, ellipsis if truncated. */
-export function firstLine(s: string): string {
-	const idx = s.indexOf("\n");
-	return idx < 0 ? s : `${s.slice(0, idx)}\u2026`;
-}
-
-/**
- * Task title, rendered safe for a single quoted line: tabs/newlines are
- * flattened and embedded double quotes neutralized (so the bashMode quotes
- * around the title can't be broken), then capped with a trailing ellipsis.
- * Shared by status lines, headers, the notification card and the widget.
- */
-export function safeTitle(title: string | undefined, max = 40): string {
-	const flat = (title ?? "(untitled)")
-		.replace(/[\r\n\t]+/g, " ")
-		.replace(/"/g, "'")
-		.trim();
-	if (flat.length <= max) return flat;
-	return `${flat.slice(0, max - 1)}\u2026`;
 }
 
 /** Muted metadata suffix, mirroring bash's ` (timeout 10s)` pattern. */
@@ -269,16 +174,7 @@ function statusLine(
 	return `${marker} ${agent} ${theme.fg("muted", state)}`;
 }
 
-/**
- * One step of the sub-agent's session as shown in the card body: a thinking
- * marker, a tool call, or a chunk of streamed text. The body renders these in
- * event order — like replaying the sub-agent's session in pi — instead of a
- * single latest-activity row.
- */
-export type RenderEvent =
-	| { kind: "thinking" }
-	| { kind: "tool"; name: string; args?: string }
-	| { kind: "text"; text: string };
+export type { RenderEvent } from "./types.js";
 
 /**
  * Shared output body: the prompt and the sub-agent's activity stream are one
@@ -309,7 +205,7 @@ function contentRow(styled: string, x = 0): Text {
  * the session path lives separately in the card footer so the warning
  * never duplicates it.
  */
-function truncationWarning(truncation: NonNullable<SubagentDetails["truncation"]>, theme: Theme): string {
+function truncationWarning(truncation: Truncation, theme: Theme): string {
 	if (!truncation.truncated) return "";
 	if (truncation.truncatedBy === "lines") {
 		return `[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines]`;
@@ -588,22 +484,7 @@ export function renderAgentControlResult(
 
 // ── Notification card (registerMessageRenderer) ────────────────
 
-export interface NotificationDetails {
-	status: string;
-	agent_id: string;
-	/** Required — always passed by notifyCompletion (AgentProcess.title). */
-	title: string;
-	/** Final output — rendered as the card body (never enters LLM context). */
-	result?: string;
-	usage?: {
-		tokens?: number | null;
-		toolUses?: number | null;
-		durationMs?: number | null;
-	};
-	sessionPath?: string;
-	sessionId?: string;
-	truncation?: SubagentDetails["truncation"];
-}
+export type { NotificationDetails } from "./types.js";
 
 /** Expand `~`-style home prefix to a display path (cross-platform). */
 function shortenHome(p: string): string {
@@ -684,3 +565,6 @@ export function renderNotification(
 
 	return cmp;
 }
+
+// ── Re-exports from format.ts (backward compat) ──
+export { activityRow, clipTail, firstLine, formatDuration, SPINNER, safeTitle };
