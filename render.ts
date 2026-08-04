@@ -214,6 +214,40 @@ function contentRow(styled: string, x = 0): Text {
 	return new Text(`\n${styled}`, x, 0);
 }
 
+/**
+ * Card background shell — Box(1, 1): 1-space horizontal padding, 1 row of
+ * vertical padding top and bottom (like the framework's tool shell, so
+ * notification cards match tool cards exactly). Only the notification card
+ * needs it (registerMessageRenderer renders outside the tool shell); tool
+ * cards get their background from the framework's default-shell Box instead
+ * and must NOT wrap in card(). The blank rows are the shell's own padding —
+ * content starts directly below the top padding row.
+ */
+function card(theme: Theme, bg: Parameters<typeof theme.bg>[0], ...children: BodyComponent[]): Box {
+	const cmp = new Box(1, 1, (t: string) => theme.bg(bg, t));
+	for (const child of children) cmp.addChild(child);
+	return cmp;
+}
+
+/**
+ * Unified card CONTENT (no background): optional header row + optional body
+ * sections + optional session footer, assembled in order. Shared by every
+ * card — tool results return it directly (the framework's default-shell Box
+ * paints the background across header + body + footer); renderNotification
+ * wraps it in card() to paint its own. Headers start at the card edge (the
+ * shell's padding row precedes them); body/footer sections carry their own
+ * blank-line prefix so sections read header / blank / body / blank / footer.
+ * Fold/blank-line/footer behavior lives here once, so every card changes
+ * together.
+ */
+function cardContent(theme: Theme, sections: { header?: string; body?: BodyComponent[]; footer?: string }): Container {
+	const cmp = new Container();
+	if (sections.header) cmp.addChild(new Text(sections.header, 0, 0));
+	for (const part of sections.body ?? []) cmp.addChild(part);
+	if (sections.footer) cmp.addChild(contentRow(theme.fg("muted", `session: ${shortenHome(sections.footer)}`)));
+	return cmp;
+}
+
 /** Shared `Agent "title"` segment — toolTitle bold name + bashMode quoted title. */
 function agentTitle(title: string | undefined, theme: Theme): string {
 	return `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : ""}`;
@@ -236,18 +270,18 @@ function stopSpinner(state: TimerState): void {
 	}
 }
 
-/** Error card: status line on toolErrorBg + dim reason body (uniform fold). */
+/** Error card content: failed status line + dim reason body (uniform fold). */
 function statusErrorCard(
 	title: string | undefined,
 	verb: "start" | "steer" | "stop" | "control",
 	theme: Theme,
 	error: string,
 	expanded: boolean,
-): Box {
-	const cmp = new Box(1, 1, (t: string) => theme.bg("toolErrorBg", t));
-	cmp.addChild(new Text(statusLine(title, verb, "failed", theme), 0, 0));
-	cmp.addChild(contentBlock(error, (l) => theme.fg("dim", l), expanded, theme));
-	return cmp;
+): Container {
+	return cardContent(theme, {
+		header: statusLine(title, verb, "failed", theme),
+		body: [contentBlock(error, (l) => theme.fg("dim", l), expanded, theme)],
+	});
 }
 
 /**
@@ -372,26 +406,21 @@ export function renderAgentResult(
 	// Background spawn: `starting…` spinner in a pending card → a result card
 	// (`✓ started` / `✗ start failed` + dim reason). Every phase carries the
 	// card shell (pending → success/error) so the tool never flashes a bare
-	// Loader-style spinner that could be mistaken for pi's own.
+	// Loader-style spinner that could be mistaken for pi's own. Background
+	// color comes from the framework's default-shell Box (isError → error).
 	if (details?.runInBackground && !details.task) {
 		const state = context.state;
 		if (isPartial && !details.error) {
 			// Spinner animation inside the pending card (in-place, no new lines).
-			const cmp = new Box(1, 1, (t: string) => theme.bg("toolPendingBg", t));
-			cmp.addChild(
-				new Text(
-					statusLine(
-						details.title,
-						"start",
-						"running",
-						theme,
-						startSpinner(state, () => context.invalidate()),
-					),
-					0,
-					0,
+			return cardContent(theme, {
+				header: statusLine(
+					details.title,
+					"start",
+					"running",
+					theme,
+					startSpinner(state, () => context.invalidate()),
 				),
-			);
-			return cmp;
+			});
 		}
 		stopSpinner(state);
 		if (details.error) {
@@ -400,9 +429,7 @@ export function renderAgentResult(
 			// from the header like every other card.
 			return statusErrorCard(details.title, "start", theme, details.error, expanded);
 		}
-		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
-		cmp.addChild(new Text(statusLine(details.title, "start", "done", theme), 0, 0));
-		return cmp;
+		return cardContent(theme, { header: statusLine(details.title, "start", "done", theme) });
 	}
 
 	// Control ack / bare error — dim one-liner.
@@ -423,29 +450,28 @@ export function renderAgentResult(
 		state.endedAt ??= details?.endedAt ?? Date.now();
 		stopSpinner(state);
 	}
-
-	const cmp = new Container();
 	const promptText = details.task.trim();
+	const bodyParts: BodyComponent[] = [];
 
 	// Body: the prompt plus the ordered activity stream (thinking / tool
 	// calls / streamed text) — like replaying the sub-agent's session.
 	const body = renderBody(promptText, details.events, expanded, theme);
-	if (body) cmp.addChild(body);
+	if (body) bodyParts.push(body);
 
 	// Failure reason (below the body, before the session footer) — the ✗
 	// header alone doesn't say why; same dim folded style as the
 	// background-start failure card.
 	if (details?.error && !isPartial) {
-		cmp.addChild(contentBlock(details.error, (l) => theme.fg("dim", l), expanded, theme));
+		bodyParts.push(contentBlock(details.error, (l) => theme.fg("dim", l), expanded, theme));
 	}
 	// Footer: session path — resume entry (sub-agent sessions live outside
-	// `pi -r`). Shown for both success and failure so the user (and LLM)
-	// can always recover the full output.
-	if (details?.sessionPath && !isPartial) {
-		cmp.addChild(contentRow(theme.fg("muted", `session: ${shortenHome(details.sessionPath)}`)));
-	}
-
-	return cmp;
+	// `pi -r`). Shown in every phase — streaming, success and failure — so
+	// the user (and LLM) can always recover the full output; the session
+	// file exists from spawn, so the entry is valid while the agent runs.
+	return cardContent(theme, {
+		body: bodyParts,
+		footer: details?.sessionPath ? details.sessionPath : undefined,
+	});
 }
 
 export interface AgentControlDetails {
@@ -476,11 +502,12 @@ export function renderAgentControlResult(
 
 	const verb = d?.action === "steer" ? "steer" : d?.action === "stop" ? "stop" : "control";
 
-	// Final results are small cards (Box shell, error/success background like
-	// the notification card); only the running phases stay bare (spinner,
-	// Loader style). Errors keep the status-line shape: `✗ Agent "title"
-	// <verb> failed` with the reason as a dim second line (kept out of the
-	// state line so new users can read the state at a glance).
+	// Final results are small cards (framework default-shell Box, error/
+	// success background like every tool card); only the running phases stay
+	// bare (spinner, Loader style). Errors keep the status-line shape:
+	// `✗ Agent "title" <verb> failed` with the reason as a dim second line
+	// (kept out of the state line so new users can read the state at a
+	// glance).
 	if (d?.error) {
 		// A stop that failed mid-animation must stop the spinner: the partial
 		// stop frame started a 100ms interval that would otherwise invalidate
@@ -495,12 +522,12 @@ export function renderAgentControlResult(
 	// Steer: status line + the injected message as a plain content line
 	// (no quote styling — content renders uniformly across cards).
 	if (d?.action === "steer" && d.message) {
-		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
-		cmp.addChild(new Text(statusLine(d.title, "steer", "done", theme), 0, 0));
 		// The full message under the uniform fold (never dropped); blank line
 		// separates it from the header, content starts at the card edge.
-		cmp.addChild(contentBlock(d.message, (l) => theme.fg("toolOutput", l), expanded, theme));
-		return cmp;
+		return cardContent(theme, {
+			header: statusLine(d.title, "steer", "done", theme),
+			body: [contentBlock(d.message, (l) => theme.fg("toolOutput", l), expanded, theme)],
+		});
 	}
 
 	// Stop: spinner while stopping, then a single completed card.
@@ -509,26 +536,18 @@ export function renderAgentControlResult(
 		if (isPartial) {
 			// Pending card: spinner + "Agent <title> stopping…" — the card shell
 			// is present in every phase, never a bare Loader-style spinner.
-			const cmp = new Box(1, 1, (t: string) => theme.bg("toolPendingBg", t));
-			cmp.addChild(
-				new Text(
-					statusLine(
-						d.title,
-						"stop",
-						"running",
-						theme,
-						startSpinner(state, () => context.invalidate()),
-					),
-					0,
-					0,
+			return cardContent(theme, {
+				header: statusLine(
+					d.title,
+					"stop",
+					"running",
+					theme,
+					startSpinner(state, () => context.invalidate()),
 				),
-			);
-			return cmp;
+			});
 		}
 		stopSpinner(state);
-		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
-		cmp.addChild(new Text(statusLine(d.title, "stop", "done", theme), 0, 0));
-		return cmp;
+		return cardContent(theme, { header: statusLine(d.title, "stop", "done", theme) });
 	}
 
 	// Bare fallback (no details) — dim one-liner.
@@ -561,9 +580,7 @@ export function renderNotification(
 	const d = message.details;
 
 	if (!d) {
-		const cmp = new Container();
-		cmp.addChild(new Text(theme.fg("dim", "(no details)"), 0, 0));
-		return cmp;
+		return card(theme, "toolErrorBg", contentRow(theme.fg("dim", "(no details)")));
 	}
 
 	// ── Header: ✓ Agent <title> <status word> (<muted meta>) ──
@@ -572,7 +589,6 @@ export function renderNotification(
 	// color still conveys state (Pi native); failed/stopped words are colored
 	// like bash's `(exit N)` / `(cancelled)`.
 	const isError = d.status !== "completed";
-	const cmp = new Box(1, 1, (text: string) => theme.bg(isError ? "toolErrorBg" : "toolSuccessBg", text));
 
 	const icon = d.status === "completed" ? "\u2713" : d.status === "failed" ? "\u2717" : "\u25a0";
 	const iconColor = d.status === "completed" ? "success" : d.status === "failed" ? "error" : "warning";
@@ -592,27 +608,24 @@ export function renderNotification(
 	if (d.usage?.toolUses != null) metaParts.push(`${d.usage.toolUses} tool use${d.usage.toolUses === 1 ? "" : "s"}`);
 	const metaSuffix = metaParts.length > 0 ? theme.fg("muted", ` (${metaParts.join(" \u00b7 ")})`) : "";
 
-	cmp.addChild(
-		new Text(
-			`${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${agentTitle(d.title, theme)}${statusWord}${metaSuffix}`,
-			0,
-			0,
-		),
-	);
+	const headerLine = `${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${agentTitle(d.title, theme)}${statusWord}${metaSuffix}`;
 
 	// ── Body: result preview — same fold policy as tool cards (input full,
 	// output tail + "earlier lines" hint, full text when expanded). ──
+	const bodyParts: BodyComponent[] = [];
 	const result = d.result?.trim();
 	if (result) {
 		// Notification body is plain text — a single text event.
 		const body = renderBody(undefined, [{ kind: "text", text: result }], expanded, theme);
-		if (body) cmp.addChild(body);
+		if (body) bodyParts.push(body);
 	}
 
-	// ── Footer: session path (resume entry, custom dir → path required) ──
-	if (d.sessionPath) {
-		cmp.addChild(contentRow(theme.fg("muted", `session: ${shortenHome(d.sessionPath)}`)));
-	}
-
-	return cmp;
+	// Shell: the notification renders outside the tool shell (message
+	// renderer), so it paints its own background; cardContent supplies the
+	// header/body/footer layout shared with every tool card.
+	return card(
+		theme,
+		isError ? "toolErrorBg" : "toolSuccessBg",
+		cardContent(theme, { header: headerLine, body: bodyParts, footer: d.sessionPath }),
+	);
 }

@@ -504,9 +504,6 @@ export default function (pi: ExtensionAPI) {
 			'Use AgentControl with action "stop" when a background agent is consuming tokens on a wrong path — stop it and respawn with a corrected prompt.',
 		],
 		parameters: AgentControlParamsSchema,
-		// Final results are cards (Box shell); only the running phase stays
-		// bare — same visual language as pi's Loader.
-		renderShell: "self",
 
 		async execute(_toolCallId, raw, _signal, onUpdate) {
 			const params = raw as AgentControlParams;

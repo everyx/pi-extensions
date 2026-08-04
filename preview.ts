@@ -21,6 +21,7 @@ import {
 	type AgentParams,
 	type RenderEvent,
 	renderAgentCall,
+	renderAgentControlCall,
 	renderAgentControlResult,
 	renderAgentResult,
 	renderNotification,
@@ -80,14 +81,20 @@ function renderLines(component: unknown, width = 100): string[] {
 
 /**
  * Simulate pi's framework tool shell (tool-execution.js): for renderShell
- * "default" tools, the framework wraps both the call renderer (header) and
- * the result renderer in one Box(1,1) whose background follows state
- * (pending while running, success/error on completion).
+ * "default" tools (Agent/AgentControl are default), the framework wraps both
+ * the call renderer (header) and the result renderer in one Box(1,1) whose
+ * background follows state (pending while running, success/error on
+ * completion) — covering the header AND the body.
  */
 function shell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[]) {
 	const box = new Box(1, 1, (t: string) => theme.bg(bg, t));
 	for (const child of children) box.addChild(child as never);
 	return { render: (w: number) => renderLines(box, w) };
+}
+
+/** Render one tool card inside the framework shell (default shell behavior). */
+function toolShell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[], w = 100): string[] {
+	return renderLines(shell(bg, children), w);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -120,250 +127,337 @@ function foregroundDetails(extra: Partial<SubagentDetails> = {}): SubagentDetail
 
 interface LiveSection {
 	title: string;
-	/** Render one frame at global tick t. Returns the canvas lines. */
-	render: (t: number) => string[];
+	/** Render one frame at global tick t for canvas width w. Returns the canvas lines. */
+	render: (t: number, w: number) => string[];
 	/** Fixed canvas height (max frame height, measured at setup). */
 	height: number;
 }
 
+// Paginate: stack sections until the page would overflow the terminal, then
+// start a new page. The canvas is fully redrawn in place per page, so
+// animations loop in place and every section is fully visible even on a
+// short terminal — nothing is ever clipped or scrolled away. Pages are
+// switched with the keyboard (→/space/n next, ←/p previous, q quit).
+function paginate(sections: LiveSection[], budget: number): LiveSection[][] {
+	const pages: LiveSection[][] = [];
+	let page: LiveSection[] = [];
+	let used = 0;
+	for (const s of sections) {
+		const need = 1 + s.height + 1; // title row + canvas + blank row
+		if (used + need > budget && page.length > 0) {
+			pages.push(page);
+			page = [];
+			used = 0;
+		}
+		page.push(s);
+		used += need;
+	}
+	if (page.length > 0) pages.push(page);
+	return pages.length > 0 ? pages : [sections];
+}
+
 async function runLive(sections: LiveSection[]): Promise<void> {
-	console.log("\n\x1b[1m\x1b[4mLive — all animations looping in place, side by side (Ctrl+C to exit)\x1b[0m");
+	console.log("\n\x1b[1m\x1b[4mLive — all animations looping in place, key-paginated (Ctrl+C to exit)\x1b[0m");
 	if (!process.stdout.isTTY) {
 		for (const s of sections) {
 			console.log(`\n\x1b[1m\x1b[4m${s.title}\x1b[0m`);
-			for (let f = 0; f < 4; f++) for (const l of s.render(f * 5)) console.log(l);
+			// Sample 4 frames across each section's full cycle: sections cycle
+			// every ~60-80 ticks, so step 20 lands on every distinct card
+			// (spinner/started/failed, spinner/stopped/steered/stop-failed,
+			// completed/expanded/failed, completed/failed/stopped…).
+			for (let f = 0; f < 4; f++) for (const l of s.render(f * 20, 100)) console.log(l);
 		}
 		return;
 	}
-	// Clear the static grid, then own the whole screen: each section = title
-	// row + canvas + blank row, fixed layout, redrawn in place.
+	// Own the whole screen: sections stack per page (title + canvas + blank
+	// row each); →/space/n and ←/p flip pages, q quits. Raw stdin so single
+	// keypresses land without Enter.
 	process.stdout.write("\x1b[2J\x1b[H");
-	process.stdout.write("\x1b[1m\x1b[4mLive — all animations looping in place, side by side (Ctrl+C to exit)\x1b[0m\n");
+	process.stdout.write("\x1b[1m\x1b[4mLive — all animations looping in place, key-paginated (Ctrl+C to exit)\x1b[0m\n");
 	process.stdout.write("\x1b[?25l"); // hide cursor
-	try {
-		const starts: number[] = [];
-		let y = 2;
-		for (const s of sections) {
-			starts.push(y);
-			y += 1 + s.height + 1;
-		}
-		for (let t = 0; ; t++) {
-			for (let i = 0; i < sections.length; i++) {
-				const s = sections[i];
-				const st = starts[i];
-				process.stdout.write(`\x1b[${st};1H\x1b[2K\x1b[1m\x1b[4m${s.title}\x1b[0m`);
-				const lines = s.render(t);
-				for (let k = 0; k < s.height; k++) {
-					process.stdout.write(`\x1b[${st + 1 + k};1H\x1b[2K${lines[k] ?? " "}`);
-				}
+	const rows = process.stdout.rows ?? 40;
+	const width = process.stdout.columns ?? 100;
+	const pages = paginate(sections, rows - 3); // top title + page indicator
+	let page = 0;
+	let quit = false;
+	// Raw stdin for single-key paging; only when stdin is a real TTY (piped
+	// stdin falls back to Ctrl+C to exit).
+	if (process.stdin.isTTY) {
+		process.stdin.setRawMode(true);
+		process.stdin.resume();
+		process.stdin.on("data", (chunk: Buffer) => {
+			const s = chunk.toString();
+			// Ctrl+C (\u0003) quits — raw mode turns SIGINT into a char, so it's
+			// handled here; the spinner/widget timers are cleaned up on exit.
+			if (s === "\u0003") {
+				quit = true;
+			} else if (s === " " || s === "n" || s === "\r" || s === "\x1b[C") {
+				page = (page + 1) % pages.length;
+			} else if (s === "p" || s === "\x1b[D") {
+				page = (page - 1 + pages.length) % pages.length;
 			}
+		});
+	}
+	try {
+		let lastPage = -1;
+		for (let t = 0; !quit; t++) {
+			if (page !== lastPage) {
+				process.stdout.write("\x1b[2J\x1b[H");
+				lastPage = page;
+			}
+			let y = 2;
+			for (const s of pages[page]) {
+				process.stdout.write(`\x1b[${y};1H\x1b[2K\x1b[1m\x1b[4m${s.title}\x1b[0m`);
+				const lines = s.render(t, width);
+				for (let k = 0; k < s.height; k++) {
+					process.stdout.write(`\x1b[${y + 1 + k};1H\x1b[2K${lines[k] ?? " "}`);
+				}
+				y += 1 + s.height + 1;
+			}
+			process.stdout.write(
+				`\x1b[${rows};1H\x1b[2K\x1b[2m— page ${page + 1}/${pages.length} (→/space next · ←/p prev · Ctrl+C quit) —\x1b[0m`,
+			);
 			await sleep(80);
 		}
 	} finally {
+		if (process.stdin.isTTY) {
+			process.stdin.setRawMode(false);
+			process.stdin.pause();
+		}
 		process.stdout.write("\x1b[?25h\n");
+		// Spinner animations keep their intervals alive (they hold the event
+		// loop), so exit explicitly instead of letting the process hang.
+		process.exit(0);
 	}
 }
 
 // ── Sections ────────────────────────────────────────────────
 
 // ── Spawn group: spinner → started → start failed, cycling ──
-const spawnCardLines = () =>
-	renderLines(
-		renderAgentResult(
-			{ details: { runInBackground: true, title: params.title }, content: [] },
-			{ expanded: false, isPartial: false },
-			theme,
-			context,
-		),
-		100,
+// The spawn call header is empty (renderAgentCall renders Text("") for
+// run_in_background) — only the result's status line is visible.
+const spawnParams: AgentParams = { ...params, run_in_background: true };
+const spawnCardLines = (w: number) =>
+	toolShell(
+		"toolSuccessBg",
+		[
+			renderAgentCall(spawnParams, theme, context),
+			renderAgentResult(
+				{ details: { runInBackground: true, title: params.title }, content: [] },
+				{ expanded: false, isPartial: false },
+				theme,
+				context,
+			),
+		],
+		w,
 	);
-const spawnFailedLines = () =>
-	renderLines(
-		renderAgentResult(
-			{
-				details: { runInBackground: true, title: "bad model", error: 'Model "no-such-model-xyz" not available.' },
-				content: [{ type: "text", text: 'Model "no-such-model-xyz" not available.' }],
-			},
-			{ expanded: false, isPartial: false },
-			theme,
-			context,
-		),
-		100,
+const spawnFailedLines = (w: number) =>
+	toolShell(
+		"toolErrorBg",
+		[
+			renderAgentCall(spawnParams, theme, context),
+			renderAgentResult(
+				{
+					details: { runInBackground: true, title: "bad model", error: 'Model "no-such-model-xyz" not available.' },
+					content: [{ type: "text", text: 'Model "no-such-model-xyz" not available.' }],
+				},
+				{ expanded: false, isPartial: false },
+				theme,
+				context,
+			),
+		],
+		w,
 	);
 // Real component partial: the pending card with the spinner inside.
-const spawnSpin = (t: number) => {
+const spawnSpin = (t: number, w: number) => {
 	void t;
-	return renderLines(
-		renderAgentResult(
-			{ details: { runInBackground: true, title: params.title }, content: [] },
-			{ expanded: false, isPartial: true },
-			theme,
-			context,
-		),
-		100,
+	return toolShell(
+		"toolPendingBg",
+		[
+			renderAgentCall(spawnParams, theme, context),
+			renderAgentResult(
+				{ details: { runInBackground: true, title: params.title }, content: [] },
+				{ expanded: false, isPartial: true },
+				theme,
+				context,
+			),
+		],
+		w,
 	);
 };
 // 20 spin + 19 started + 19 failed ticks per cycle
 const SPAWN_CYCLE = 20 + 19 + 19;
 const spawnSection: LiveSection = {
 	title: "background spawn: spinner → started → start failed",
-	render: (t) => {
+	render: (t, w) => {
 		const phase = t % SPAWN_CYCLE;
-		if (phase < 20) return spawnSpin(t);
-		if (phase < 39) return spawnCardLines();
-		return spawnFailedLines();
+		if (phase < 20) return spawnSpin(t, w);
+		if (phase < 39) return spawnCardLines(w);
+		return spawnFailedLines(w);
 	},
 	height: 0,
 };
 
 // ── AgentControl group: spinner → stopped → steered → stop failed, cycling ──
-const acStoppedLines = () =>
-	renderLines(
-		renderAgentControlResult(
-			{
-				content: [{ type: "text", text: "Stopped agent a1." }],
-				details: { action: "stop", title: params.title },
-			},
-			{ expanded: false, isPartial: false },
-			theme,
-			context,
-		),
-		100,
-	);
-const acSteeredLines = () =>
-	renderLines(
-		renderAgentControlResult(
-			{
-				content: [{ type: "text", text: 'Steered agent a1: "…"' }],
-				details: {
-					action: "steer",
-					title: params.title,
-					message: "重点看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
+const acStoppedLines = (w: number) =>
+	toolShell(
+		"toolSuccessBg",
+		[
+			renderAgentControlCall(params as never, theme, context),
+			renderAgentControlResult(
+				{
+					content: [{ type: "text", text: "Stopped agent a1." }],
+					details: { action: "stop", title: params.title },
 				},
-			},
-			{ expanded: false, isPartial: false },
-			theme,
-			context,
-		),
-		100,
+				{ expanded: false, isPartial: false },
+				theme,
+				context,
+			),
+		],
+		w,
 	);
-const acStopFailedLines = () =>
-	renderLines(
-		renderAgentControlResult(
-			{
-				content: [{ type: "text", text: "Agent a1 already finished." }],
-				details: { action: "stop", title: params.title, error: "Agent a1 already finished." },
-			},
-			{ expanded: false, isPartial: false },
-			theme,
-			context,
-		),
-		100,
+const acSteeredLines = (w: number) =>
+	toolShell(
+		"toolSuccessBg",
+		[
+			renderAgentControlCall(params as never, theme, context),
+			renderAgentControlResult(
+				{
+					content: [{ type: "text", text: 'Steered agent a1: "…"' }],
+					details: {
+						action: "steer",
+						title: params.title,
+						message: "重点看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
+					},
+				},
+				{ expanded: false, isPartial: false },
+				theme,
+				context,
+			),
+		],
+		w,
 	);
-const acSpin = (t: number) => {
+const acStopFailedLines = (w: number) =>
+	toolShell(
+		"toolErrorBg",
+		[
+			renderAgentControlCall(params as never, theme, context),
+			renderAgentControlResult(
+				{
+					content: [{ type: "text", text: "Agent a1 already finished." }],
+					details: { action: "stop", title: params.title, error: "Agent a1 already finished." },
+				},
+				{ expanded: false, isPartial: false },
+				theme,
+				context,
+			),
+		],
+		w,
+	);
+const acSpin = (t: number, w: number) => {
 	void t;
-	return renderLines(
-		renderAgentControlResult(
-			{
-				content: [{ type: "text", text: "Stopping…" }],
-				details: { action: "stop", title: params.title },
-			},
-			{ expanded: false, isPartial: true },
-			theme,
-			context,
-		),
-		100,
+	return toolShell(
+		"toolPendingBg",
+		[
+			renderAgentControlCall(params as never, theme, context),
+			renderAgentControlResult(
+				{
+					content: [{ type: "text", text: "Stopping…" }],
+					details: { action: "stop", title: params.title },
+				},
+				{ expanded: false, isPartial: true },
+				theme,
+				context,
+			),
+		],
+		w,
 	);
 };
 // 20 spin + 19 stopped + 19 steered + 19 stop-failed ticks per cycle
 const AC_CYCLE = 20 + 19 + 19 + 19;
 const agentControlSection: LiveSection = {
 	title: "AgentControl: spinner → stopped → steered → stop failed",
-	render: (t) => {
+	render: (t, w) => {
 		const phase = t % AC_CYCLE;
-		if (phase < 20) return acSpin(t);
-		if (phase < 39) return acStoppedLines();
-		if (phase < 58) return acSteeredLines();
-		return acStopFailedLines();
+		if (phase < 20) return acSpin(t, w);
+		if (phase < 39) return acStoppedLines(w);
+		if (phase < 58) return acSteeredLines(w);
+		return acStopFailedLines(w);
 	},
 	height: 0,
 };
 
 // ── Foreground group: completed (collapsed) → expanded → failed, cycling ──
+// The foreground card renders details.task + details.events (activity
+// stream), NOT content — long output goes through events so the collapsed
+// fold shows the "... N earlier lines (to expand)" hint.
+const longOutput: RenderEvent[] = [
+	"Found 5 flaky tests. All share the `retries: 0` flag.",
+	"The five specs all run before fixtures are seeded — a known race.",
+	"Evidence: git log shows the fixture change landed 2 days ago.",
+	"1. orders.test.ts — flaky since Mar 3",
+	"2. users.test.ts — flaky since Mar 5",
+	"3. invoices.test.ts — flaky since Mar 8",
+	"4. reports.test.ts — flaky since Mar 12",
+	"5. audit.test.ts — flaky since Mar 14",
+	"Root cause: specs assert before the async fixture promise settles.",
+	"Repro: npx vitest run --repeat 20 orders.test.ts",
+	"Consistent failure on the 7th run.",
+	"Patch: set retries: 2 in vitest.config.ts.",
+].map((text) => ({ kind: "text" as const, text }));
 const fgCards = [
-	() =>
-		shell("toolSuccessBg", [
-			renderAgentCall(params, theme, context),
-			renderAgentResult(
-				{
-					details: foregroundDetails(),
-					// Long output so the collapsed fold shows the "... N earlier
-					// lines (to expand)" hint (prompt 1 + 12 lines → 8 folded).
-					content: [
-						{
-							type: "text",
-							text: [
-								"Found 5 flaky tests. All share the `retries: 0` flag.",
-								"The five specs all run before fixtures are seeded — a known race.",
-								"Evidence: git log shows the fixture change landed 2 days ago.",
-								"1. orders.test.ts — flaky since Mar 3",
-								"2. users.test.ts — flaky since Mar 5",
-								"3. invoices.test.ts — flaky since Mar 8",
-								"4. reports.test.ts — flaky since Mar 12",
-								"5. audit.test.ts — flaky since Mar 14",
-								"Root cause: specs assert before the async fixture promise settles.",
-								"Repro: npx vitest run --repeat 20 orders.test.ts",
-								"Consistent failure on the 7th run.",
-								"Patch: set retries: 2 in vitest.config.ts.",
-							].join("\n"),
-						},
-					],
-				},
-				{ expanded: false, isPartial: false },
-				theme,
-				context,
-			),
-		]),
-	() =>
-		shell("toolSuccessBg", [
-			renderAgentCall(params, theme, context),
-			renderAgentResult(
-				{
-					details: foregroundDetails(),
-					content: [
-						{
-							type: "text",
-							text: "Found 5 flaky tests. All share the `retries: 0` flag.\n\nPatch: set retries: 2 in vitest.config.ts.",
-						},
-					],
-				},
-				{ expanded: true, isPartial: false },
-				theme,
-				context,
-			),
-		]),
-	() =>
-		shell("toolErrorBg", [
-			renderAgentCall(params, theme, errorContext),
-			renderAgentResult(
-				{
-					details: foregroundDetails({ activity: activityTool }),
-					content: [
-						{
-							type: "text",
-							text: 'Model "no-such-model-xyz" not available.\n(stopped — reached the task time/token limit; the output above is partial)',
-						},
-					],
-				},
-				{ expanded: false, isPartial: false },
-				theme,
-				context,
-			),
-		]),
+	(w: number) =>
+		toolShell(
+			"toolSuccessBg",
+			[
+				renderAgentCall(params, theme, context),
+				renderAgentResult(
+					{ details: foregroundDetails({ events: longOutput }), content: [] },
+					{ expanded: false, isPartial: false },
+					theme,
+					context,
+				),
+			],
+			w,
+		),
+	(w: number) =>
+		toolShell(
+			"toolSuccessBg",
+			[
+				renderAgentCall(params, theme, context),
+				renderAgentResult(
+					{ details: foregroundDetails({ events: longOutput }), content: [] },
+					{ expanded: true, isPartial: false },
+					theme,
+					context,
+				),
+			],
+			w,
+		),
+	(w: number) =>
+		toolShell(
+			"toolErrorBg",
+			[
+				renderAgentCall(params, theme, errorContext),
+				renderAgentResult(
+					{
+						details: foregroundDetails({
+							events: longOutput.slice(0, 2),
+							error: 'Model "no-such-model-xyz" not available.',
+						}),
+						content: [],
+					},
+					{ expanded: false, isPartial: false },
+					theme,
+					errorContext,
+				),
+			],
+			w,
+		),
 ];
 const foregroundSection: LiveSection = {
 	title: "foreground agent: completed (collapsed) → expanded → failed",
-	render: (t) => renderLines(fgCards[Math.floor(t / 25) % fgCards.length](), 100),
+	render: (t, w) => fgCards[Math.floor(t / 25) % fgCards.length](w),
 	height: 0,
 };
 
@@ -394,7 +488,7 @@ widget.add(fakeAgent("a1", params.title, now - 42_000, activityTool));
 widget.add(fakeAgent("a2", "slow query probe", now - 8_000, activityThinking));
 const widgetSection: LiveSection = {
 	title: "Agents widget (spinner frames + ticking elapsed)",
-	render: () => widgetRender?.() ?? [],
+	render: (_t, _w) => widgetRender?.() ?? [],
 	height: 0,
 };
 
@@ -436,7 +530,7 @@ const streamLines = [
 ];
 const streamSection: LiveSection = {
 	title: "foreground stream (collapsed, growing output)",
-	render: (t) => {
+	render: (t, w) => {
 		const step = Math.floor(t / 4) % streamLines.length;
 		const shown = streamLines.slice(0, step + 1).join("\n");
 		// The activity stream in event order: activities seen so far, then the
@@ -469,7 +563,7 @@ const streamSection: LiveSection = {
 					liveContext,
 				),
 			]),
-			100,
+			w,
 		);
 	},
 	height: 0,
@@ -480,7 +574,7 @@ const streamSection: LiveSection = {
 const notifStatuses = ["completed", "failed", "stopped"] as const;
 const notifSection: LiveSection = {
 	title: "notification cards (completed → failed → stopped)",
-	render: (t) =>
+	render: (t, w) =>
 		renderLines(
 			renderNotification(
 				{
@@ -499,17 +593,18 @@ const notifSection: LiveSection = {
 				{ expanded: false },
 				theme,
 			),
-			100,
+			w,
 		),
 	height: 0,
 };
 
 // Measure fixed canvas heights over a full cycle (covers both the spin and
+// Measure fixed canvas heights over a full cycle (covers both the spin and
 // card phases of the flow animations, every stream step, and every card of
 // the two carousels), then run all sections concurrently forever.
 for (const s of [spawnSection, agentControlSection, foregroundSection, widgetSection, streamSection, notifSection]) {
 	let maxH = 0;
-	for (let t = 0; t < 200; t++) maxH = Math.max(maxH, s.render(t).length);
+	for (let t = 0; t < 200; t++) maxH = Math.max(maxH, s.render(t, 100).length);
 	s.height = maxH;
 }
 await runLive([spawnSection, agentControlSection, foregroundSection, widgetSection, streamSection, notifSection]);
