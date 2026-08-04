@@ -92,13 +92,16 @@ export class AgentRegistry {
 	}
 
 	/** AgentControl.stop path: graceful stop + removal (no notification).
-	 *  A rejecting stop() propagates — the caller (AgentControl.execute)
-	 *  surfaces it as a tool error, matching the original wiring. */
-	async stopAndRemove(agentId: string): Promise<void> {
+	 *  Returns whether an agent was actually stopped (false when it finished
+	 *  between lookup and removal). A rejecting stop() propagates — the
+	 *  caller (AgentControl.execute) surfaces it as a tool error, matching
+	 *  the original wiring. */
+	async stopAndRemove(agentId: string): Promise<boolean> {
 		const agent = this.agents.get(agentId);
-		if (!agent) return;
+		if (!agent) return false;
 		await agent.stop();
 		this.remove(agentId);
+		return true;
 	}
 
 	/** Stop everything (session shutdown). */

@@ -56,6 +56,10 @@ describe("parseLine — responses", () => {
 		}
 	});
 
+	it("rejects a response without a success field", () => {
+		assert.equal(parseLine('{"id":"a1","type":"response","command":"prompt"}'), null);
+	});
+
 	it("rejects a response without a command field", () => {
 		assert.equal(parseLine('{"id":"a1","type":"response","success":true}'), null);
 	});

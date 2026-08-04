@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { renderAgentControlResult, renderAgentResult, renderNotification } from "../render.js";
+import { renderAgentControlResult, renderAgentResult, renderNotification, safeTitle } from "../render.js";
 
 // Fold hints render through keyHint, which reads the real global theme.
 initTheme("dark");
@@ -319,4 +319,20 @@ test("notification header carries the status icon", () => {
 		theme,
 	);
 	assert.ok(renderText(stopped, 120).includes('■ Agent "slow query probe" stopped'), "stopped icon + word");
+});
+
+// ── safeTitle (title rendered safe for a single quoted line) ──
+
+test("safeTitle flattens newlines and neutralizes embedded quotes", () => {
+	assert.equal(safeTitle('research "db" schema'), "research 'db' schema");
+	assert.equal(safeTitle("line1\nline2\t tab"), "line1 line2  tab");
+	assert.equal(safeTitle("  padded  "), "padded");
+	assert.equal(safeTitle(undefined), "(untitled)");
+});
+
+test("safeTitle caps long titles with a trailing ellipsis", () => {
+	const long = "a".repeat(100);
+	const out = safeTitle(long, 40);
+	assert.equal(out.length, 40);
+	assert.equal(out.endsWith("…"), true);
 });

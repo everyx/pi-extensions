@@ -52,6 +52,12 @@ export function resolveModel(
 	const sep = originalModel.indexOf("/");
 	const providerHint = sep >= 0 ? originalModel.slice(0, sep) : undefined;
 	const modelName = sep >= 0 ? originalModel.slice(sep + 1) : originalModel;
+	if (!modelName.trim()) {
+		// "provider/" with nothing after the slash matches nothing — an
+		// empty model name would otherwise be an `includes("")` truthy
+		// substring match against every model.
+		return { error: `Model "${originalModel}" not available.` };
+	}
 	const normModel = normalize(modelName);
 
 	const matches = (m: ModelLite) =>

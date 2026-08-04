@@ -102,7 +102,7 @@ export function parseLine(line: string): ParsedLine | null {
 	const obj = value as Record<string, unknown>;
 
 	if (obj.type === "response") {
-		if (typeof obj.command !== "string") return null;
+		if (typeof obj.command !== "string" || typeof obj.success !== "boolean") return null;
 		return { kind: "response", response: value as RpcResponse };
 	}
 

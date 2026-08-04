@@ -36,6 +36,16 @@ export interface RpcClientOptions {
 /** How long to wait for a single command response before failing it. */
 const RESPONSE_TIMEOUT_MS = 10_000;
 
+/**
+ * Single-line output cap: a pathological (or buggy) child spewing one huge
+ * line would otherwise grow `buffer` without bound. Lines past this are
+ * dropped at the line boundary; individual real lines are far smaller.
+ */
+const MAX_LINE_BUFFER = 1024 * 1024;
+
+/** Stderr capture cap — only used for error messages on exit. */
+const MAX_STDERR = 64 * 1024;
+
 interface PendingWaiter {
 	resolve: (response: RpcResponse) => void;
 	reject: (err: Error) => void;
@@ -64,6 +74,10 @@ export class RpcClient {
 		const proc = spawn(options.command ?? "pi", argv, {
 			cwd: options.cwd,
 			stdio: ["pipe", "pipe", "pipe"],
+			// Own process group (Unix): lets kill(-pid, …) signal the whole
+			// tree — without this, a SIGTERM to the pi child would orphan its
+			// bash/sleep grandchildren still holding the stdout pipe.
+			...(process.platform !== "win32" ? { detached: true } : {}),
 		});
 		this.proc = proc;
 
@@ -72,8 +86,9 @@ export class RpcClient {
 		// (U+FFFD) and make the decoder pointless.
 		proc.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
 		proc.stderr.on("data", (chunk: Buffer) => {
-			this.stderr += chunk.toString();
-			options.onStderr?.(chunk.toString());
+			const text = chunk.toString();
+			if (this.stderr.length < MAX_STDERR) this.stderr += text.slice(0, MAX_STDERR - this.stderr.length);
+			options.onStderr?.(text);
 		});
 		// Stream errors (e.g. write-after-end during shutdown races) must never
 		// crash the host as unhandled 'error' events — fail pending commands.
@@ -131,15 +146,29 @@ export class RpcClient {
 		});
 	}
 
-	/** Graceful shutdown: stdin EOF triggers pi's rpc-mode `shutdown()`. */
+	/** Graceful shutdown: stdin EOF triggers pi's rpc-mode `shutdown()`. Idempotent —
+	 *  hardStop can race another hardStop (abortAndWait vs stop) and a second
+	 *  `.end()` on an already-ended stream throws ERR_STREAM_ALREADY_FINISHED. */
 	endInput(): void {
-		if (!this.proc.stdin || this.proc.stdin.destroyed) return;
-		this.proc.stdin.end();
+		const stdin = this.proc.stdin;
+		if (!stdin || stdin.destroyed || stdin.writableEnded) return;
+		stdin.end();
 	}
 
-	/** Hard fallback: signal the child. */
+	/** Hard fallback: signal the whole child process group (detached). */
 	kill(signal: NodeJS.Signals = "SIGTERM"): void {
 		if (this.closed || this.proc.exitCode !== null) return;
+		const pid = this.proc.pid;
+		if (pid === undefined) return;
+		if (process.platform !== "win32") {
+			try {
+				// Negative pid = the process group the detached child leads.
+				process.kill(-pid, signal);
+				return;
+			} catch {
+				/* group gone — fall through to the single-process signal */
+			}
+		}
 		try {
 			this.proc.kill(signal);
 		} catch {
@@ -151,6 +180,11 @@ export class RpcClient {
 
 	private onData(chunk: Buffer): void {
 		this.buffer += this.decoder.write(chunk);
+		if (this.buffer.length > MAX_LINE_BUFFER) {
+			// A single unterminated line exceeded the cap — drop it rather than
+			// grow without bound (the framing is still recovered at the next \n).
+			this.buffer = "";
+		}
 		for (;;) {
 			const idx = this.buffer.indexOf("\n");
 			if (idx === -1) break;

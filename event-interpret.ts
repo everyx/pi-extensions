@@ -38,7 +38,12 @@ function summarizeArgs(name: string, args: unknown): string {
 						: undefined;
 		if (key && typeof a[key] === "string" && a[key]) return a[key];
 		const json = JSON.stringify(a);
-		return json.length > 80 ? `${json.slice(0, 80)}\u2026` : json;
+		if (json.length > 80) {
+			// Code-point-safe truncation — slicing a UTF-16 string at 80 could
+			// split a surrogate pair (emoji) and emit U+FFFD garbage.
+			return `${Array.from(json).slice(0, 80).join("")}\u2026`;
+		}
+		return json;
 	}
 	return "";
 }

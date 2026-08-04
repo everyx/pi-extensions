@@ -55,6 +55,12 @@ describe("resolveModel", () => {
 		assert.equal(r.model, "openai/gpt-4o");
 	});
 
+	it("rejects a trailing-slash model spec instead of matching everything", () => {
+		const r = resolveModel(registry, fallback, "anthropic/");
+		assert.equal(r.model, undefined);
+		assert.ok(r.error?.includes("anthropic/"), "error names the bad spec");
+	});
+
 	it("returns error when explicit model not found", () => {
 		const r = resolveModel(registry, fallback, "nonexistent-model");
 		assert.equal(r.model, undefined);

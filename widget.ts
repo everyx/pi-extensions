@@ -126,15 +126,20 @@ export class AgentWidget {
 		// (interactive-mode renderWidgetContainer, leadingSpacer=true) — no
 		// manual blank line. 1-char left padding matches pi's string[] widget
 		// form (Text(line, 1, 0)).
-		const lines: string[] = [` ${theme.fg("accent", `\u25cf ${theme.fg("accent", "Agents")}`)}`];
+		const lines: string[] = [` ${theme.fg("accent", `\u25cf Agents`)}`];
 		for (const row of this.rows.values()) {
 			const { agent, frame } = row;
 			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
 			// Task label (quoted, bashMode-style like the card header titles) —
-			// same as the session display name.
-			const name = agent.title;
+			// same as the session display name. Rendered safe for one line:
+			// newlines/quotes flattened, capped (mirrors safeTitle in render.ts).
+			const name = (agent.title ?? "")
+				.replace(/[\r\n\t]+/g, " ")
+				.replace(/"/g, "'")
+				.trim();
+			const label = (name || "(untitled)").length > 40 ? `${name.slice(0, 39)}\u2026` : name || "(untitled)";
 			const elapsed = formatDuration(Date.now() - agent.startedAt);
-			lines.push(` ${spinner} ${theme.fg("muted", `"${name}" \u00b7 ${elapsed}`)}`);
+			lines.push(` ${spinner} ${theme.fg("muted", `"${label}" \u00b7 ${elapsed}`)}`);
 
 			const activity = agent.getLatestActivity();
 			if (activity) lines.push(this.renderExcerpt(activity, theme));

@@ -77,7 +77,7 @@ interface TimerState {
 	endedAt?: number;
 	interval?: ReturnType<typeof setInterval>;
 	/** Spinner frame index for the stop/start animation. */
-	stopFrame?: number;
+	frame?: number;
 }
 
 // ─── Render context (from pi framework) ────────────────────────
@@ -127,15 +127,29 @@ export function activityRow(activity: AgentActivity, theme: Theme, max?: number)
 }
 
 /** Extract a one-line summary of a long string: first line, ellipsis if truncated. */
-function firstLine(s: string): string {
+export function firstLine(s: string): string {
 	const idx = s.indexOf("\n");
 	return idx < 0 ? s : `${s.slice(0, idx)}\u2026`;
+}
+
+/**
+ * Task title, rendered safe for a single quoted line: tabs/newlines are
+ * flattened and embedded double quotes neutralized (so the bashMode quotes
+ * around the title can't be broken), then capped with a trailing ellipsis.
+ * Shared by status lines, headers, the notification card and the widget.
+ */
+export function safeTitle(title: string | undefined, max = 40): string {
+	const flat = (title ?? "(untitled)")
+		.replace(/[\r\n\t]+/g, " ")
+		.replace(/"/g, "'")
+		.trim();
+	if (flat.length <= max) return flat;
+	return `${flat.slice(0, max - 1)}\u2026`;
 }
 
 /** Muted metadata suffix, mirroring bash's ` (timeout 10s)` pattern. */
 function buildMetaSuffix(args: AgentParams, theme: Theme): string {
 	const parts: string[] = [];
-	if (args.run_in_background) parts.push("background");
 	const model = args.model;
 	if (model) parts.push(model);
 	if (parts.length === 0) return "";
@@ -154,7 +168,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 	// renderResult (Text("") renders zero lines); the title lives on the line.
 	if (args.run_in_background) return new Text("", 0, 0);
 
-	const title = args.title.trim() || firstLine(args.prompt);
+	const title = safeTitle(args.title.trim() || firstLine(args.prompt));
 	return new Text(
 		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${title}"`)}${buildMetaSuffix(args, theme)}`,
 		0,
@@ -186,12 +200,12 @@ function dimOneLiner(text: string | undefined, theme: Theme): Text {
  */
 function statusLine(
 	title: string | undefined,
-	verb: "start" | "steer" | "stop",
+	verb: "start" | "steer" | "stop" | "control",
 	phase: "running" | "done" | "failed",
 	theme: Theme,
 	spinner?: string,
 ): string {
-	const agent = `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${title}"`)}` : ""}`;
+	const agent = `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : ""}`;
 	const marker =
 		phase === "running"
 			? theme.fg("accent", spinner ?? "")
@@ -210,7 +224,9 @@ function statusLine(
 				? "started"
 				: verb === "stop"
 					? "stopped"
-					: "steered";
+					: verb === "steer"
+						? "steered"
+						: "finished";
 	return `${marker} ${agent} ${theme.fg("muted", `\u00b7 ${state}`)}`;
 }
 
@@ -284,10 +300,10 @@ export function renderAgentResult(
 		const state = context.state;
 		if (isPartial && !details.error) {
 			// Spinner animation while the child spawns (in-place, no new lines).
-			if (state.stopFrame === undefined) state.stopFrame = 0;
+			if (state.frame === undefined) state.frame = 0;
 			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
-			const spinner = SPINNER[state.stopFrame % SPINNER.length];
-			state.stopFrame++;
+			const spinner = SPINNER[state.frame % SPINNER.length];
+			state.frame++;
 			return new Text(statusLine(details.title, "start", "running", theme, spinner), 0, 0);
 		}
 		if (state.interval) {
@@ -295,6 +311,9 @@ export function renderAgentResult(
 			state.interval = undefined;
 		}
 		if (details.error) {
+			// Dim reason line, indented +1 past the status line (the card Box
+			// shell supplies the base padding — same relative indent as the
+			// control status lines in renderAgentControlResult).
 			const cmp = new Container();
 			cmp.addChild(new Text(statusLine(details.title, "start", "failed", theme), 0, 0));
 			cmp.addChild(new Text(theme.fg("dim", truncateTail(details.error, 80)), 1, 0));
@@ -379,7 +398,7 @@ export function renderAgentControlResult(
 	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 	const d = result.details;
 
-	const verb = d?.action === "steer" ? "steer" : "stop";
+	const verb = d?.action === "steer" ? "steer" : d?.action === "stop" ? "stop" : "control";
 
 	// Errors keep the status-line shape: `✗ Agent "title" · <verb> failed` with
 	// the reason as a dim second line (kept out of the state line so new users
@@ -399,7 +418,7 @@ export function renderAgentControlResult(
 		const cmp = new Container();
 		cmp.addChild(new Text(statusLine(d.title, "steer", "done", theme), 1, 0));
 		const first = d.message.trim().split(/\n/)[0];
-		const line = truncateTail(first, 60);
+		const line = first.length > 60 ? `${first.slice(0, 57)}\u2026` : first;
 		if (line) {
 			cmp.addChild(new Markdown(`> ${line}`, 1, 0, getMarkdownTheme()));
 		}
@@ -414,10 +433,10 @@ export function renderAgentControlResult(
 		if (isPartial) {
 			// Working-indicator style: spinner + "Agent <title> · stopping…"
 			// (same accent spinner / cadence as pi's Loader).
-			if (state.stopFrame === undefined) state.stopFrame = 0;
+			if (state.frame === undefined) state.frame = 0;
 			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
-			const spinner = SPINNER[state.stopFrame % SPINNER.length];
-			state.stopFrame++;
+			const spinner = SPINNER[state.frame % SPINNER.length];
+			state.frame++;
 			cmp.addChild(new Text(statusLine(d.title, "stop", "running", theme, spinner), 1, 0));
 		} else {
 			if (state.interval) {
@@ -505,7 +524,7 @@ export function renderNotification(
 
 	cmp.addChild(
 		new Text(
-			`${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${d.title}"`)}${statusWord}${metaSuffix}`,
+			`${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${safeTitle(d.title)}"`)}${statusWord}${metaSuffix}`,
 			0,
 			0,
 		),

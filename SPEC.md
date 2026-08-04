@@ -162,6 +162,8 @@ widget.ts          — Agents 状态 widget
 - 响应：`{id, type:"response", command, success, data|error}`
 - 事件：`agent_settled` / `agent_end` / `message_update` 等全事件流
 - 不绑定框架 `RpcClient`（私有 + setTimeout 赌就绪 + SIGTERM→SIGKILL 脏点）
+- 子进程 **detached（独立进程组）**：stop 的 SIGTERM 级联到整棵进程树（pi → bash → sleep），不遗留孤儿孙进程；`kill(-pid, signal)` 失败时回退单进程信号
+- stdout 行缓冲 1MB 上限（病态单行丢弃而非 OOM）、stderr 捕获 64KB 上限（仅退出错误消息用）
 
 ### 生命周期
 
@@ -170,11 +172,11 @@ queued → running ──→ completed（通知）／ failed（API 错误/崩溃
 ```
 
 - **就绪判定**：prompt 命令 preflight 回执（`success:true`）——两道信号之一；`agent_settled` 为完成信号
-- **前台**：spawnAndSend → waitForCompletion（含 graceful limits 循环）→ lastOutput → stdin.end()（优雅退出）
+- **前台**：spawnAndSend → waitForCompletion（含 graceful limits 循环）→ lastOutput → stdin.end()（优雅退出）；**失败与超限（stopped）都返回 isError 工具结果**（details.error → 红底；超限 stopped 标注 `(stopped — reached the task time/token limit; the output above is partial)`，用户主动 cancel 的 stopped 仅标 `Sub-agent stopped.`，不嫁祸超限）
 - **后台**：spawnAndSend 后立即返回 agent_id；waitForCompletion resolve 后投递通知 → stdin.end() 退出
-- **steer**：写 `steer` 命令（turn 结束后注入，排队语义）；仅 running 期间有效
-- **stop**：stdin.end() 优雅退出，5s 未退 SIGTERM 兜底；`stoppedByControl` 抑制通知
-- **异常**：agent_end `stopReason:"error"` → failed（错误信息进输出）；子进程非零退出 → failed；RPC stdin 关闭竞态（write-after-end）→ 优雅 reject
+- **steer**：写 `steer` 命令（turn 结束后注入，排队语义）；仅 running 期间有效；子进程在 steer 途中死掉/结束时返回结构化失败（status line + dim 原因），不裸 throw
+- **stop**：stdin.end() 优雅退出，5s 未退 SIGTERM 兜底；`stoppedByControl` 抑制通知；对已结束的 agent 报 `already finished`（不谎报 "Stopped"）
+- **异常**：agent_end `stopReason:"error"` → failed（错误信息进输出）；子进程非零退出 → failed；RPC stdin 关闭竞态（write-after-end）→ 结构化 reject（details 带 action/title，保留状态行形态）
 
 ### 完成通知
 
@@ -182,6 +184,7 @@ queued → running ──→ completed（通知）／ failed（API 错误/崩溃
 - content：`{status, agent_id, result, session_path}`（LLM 一次拿全）
 - details：`{title, result, usage, sessionPath, sessionId}`（卡片渲染，不进 LLM）
 - 一次投递、无重试、无查询工具
+- **spawn 失败不投递通知**（原 D15 双通道）：isError 工具结果已把失败交给 LLM、状态行展示给用户——followUp 通知会重复同一失败两次（LLM 收到两份 + 用户看到两个失败卡）
 
 ### Graceful turn limits
 

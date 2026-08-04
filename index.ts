@@ -295,8 +295,11 @@ export default function (pi: ExtensionAPI) {
 			});
 
 			// Wire the execute AbortSignal (user cancel) to a graceful stop.
+			// Guarded: only stop while the agent is still live — a late abort
+			// (signal outliving this execute) must not stop an agent that
+			// already reached a terminal state or flip stoppedByControl.
 			const onAbort = () => {
-				void agent.stop();
+				if (agent.status === "queued" || agent.status === "running") void agent.stop();
 			};
 			if (signal?.aborted) {
 				onAbort();
@@ -318,16 +321,12 @@ export default function (pi: ExtensionAPI) {
 
 				// ── Background: return agent_id now, notify on completion ──
 				if (params.run_in_background) {
-					// Spawn failure: deliver the failed notification (D15) — the
-					// caller only sees an isError return, the user gets the card.
+					// Spawn failure: the isError return already carries the failure
+					// to the LLM and the status line shows it to the user — a
+					// followUp notification would deliver the same failure twice.
 					if (!started.ok) {
-						await registry.complete(agent, {
-							status: "failed",
-							output: started.error,
-							stats: { tokens: 0, toolUses: 0, durationMs: 0 },
-							sessionPath: undefined,
-							sessionId: undefined,
-						});
+						signal?.removeEventListener("abort", onAbort);
+						await agent.stop().catch(() => {});
 						return {
 							content: [{ type: "text", text: started.error }],
 							details: { runInBackground: true, title: agent.title, error: started.error },
@@ -335,6 +334,11 @@ export default function (pi: ExtensionAPI) {
 						};
 					}
 
+					// Abort is wired to stop while spawning only; once the spawn
+					// settled, the background agent runs on its own — the user
+					// controls it via AgentControl, and this (already returned)
+					// tool call's signal must not kill it later.
+					signal?.removeEventListener("abort", onAbort);
 					ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
 					registry.register(agent);
 					void agent
@@ -378,10 +382,22 @@ export default function (pi: ExtensionAPI) {
 				await agent.stop().catch(() => {});
 				signal?.removeEventListener("abort", onAbort);
 
-				if (completion.status === "failed") {
+				// Failures and limit-stops are both errors for the caller: the
+				// stopped case (total timeout / hard token limit) must not look
+				// like a clean success — mark details.error so the isError
+				// workaround hook restores the error background. A stopped agent
+				// is also what a user cancel (abort) produces — don't blame that
+				// on the limits.
+				if (completion.status === "failed" || completion.status === "stopped") {
+					const message =
+						completion.status === "failed"
+							? completion.output || "Sub-agent failed."
+							: agent.stoppedByControl
+								? completion.output || "Sub-agent stopped."
+								: `${completion.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)`;
 					return {
-						content: [{ type: "text", text: completion.output || "Sub-agent failed." }],
-						details: { task, startedAt, endedAt: Date.now() },
+						content: [{ type: "text", text: message }],
+						details: { task, startedAt, endedAt: Date.now(), error: message },
 						isError: true,
 					};
 				}
@@ -458,11 +474,37 @@ export default function (pi: ExtensionAPI) {
 					content: [{ type: "text", text: `Stopping ${agent.title}\u2026` }],
 					details: { action: "stop", title: agent.title },
 				});
-				await registry.stopAndRemove(params.agent_id);
-				return {
-					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
-					details: { agentId: params.agent_id, action: "stop", title: agent.title },
-				};
+				try {
+					const stopped = await registry.stopAndRemove(params.agent_id);
+					if (!stopped) {
+						// Finished between lookup and removal (rare) — don't claim
+						// a stop that never happened.
+						const message = `Agent ${params.agent_id} already finished.`;
+						return {
+							content: [{ type: "text", text: message }],
+							details: {
+								agentId: params.agent_id,
+								action: "stop",
+								title: agent.title,
+								error: message,
+							},
+							isError: true,
+						};
+					}
+					return {
+						content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
+						details: { agentId: params.agent_id, action: "stop", title: agent.title },
+					};
+				} catch (err) {
+					// Child died mid-stop (e.g. write-after-end): surface it as a
+					// proper status line, not a bare thrown error.
+					const message = err instanceof Error ? err.message : String(err);
+					return {
+						content: [{ type: "text", text: message }],
+						details: { agentId: params.agent_id, action: "stop", title: agent.title, error: message },
+						isError: true,
+					};
+				}
 			}
 
 			// steer
@@ -495,7 +537,37 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			await agent.steer(message);
+			let steerError: string | null = null;
+			try {
+				await agent.steer(message);
+			} catch (err) {
+				// Child died between lookup and steer (write-after-end): surface
+				// it as a status line, not a bare thrown error. Note: a .catch()
+				// callback's return value would be swallowed — the tool result
+				// must come from an explicit return after the try.
+				steerError = err instanceof Error ? err.message : String(err);
+			}
+			if (steerError) {
+				return {
+					content: [{ type: "text", text: steerError }],
+					details: { agentId: agent.agentId, action: "steer", title: agent.title, error: steerError },
+					isError: true,
+				};
+			}
+			if (agent.status !== "running") {
+				// The child settled or died while the steer was in flight — the
+				// completion notification (if any) carries the real outcome.
+				return {
+					content: [{ type: "text", text: `Agent ${params.agent_id} finished before the steer arrived.` }],
+					details: {
+						agentId: agent.agentId,
+						action: "steer",
+						title: agent.title,
+						error: `finished before the steer arrived (status: ${agent.status})`,
+					},
+					isError: true,
+				};
+			}
 			return {
 				// The injected message rides in the tool content so the LLM keeps
 				// it across compaction; the user sees it as the quote line on the card.

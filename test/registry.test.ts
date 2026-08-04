@@ -169,17 +169,19 @@ describe("AgentRegistry — stop / shutdown", () => {
 		const agent = new FakeAgent("a1");
 		registry.register(agent);
 
-		await registry.stopAndRemove("a1");
+		const stopped = await registry.stopAndRemove("a1");
 
+		assert.equal(stopped, true);
 		assert.equal(agent.stopped, true);
 		assert.equal(agent.stopCalls, 1);
 		assert.deepEqual(widget?.removed, ["a1"]);
 		assert.equal(registry.lookup("a1"), undefined);
 	});
 
-	it("stopAndRemove is a no-op for unknown ids", async () => {
+	it("stopAndRemove reports false for unknown ids (already finished)", async () => {
 		const { registry } = makeRegistry();
-		await registry.stopAndRemove("nope");
+		const stopped = await registry.stopAndRemove("nope");
+		assert.equal(stopped, false);
 	});
 
 	it("shutdown stops every agent, clears the map, and disposes the widget", async () => {
