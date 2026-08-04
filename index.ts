@@ -88,10 +88,7 @@ function widgetSurface(): WidgetSurface | null {
 
 const AgentParamsSchema = Type.Object({
 	prompt: Type.String({
-		description:
-			"The task for the sub-agent. Must be self-contained — the sub-agent starts with " +
-			"zero context from this conversation. Include file paths, constraints, and the " +
-			"desired output shape.",
+		description: "The task for the sub-agent (self-contained: it starts with zero context).",
 	}),
 	title: Type.String({
 		description:
@@ -257,7 +254,7 @@ export default function (pi: ExtensionAPI) {
 		name: "Agent",
 		label: "Agent",
 		description:
-			"Spawn a sub-agent that works in its own isolated context window. " +
+			"Spawn an isolated sub-agent that works in its own context window. " +
 			"The sub-agent starts with zero context from this conversation, so the prompt " +
 			"must be self-contained: include file paths, constraints, and the desired output shape. " +
 			"Use it for heavy tasks whose verbose intermediate output (search results, logs, test " +
@@ -270,9 +267,8 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use Agent when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
 			"Use Agent for independent parallel work: spawn several with run_in_background: true — each completion notification carries its own result.",
-			"Write Agent prompts self-contained: the sub-agent has zero context from this conversation. Include paths, constraints, and the expected output shape.",
-			"Never poll a background Agent. Wait for its completion notification — it carries the result directly.",
-			"Trust but verify: a sub-agent's summary describes intent, not outcome. Check its actual changes before reporting work as done.",
+			"Write Agent prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
+			"Never poll a background Agent — its completion notification carries the result.",
 		],
 		parameters: AgentParamsSchema,
 
@@ -495,8 +491,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Control Agent",
 		description:
 			"Intervene in a running sub-agent. steer: inject a message into its conversation to " +
-			"redirect its work mid-run (delivered after its current turn settles — only supported " +
-			"for background agents still running, before the completion notification is sent). " +
+			"redirect its work mid-run; it is delivered after the agent's current turn settles. " +
 			"stop: terminate a running sub-agent immediately, discarding further work. Only works " +
 			"on agents that are currently running.",
 		promptSnippet: "Steer or stop a running sub-agent",
@@ -632,9 +627,10 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			return {
-				// The injected message rides in the tool content so the LLM keeps
-				// it across compaction; the user sees it as the quote line on the card.
-				content: [{ type: "text", text: `Steered agent ${params.agent_id}: "${message}".` }],
+				// Steer confirmation stays minimal: the full message already lives in the
+				// child's conversation and on the card (details.message) — echoing it
+				// here would double its tokens for no new information.
+				content: [{ type: "text", text: `Steered agent ${params.agent_id}.` }],
 				details: { action: "steer", title: agent.title, message },
 			};
 		},

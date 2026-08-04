@@ -40,7 +40,7 @@ Two primitive tools:
 - **`Agent`** — spawn an isolated sub‑agent: `{ prompt, title, model?, thinking?, tools?, run_in_background? }`. `title` (3‑5 words, required) labels the tool header, notification card, widget row, and session name — like Claude Code's `description` / Codex's `task_name`. Foreground (default) blocks until the result is ready; `run_in_background: true` returns an `agent_id` immediately and delivers a completion notification carrying the final output.
 - **`AgentControl`** — intervene in a running background agent: `steer` (inject a redirecting message) or `stop` (terminate).
 
-The LLM is guided by `promptSnippet` + `promptGuidelines` (system-prompt injection): when to delegate, to keep prompts self-contained, to never poll, and to verify a sub‑agent's actual changes before reporting done.
+The LLM is guided by `promptSnippet` + `promptGuidelines` (system-prompt injection): when to delegate, to keep prompts self-contained, and to never poll.
 
 ## Usage
 

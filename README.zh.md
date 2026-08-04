@@ -40,7 +40,7 @@ ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 - **`Agent`** — spawn 一个隔离的 sub-agent：`{ prompt, title, model?, thinking?, tools?, run_in_background? }`。`title`（3-5 词，**必填**）作为工具头、通知卡片、widget 行和会话名的标识——对齐 Claude Code 的 `description` / Codex 的 `task_name`。前台（默认）阻塞到结果就绪；`run_in_background: true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。
 - **`AgentControl`** — 干预运行中的后台 agent：`steer`（注入重定向消息）或 `stop`（终止）。
 
-LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使用指南：何时委派、prompt 必须自包含、绝不轮询、汇报前验证子 agent 的实际改动。
+LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使用指南：何时委派、prompt 必须自包含、绝不轮询。
 
 ## 用法
 
