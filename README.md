@@ -89,15 +89,6 @@ Ask a sub‑agent to research the project structure, but only let it use read an
 
 Sub‑agent won't see any other tools. Read-only exploration with a cheaper model is the recommended pattern for research tasks.
 
-## Observability
-
-- **LLM context protection** — result content fed to the LLM is truncated tail-first (2000 lines / 50KB, same as the bash tool); a warning appears below the card body (`[Truncated: showing X of Y lines]`, or bytes variant `[Truncated: X lines shown (<size> limit)]`); the session path is listed separately in the card footer (`session: <path>`). The UI rendering stream (`details.events`) is never truncated — expanding shows everything; only the LLM sees the capped version.
-- **Foreground** — the card replays the sub‑agent's session: thinking markers, tool calls and streamed text in event order (like watching a pi session), with the output streaming word by word. Header shows a status icon (`⠋` while running / `✓✗` on completion), the quoted task title in the bash-command color, and parenthesized meta (`model · Took/Elapsed`): `⠋ Agent "research db schema" (model · Elapsed 12.3s)`. Failures *and* limit-stops (timeout) return as errors: `✗` red card with the reason, and a stopped result is marked `(stopped — reached the task time/token limit; the output above is partial)` instead of masquerading as a clean success.
-- **Background spawn** — a bare spinner confirms the spawn (`⠋ Agent "probe" starting…`), then a small result card: `✓ Agent "probe" started` (or `✗ Agent "probe" start failed` with the reason on a dim line). The leading icon (spinner / ✓ / ✗) makes the state readable at a glance. Spawn failures are delivered once (the error tool result), not also as a notification card. The agent id stays in the tool content for the LLM's AgentControl — never shown on the card.
-- **Background run** — a persistent status widget sits above the editor with an `Agents` heading (accent dot + toolTitle bold, matching the card's `Agent` word), one line per running agent: `⠋ "probe" (42.0s)` (accent spinner + bashMode title matching the card's quoted title + muted parenthesized meta), plus a latest-activity excerpt line aligned under the title: tool calls (`bash: sleep 20` — tool name highlighted), `Thinking...` (italic, pi's hidden-thinking style), or the latest text tail. Finished agents drop out immediately — the completion notification card (which appears right away) carries the outcome, so the widget never lingers. Status-only by design (no full output stream — the complete result arrives via the completion notification, and via `pi --session <path>` for review).
-- **Steer/stop** — every phase is a card: the running phase is a pending-background card with the spinner (`⠹ Agent "probe" stopping…`), and the settled result flips to success/error background like the notification card: `✓ Agent "probe" steered` with the injected message as a plain full-length content line underneath, `✓ Agent "probe" stopped`, or `✗ Agent "probe" stop failed` with the reason on a dim line. A stop that raced a natural completion reports `already finished` rather than claiming a stop. Control errors never throw bare — they render as structured result cards.
-- **Completion notification** — rendered as a card headed by a status icon that distinguishes it from the Agent tool card (which has none): `✓ Agent "probe" (Took 12.3s · 1,250 tokens · 3 tool uses)` / `✗ … failed` / `■ … stopped`, with a result preview body and the session path footer.
-
 ## How it works
 
 Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
@@ -122,28 +113,3 @@ Sub‑agents are full pi instances and therefore spawn sub‑agents of their own
 ## Cleanup
 
 When pi exits, running sub‑agents receive a graceful stdin-EOF shutdown. Sessions remain on disk for attach/replay; nothing is killed or deleted.
-
-## For developers
-
-```bash
-pnpm install
-pnpm check      # biome
-pnpm typecheck  # tsc --noEmit
-pnpm test       # tsx --test
-```
-
-Layout:
-
-```
-index.ts           — tool registration (Agent / AgentControl) + schemas + notification delivery
-protocol.ts        — pure JSONL protocol layer (unit tested)
-rpc-client.ts      — stateful thin JSONL client (spawn + transport)
-event-interpret.ts — raw RpcEvent → AgentEvent adapter (pure, unit tested)
-agent-process.ts   — AgentProcess: one resident rpc child, semantic API (tested via seam)
-registry.ts        — AgentRegistry: running-agent lifecycle + completion policy (tested)
-model.ts           — model resolution (tested)
-types.ts           — shared protocol types (RenderEvent / SubagentDetails / NotificationDetails / Truncation)
-format.ts          — pure formatting utilities (SPINNER / formatDuration / safeTitle / activityRow / clipTail / firstLine)
-render.ts          — TUI rendering + notification card renderer
-widget.ts          — Agents status widget (setWidget, above the editor)
-```

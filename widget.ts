@@ -2,7 +2,7 @@
  * pi-subagent — AgentWidget.
  *
  * Persistent above-editor widget showing one status line per *background*
- * agent: `⠋ <title> (42.0s)`, plus a latest-activity excerpt line aligned
+ * agent: `⠋ title (42.0s)`, plus a latest-activity excerpt line aligned
  * under the title (tool call / Thinking... / text tail). Foreground agents
  * are intentionally excluded — their live output already streams inline in
  * the tool card (mirrors tintinweb's default widget mode, which hides
@@ -138,7 +138,7 @@ export class AgentWidget {
 			// Meta is parenthesized like every other component's meta (bash
 			// `(timeout 10s)`, notification `(Took …)`); `·` only separates
 			// multiple meta items, so a lone elapsed time drops it.
-			lines.push(` ${spinner} ${theme.fg("bashMode", `"${label}"`)} ${theme.fg("muted", `(${elapsed})`)}`);
+			lines.push(` ${spinner} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`);
 
 			const activity = agent.getLatestActivity();
 			if (activity) lines.push(this.renderExcerpt(activity, theme));
