@@ -98,6 +98,7 @@ const params: AgentParams = {
 	prompt: "Check the CI config for flaky tests. Look at the pipeline definition and report issues with evidence.",
 	title: "检查 CI 配置",
 	model: "claude-sonnet",
+	thinking: "high",
 };
 
 const activityTool: SubagentDetails["activity"] = { kind: "tool", name: "bash", args: "sleep 20" };
@@ -108,6 +109,8 @@ function foregroundDetails(extra: Partial<SubagentDetails> = {}): SubagentDetail
 		task: params.prompt,
 		startedAt: state.startedAt as number,
 		endedAt: state.endedAt as number,
+		model: params.model,
+		thinking: params.thinking,
 		sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
 		...extra,
 	};
@@ -486,6 +489,8 @@ const notifSection: LiveSection = {
 						status: notifStatuses[Math.floor(t / 20) % 3],
 						agent_id: "a1",
 						title: params.title,
+						model: params.model,
+						thinking: params.thinking,
 						result: "Found 5 flaky tests. All share the `retries: 0` flag.",
 						usage: { durationMs: 27_500, tokens: 12_500, toolUses: 3 },
 						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",

@@ -37,7 +37,7 @@ export type AgentActivityKind = "thinking" | "text" | "tool";
 export type AgentActivity =
 	| { kind: "thinking"; text: string }
 	| { kind: "text"; text: string }
-	| { kind: "tool"; name: string; args: string };
+	| { kind: "tool"; name: string; args: string; id?: string };
 
 export interface AgentStats {
 	tokens: number;
@@ -331,6 +331,23 @@ export class AgentProcess {
 		return this.events;
 	}
 
+	/**
+	 * Index of the last tool event with a matching identity: same id when
+	 * both sides have one, otherwise same name (pre-id snapshots).
+	 */
+	private findToolEvent(name: string, id: string | undefined): number {
+		for (let i = this.events.length - 1; i >= 0; i--) {
+			const e = this.events[i];
+			if (e.kind !== "tool") continue;
+			if (id !== undefined && e.id !== undefined) {
+				if (e.id === id) return i;
+			} else if (e.name === name) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
 	// ── Internal ───────────────────────────────────────────
 
 	private readonly onDelta: ((delta: string) => void) | undefined;
@@ -350,23 +367,49 @@ export class AgentProcess {
 					break;
 				case "activity": {
 					this.latestActivity = ev.activity;
-					// Thinking/tool transitions carry no text deltas — the card would
-					// never refresh without this push (text keeps streaming via onDelta).
-					// Dedup key is structured, not a display label — no shared format
-					// with the render layer.
+					// pi sends message_update fragments as the assistant message
+					// builds; each is a full snapshot. Tool args grow per fragment
+					// ({} → {"command":""} → …) and text deltas interleave — so
+					// merge by stable tool-call id, never by position (pi's own
+					// pendingTools map does the same). Consecutive thinking
+					// snapshots collapse to one marker.
 					const key =
 						ev.activity.kind === "tool"
 							? `tool\u0000${ev.activity.name}\u0000${ev.activity.args}`
 							: `${ev.activity.kind}\u0000${ev.activity.text}`;
 					if (ev.activity.kind !== "text" && key !== this.lastNotifiedActivityKey) {
 						this.lastNotifiedActivityKey = key;
+						if (ev.activity.kind === "thinking") {
+							const last = this.events[this.events.length - 1];
+							if (!last || last.kind !== "thinking") {
+								this.events.push({ kind: "thinking" });
+							}
+						} else if (ev.activity.kind === "tool") {
+							const idx = this.findToolEvent(ev.activity.name, ev.activity.id);
+							if (idx >= 0) {
+								const prev = this.events[idx];
+								if (prev.kind === "tool") prev.args = ev.activity.args;
+							} else {
+								const tool: RenderEvent = { kind: "tool", name: ev.activity.name, args: ev.activity.args };
+								if (ev.activity.id) tool.id = ev.activity.id;
+								this.events.push(tool);
+							}
+						}
 						this.onActivityChange?.(ev.activity);
 					}
 					break;
 				}
-				case "text_delta":
+				case "text_delta": {
+					// Fold consecutive text deltas into the current text event.
+					const last = this.events[this.events.length - 1];
+					if (last?.kind === "text") {
+						last.text += ev.delta;
+					} else {
+						this.events.push({ kind: "text", text: ev.delta });
+					}
 					this.onDelta?.(ev.delta);
 					break;
+				}
 				case "agent_failed":
 					this.agentError = ev.error;
 					break;

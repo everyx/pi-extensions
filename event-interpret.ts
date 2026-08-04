@@ -64,7 +64,14 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 		const content = (
 			raw.message as
 				| {
-						content?: Array<{ type?: string; text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>;
+						content?: Array<{
+							type?: string;
+							text?: unknown;
+							thinking?: unknown;
+							name?: unknown;
+							arguments?: unknown;
+							id?: unknown;
+						}>;
 				  }
 				| undefined
 		)?.content;
@@ -75,10 +82,15 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 			} else if (last?.type === "text" && typeof last.text === "string" && last.text.trim()) {
 				events.push({ type: "activity", activity: { kind: "text", text: last.text } });
 			} else if (last?.type === "toolCall" && typeof last.name === "string") {
-				events.push({
-					type: "activity",
-					activity: { kind: "tool", name: last.name, args: summarizeArgs(last.name, last.arguments) },
-				});
+				const tool: AgentActivity = {
+					kind: "tool",
+					name: last.name,
+					args: summarizeArgs(last.name, last.arguments),
+				};
+				// Stable tool-call identity (pi uses content.id to dedup the
+				// same call across message_update snapshots).
+				if (typeof last.id === "string") tool.id = last.id;
+				events.push({ type: "activity", activity: tool });
 			}
 		}
 

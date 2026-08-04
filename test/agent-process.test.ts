@@ -90,7 +90,14 @@ class FakeClient {
 		assistantMessageEvent?: { type: string; delta?: unknown };
 		messages?: Array<{ role?: string; stopReason?: string; errorMessage?: unknown; content?: unknown[] }>;
 		message?: {
-			content?: Array<{ type?: string; text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>;
+			content?: Array<{
+				type?: string;
+				text?: unknown;
+				thinking?: unknown;
+				name?: unknown;
+				arguments?: unknown;
+				id?: unknown;
+			}>;
 		};
 	}): void {
 		this.onEvent?.(event as never);
@@ -439,6 +446,59 @@ describe("AgentProcess — latest activity", () => {
 		assert.deepEqual(events, [
 			{ kind: "tool", name: "read", args: "a.ts" },
 			{ kind: "tool", name: "read", args: "b.ts" },
+		]);
+	});
+
+	it("accumulates thinking, tool, and text events in order", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		const starter = agent.spawnAndSend("prompt");
+		fake.emitEvent({ type: "agent_settled" }); // acks spawn
+		await starter;
+
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "thinking", thinking: "reasoning..." }] },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }] },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "hello" },
+		});
+		fake.emitEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: " world" },
+		});
+
+		assert.deepEqual(agent.getEvents(), [
+			{ kind: "thinking" },
+			{ kind: "tool", name: "bash", args: "ls" },
+			{ kind: "text", text: "hello world" },
+		]);
+	});
+
+	it("merges tool-arg growth across message_update snapshots into one event", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		const starter = agent.spawnAndSend("prompt");
+		fake.emitEvent({ type: "agent_settled" }); // acks spawn
+		await starter;
+
+		// Same tool-call id, args growing — pi's message builds incrementally.
+		for (const args of [{}, { command: "" }, { command: "echo" }, { command: "echo hi" }]) {
+			fake.emitEvent({
+				type: "message_update",
+				message: { content: [{ type: "toolCall", id: "call_1", name: "bash", arguments: args }] },
+			});
+			// Text deltas interleave — the interleaving used to defeat the
+			// "last event" merge, pushing one tool event per snapshot.
+			fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
+		}
+
+		assert.deepEqual(agent.getEvents(), [
+			{ kind: "tool", name: "bash", args: "echo hi", id: "call_1" },
+			{ kind: "text", text: "xxxx" },
 		]);
 	});
 });

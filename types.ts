@@ -18,7 +18,7 @@ import type { AgentActivity } from "./agent-process.js";
  */
 export type RenderEvent =
 	| { kind: "thinking" }
-	| { kind: "tool"; name: string; args?: string }
+	| { kind: "tool"; name: string; args?: string; id?: string }
 	| { kind: "text"; text: string };
 
 /** LLM-context truncation info (aligns with bash tool truncateTail). */

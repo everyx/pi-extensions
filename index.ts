@@ -495,6 +495,7 @@ export default function (pi: ExtensionAPI) {
 						model: agent.model,
 						thinking: agent.thinking,
 						truncation,
+						events: agent.getEvents(),
 					},
 				};
 			} catch (err) {
