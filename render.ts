@@ -16,7 +16,7 @@ import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { formatSize, keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
-import { activityRow, clipTail, firstLine, formatDuration, SPINNER, safeTitle } from "./format.js";
+import { firstLine, formatDuration, SPINNER, safeTitle } from "./format.js";
 import type { NotificationDetails, RenderEvent, SubagentDetails, Truncation } from "./types.js";
 
 // ─── Tool params ───────────────────────────────────────────
@@ -565,6 +565,3 @@ export function renderNotification(
 
 	return cmp;
 }
-
-// ── Re-exports from format.ts (backward compat) ──
-export { activityRow, clipTail, firstLine, formatDuration, SPINNER, safeTitle };

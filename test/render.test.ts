@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { renderAgentControlResult, renderAgentResult, renderNotification, safeTitle } from "../render.js";
+import { safeTitle } from "../format.js";
+import { renderAgentControlResult, renderAgentResult, renderNotification } from "../render.js";
 
 // Fold hints render through keyHint, which reads the real global theme.
 initTheme("dark");

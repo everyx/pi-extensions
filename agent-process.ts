@@ -11,11 +11,9 @@
  *   waitForCompletion()  → terminal (completed / failed / stopped)
  *   stop()               → graceful stdin EOF, SIGTERM fallback
  *
- * Graceful turn limits (issue #10 decision 10):
- *   After each settled turn we read get_session_stats. At the wrap-up token
- *   threshold we steer a "wrap up" message; at the hard limit (or total
- *   wall-clock timeout) we abort → wait for the next settle within a grace
- *   window → hard-stop the child if it never settles (hung model call).
+ * Token limits: none. A timeoutMs (if set) triggers a hard abort → graceful
+ *   settle within the grace window → hard-stop if it never settles. Otherwise
+ *   the child runs until it finishes or is stopped via AgentControl.
  */
 
 import { interpretEvent } from "./event-interpret.js";
@@ -76,7 +74,6 @@ export interface AgentProcessOptions {
 	 *  Omitted = no limit (the default): the child runs until it finishes,
 	 *  is stopped, or hits an explicit token limit. */
 	timeoutMs?: number;
-	/** Token threshold: at/above this, inject a "wrap up" steer. Omitted = disabled. */
 	/** After an abort, how long to wait for the child to settle before hard-stopping it. */
 	abortSettleGraceMs?: number;
 	/** Streamed assistant text deltas (rpc message_update/text_delta) — for live tool-card output. */
@@ -375,9 +372,9 @@ export class AgentProcess {
 
 	private settle(): void {
 		// Count-based: agent_settled fires when the child's run loop finishes —
-		// a wrap-up steer re-runs the loop and settles again, so each post-
-		// steer/post-abort turn must be awaited (no one-shot latch, D10). The
-		// count also survives settles that arrive while no waiter is attached.
+		// a steer re-runs the loop and settles again, so each post-steer/
+		// post-abort turn must be awaited (no one-shot latch). The count also
+		// survives settles that arrive while no waiter is attached.
 		this.settleCount++;
 		for (const waiter of this.settleWaiters) waiter();
 		this.settleWaiters.clear();

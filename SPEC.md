@@ -25,15 +25,15 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 ### Pi Native
 
 - **一致的调用方式**：参数 schema、命名风格与 pi 内置工具（`bash`、`read` 等）保持一致；`promptSnippet` / `promptGuidelines` 注入系统提示。
-- **一致的输出质感**：渲染复用 pi 原生组件（`Text`、`Container`、`setWidget`、`registerMessageRenderer`），排版、颜色、折叠展开遵循内置工具（bash 工具卡片）的惯例；widget 与内置 working 指示器同一视觉语言（accent spinner 80ms + muted 文本）。
+- **一致的输出质感**：渲染复用 pi 原生组件，排版、颜色、折叠展开遵循内置工具（bash 工具卡片）的惯例；widget 与内置 working 指示器同一视觉语言（accent spinner 80ms + muted 文本）。
 - **一致的视觉家族**：工具卡 `Agent <title>`、通知卡 `Agent ✓ <title>`、总览 `Agents`——不出现 "subagent" 字样、无装饰 emoji（通知卡状态 icon 除外）。
 - **依赖原生能力**：会话存储/attach 走 pi 原生机制（`--session <path>`），不自造会话管理。
 
 ### LLM + Token Friendly
 
-- **Token Economy**：通知的 `content`（LLM 可见）只含最小结构化信息（status / agent_id / result / session_path）；装饰性元素（title、usage、session 路径）放 `details`——源码核实 `convertToLlm` 只转 `content`，`details` 永不进入 LLM 上下文。
-- **纯函数隔热层**：协议序列化/解析（`protocol.ts`）、模型解析（`model.ts`）是无副作用的纯函数，可独立单测。
-- **不轮询**：后台结果由完成通知一次投递，无查询工具（promptGuidelines 写死 "Never poll"）。
+- **Token Economy**：通知的 `content`（LLM 可见）只含最小结构化信息；装饰性元素（title、usage、session 路径）放 `details`——`details` 永不进入 LLM 上下文。
+- **纯函数隔热层**：协议序列化/解析、模型解析是无副作用的纯函数，可独立单测。
+- **不轮询**：后台结果由完成通知一次投递，无查询工具。
 
 ### 提供能力而非方案
 
@@ -55,92 +55,88 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 ### 统一视觉语法
 
-- **内容型**（前台 Agent、通知卡）：`<status icon ✓/✗> + <bold 工具名> + <"title" 引号 bashMode> + <muted 括号 meta（model · Took/Elapsed）>` → 1 空行 → `toolOutput body（prompt 与输出同一流，折叠为尾部预览）` → 1 空行 → `muted footer（仅 session）`。**body/footer 从卡片左边缘起，不对齐 header 文字**（pi bash 卡惯例：空行即分隔）。
-- **控制型**（后台 spawn / steer / stop）：状态行 `[marker] Agent "title" <状态词>`（marker = accent spinner / success ✓ / error ✗），**全阶段包 Box 壳**（pending → success/error 底色）——工具从不显示无壳 spinner，不与 pi 原生 Loader 混淆。状态词是自然语言动词短语（`started` / `starting…`），空格直接连接；**`·` 只用于 meta 列表分隔**，不分割动词短语
-- **统一折叠**：所有卡内容（前台/通知 body、控制卡消息/原因）超过 5 行一律折叠为尾部预览 + `... (N earlier lines, <key> to expand)` 提示，快捷键展开全显——折叠不丢内容（展开可见全部），只限屏幕占用
-- **LLM context 截断保护**（对齐 bash 工具）：进 LLM 的 content 经 truncateTail（尾部 2000 行 / 50KB）截断——截断时卡片在 body 下方显示警告 `[Truncated: showing X of Y lines]`（bytes 变体 `[Truncated: X lines shown (<size> limit)]`），完整输出在 session 文件（卡片 footer 已标 `session: <path>`，警告不重复）；**UI 渲染源（events）不截断**——用户展开看全部，只有 LLM 看到截断版；content 尾部附 `[Full output available in the sub-agent session — use ...read... on session_path to inspect.]` 引导 LLM 排查
-- **title 视觉约定**：任务名始终以**引号包裹、bashMode 色**出现（对齐 bash 卡 `$ cmd` 的命令色）——与工具名 `Agent`（toolTitle bold）区分；widget 里 `Agents` 用 toolTitle bold、title 用 bashMode（与卡片同色系）。
-- **占位/兜底**：`dim` 色 + 括号（如 `(no details)`，对齐 pi bash 卡的 `(no output)`）。
+- **icon 前置**：所有状态标记（spinner / ✓ / ✗ / ■）在行首——与 pi 内置 Loader 一致。
+- **全阶段 Box 壳**：工具任何阶段不出无壳 spinner，pending → success/error 底色全程覆盖。
+- **`·` 只做 meta 分隔**：不分割动词短语；时间归 header meta、footer 仅 session。
+- **内容行从卡片左边缘起**：body/footer 不对齐 header 文字，空行即分隔（pi bash 卡惯例）。
+- **统一折叠**：所有卡内容超 5 视觉行折叠为尾部预览 + `... (N earlier lines, <key> to expand)`（对齐 bash 工具卡的 BASH_PREVIEW_LINES 和 hint 格式）；展开全显。
+- **LLM context 截断保护**：进 LLM 的 content 经 truncateTail（尾部 2000 行 / 50KB）；UI 渲染源（events）不截断——用户展开看全部，只有 LLM 看到截断版。
+- **title 视觉约定**：任务名始终以引号包裹、bashMode 色出现——与工具名 `Agent`（toolTitle bold）区分；widget 里 `Agents` 用 toolTitle bold、title 用 bashMode。
+- **占位/兜底**：dim 色 + 括号（对齐 pi bash 卡的 `(no output)`）。
 
 ### Agent 工具卡片
 
 ```
-✓ Agent "检查 CI 配置" (sonnet · Took 27.5s)   ← header：icon（进行中 spinner / 完成 ✓✗）+ Agent + "title" + meta（model · 时间）
-⠙ Agent "检查 CI 配置" (claude-sonnet · Elapsed 12.3s)  ← 进行中：accent spinner（与 ✓ 同宽，Agent 列恒定）+ Elapsed 动态
-Thinking...                  ← 活动行（思考中：italic + thinkingText，pi 隐藏 thinking 同款）
-bash: pnpm check             ← 活动行（工具调用：工具名 toolTitle + 冒号 + muted 参数）
+✓ Agent "检查 CI 配置" (sonnet · Took 27.5s)
+⠙ Agent "检查 CI 配置" (claude-sonnet · Elapsed 12.3s)
+Thinking...
+bash: pnpm check
 <空行>
-... (12 earlier lines, ctrl+o to expand)   ← 折叠提示（与 bash 工具卡同款；muted + keyHint；被折叠的是流的头部：prompt + 早期输出）
-<子 agent 输出尾部 5 行>          ← 输出（前台流式逐字滚动；折叠时只显示最新尾部，展开全显）
+... (12 earlier lines, ctrl+o to expand)
+<子 agent 输出尾部 5 行>
 <空行>
-session: /path/...jsonl       ← footer 仅 session
+session: /path/...jsonl
 ```
 
-- header：`⠋/✓/✗`（进行中 accent spinner，与 ✓ 同宽故 Agent 列恒定；final 由框架 isError 决定 ✓/✗）+ `Agent`（bold toolTitle）+ `"title"`（bashMode 色，引号同色）+ muted meta `(model · Took/Elapsed X.Xs)`——title 用 bash 命令同款色系，与工具名区分；时间从 state 共享（final 首帧用 Date.now() 兜底，无可见延迟）；`run_in_background` 时 renderCall 返回空（见下）
-- body：**混合活动流**——prompt 在流头，随后按事件顺序渲染子 agent 的会话（像回放 pi 会话）：`Thinking...`（italic thinkingText）、工具调用（toolTitle 名 + muted 参数）、流式文本（toolOutput）；随输出增长 prompt 与早期活动滚出折叠区（terminal-scroll 感，header title 是固定标识）
-- 折叠时整流截为尾部 5 行（`... (N earlier lines, <key> to expand)`——括号包整句、逗号分隔、提示在尾部预览之前，与 bash 工具卡完全一致；N 含被折叠的 prompt/活动/早期输出）；展开全显；折叠/展开经 keyHint 绑定键切换
-- 数据：`details.events`（RenderEvent[]：thinking/tool/text 事件序）——**不进 LLM context**（LLM 看到的是 content text 累积）
-- footer：**仅** `session: <path>`（前台完成时）——时间已在 header meta
-- 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值（`pi.getThinkingLevel()`），经 `--thinking` 传给子进程
-- **后台 spawn 结果卡**（renderResult，Box 壳，原地切换）：
+- header：`⠋/✓/✗` + `Agent` + `"title"` + muted meta——时间从 state 共享；`run_in_background` 时 renderCall 返回空（后台 spawn 用独立结果卡）
+- body：混合活动流——prompt 在流头，随后按事件顺序渲染子 agent 会话（Thinking... / 工具调用 / 流式文本）；随输出增长 prompt 与早期活动滚出折叠区
+- footer：仅 `session: <path>`
+- 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值
+
+**后台 spawn 结果卡**（原地切换）：
 
 ```
-⠋ Agent "检查 CI 配置" starting…        ← 进行中：pending 底卡片 + accent spinner（100ms 帧）
-✓ Agent "检查 CI 配置" started          ← 成功：success 底卡片 + success ✓
-✗ Agent "检查 CI 配置" start failed     ← 失败：error 底卡片 + error ✗
-  Model not found                          ← 原因：dim（空行分隔，卡片左边缘起）
+⠋ Agent "检查 CI 配置" starting…
+✓ Agent "检查 CI 配置" started
+✗ Agent "检查 CI 配置" start failed
+  Model not found
 ```
 
-- 状态一眼可辨（icon 前置），失败原因独立 dim 行**完整显示**（不截断——错误里的模型名/堆栈不能丢），新手读状态不用啃长句
-- 后台 agent id 只进 LLM 的 tool content（`Started background agent a1. …`），卡片上不出现
+- 状态一眼可辨（icon 前置），失败原因完整显示，不截断
+- 后台 agent id 只进 LLM 的 tool content，卡片上不出现
 
-### AgentControl 结果卡（renderShell "self"，Box 壳）
+### AgentControl 结果卡（renderShell "self"）
 
 ```
-✓ Agent "research db schema" steered      ← 成功：success 底卡片
-  重点看 orders 表的索引和慢查询             ← 消息：普通文本（toolOutput，空行分隔，卡片左边缘起）
-  第二行指令也完整显示                      ← 完整多行，不截断
+✓ Agent "research db schema" steered
+  重点看 orders 表的索引和慢查询
 
-⠹ Agent "slow query probe" stopping…      ← stop 进行中：pending 底卡片 + accent spinner
-✓ Agent "slow query probe" stopped        ← stop 完成：success 底卡片
+⠹ Agent "slow query probe" stopping…
+✓ Agent "slow query probe" stopped
 
-✗ Agent "slow query probe" stop failed    ← 失败：error 底卡片
-  agent not found                            ← 原因：dim（空行分隔，卡片左边缘起）
+✗ Agent "slow query probe" stop failed
+  agent not found
 ```
 
-- steer/stop **全阶段都是结果卡**（Box 壳）：pending（进行中 spinner）→ success/error 底色——统一原则：工具任何阶段都不出现无壳 spinner
-- steer 注入的消息以**普通文本**显示在卡片内（toolOutput 色，空行分隔、卡片左边缘起，与其他卡 body 一致）；超 5 行按统一折叠规则折叠（展开快捷键可见全部）——用户看到的与注入子 agent 的内容一致；消息同时进 LLM 的 tool content（compaction 后不丢）
-- 动画帧在**同一行内**切换（spinner 帧 + 状态词），绝不追加新行
-- 错误保持同一形态：`✗ Agent "title" <verb> failed`（error 色）+ dim 原因行；完整错误仍在 LLM content
+- steer 注入的消息以普通文本显示在卡片内，完整多行，超 5 行按统一折叠规则处理
+- 动画帧在同一行内切换，绝不追加新行
+- 错误保持同一形态：状态行 error 色 + dim 原因行
 
-### 完成通知卡片（registerMessageRenderer）
+### 完成通知卡片
 
 ```
 ✓ Agent "检查 CI 配置" (Took 27.5s · 1,250 tokens · 3 tool uses)
 <空行>
-... (3 earlier lines, ctrl+o to expand)      ← 折叠提示（同工具卡；muted + keyHint）
+... (3 earlier lines, ctrl+o to expand)
 Found 5 files handling authentication: src/auth/*.ts …
 <空行>
 session: /path/...jsonl
 ```
 
-- header：**状态 icon 在最前**（`✓` success / `✗` error / `■` warning）+ `Agent` + `"title"`（bashMode）+ muted meta（usage 并入括号）；失败/停止时追加彩色状态词（`failed` error / `stopped` warning，同 bash `(exit N)` 语言）
-- icon 把**完成通知卡**与 **Agent 工具卡**区分开（工具卡无 icon）——背景色不再单独承担状态传达
-- body：结果预览，同一流折叠策略（尾部 5 行 + `... (N earlier lines, <key> to expand)`；展开全显）
-- footer：session 路径
+- header：状态 icon 在最前（✓/✗/■）——与 Agent 工具卡区分（工具卡无 icon）
+- 失败/停止时追加彩色状态词（`failed` error / `stopped` warning）
 - 渲染数据在 `details`，不进 LLM 上下文
 
-### Agents 状态 widget（setWidget，aboveEditor）
+### Agents 状态 widget（aboveEditor）
 
 ```
-（容器级 1 空行，pi 自动）
-  ● Agents                    ← accent ● + toolTitle bold "Agents"（与卡片 Agent 词同色）
-  ⠋ "检查 CI 配置" (42.0s)      ← 运行中：accent spinner + bashMode "title"（与卡片标题同色）+ muted meta (时长)；1 空格左 padding
+  ● Agents
+  ⠋ "检查 CI 配置" (42.0s)
 ```
 
 - 仅跟踪后台 agent（前台已 inline 流式，不重复）
-- **完成/停止立即移除**——完成结果由通知卡（followUp，立即出现）承担，widget 不留冗余确认行
-- 每行下方追加**最新活动摘录**（缩进 3 字符，与标题左对齐）：工具调用（工具名 toolTitle 色 + 冒号 + muted 参数摘要）、`Thinking...`（italic + thinkingText，pi 隐藏 thinking 同款）、或最新正文尾部（muted，截断 60 字符）；数据取自 `message_update` 累积消息的最新 content 部分，不进 LLM context
+- 完成/停止立即移除——完成结果由通知卡承担
+- 每行下方追加最新活动摘录（缩进 3 字符）：工具调用、Thinking...、或最新正文尾部
 
 ## 实现决策
 
@@ -148,94 +144,81 @@ session: /path/...jsonl
 
 ```
 index.ts           — 工具注册（Agent / AgentControl）+ schema + 通知投递
-protocol.ts        — 纯函数 JSONL 协议层（serializeCommand / parseLine）
-rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + pending map + 事件流 + 退出）
-event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数，单测）
+protocol.ts        — 纯函数 JSONL 协议层
+rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + 事件流 + 退出）
+event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数）
 agent-process.ts   — AgentProcess：一个常驻 rpc 子进程的语义封装
-registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 完成策略（测试）
+registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 完成策略
 model.ts           — model spec → resolved model（纯函数）
-render.ts          — TUI 渲染（工具卡 / 通知卡 / 接力卡）
+types.ts           — 共享协议类型（RenderEvent / SubagentDetails / NotificationDetails / Truncation）
+format.ts          — 纯函数格式化工具（SPINNER / formatDuration / safeTitle / activityRow 等）
+render.ts          — TUI 渲染（工具卡 / 控制卡 / 通知卡）
 widget.ts          — Agents 状态 widget
 ```
 
-### RPC 协议（自写薄客户端，方案 II）
+### RPC 协议
 
-- 线格式：JSONL（LF 分隔，与 pi 的 jsonl.js 一致）
-- 命令：`prompt` / `steer` / `abort` / `get_last_assistant_text` / `get_state` / `get_session_stats`（带 id 关联）
-- 响应：`{id, type:"response", command, success, data|error}`
-- 事件：`agent_settled` / `agent_end` / `message_update` 等全事件流
-- 不绑定框架 `RpcClient`（私有 + setTimeout 赌就绪 + SIGTERM→SIGKILL 脏点）
-- 子进程 **detached（独立进程组）**：stop 的 SIGTERM 级联到整棵进程树（pi → bash → sleep），不遗留孤儿孙进程；`kill(-pid, signal)` 失败时回退单进程信号
-- stdout 行缓冲 1MB 上限（病态单行丢弃而非 OOM）、stderr 捕获 64KB 上限（仅退出错误消息用）
+- 线格式：JSONL（LF 分隔，与 pi 的 jsonl.js 一致），命令带 id 关联
+- 子进程 detached（独立进程组）：stop 的 SIGTERM 级联到整棵进程树，不遗留孤儿孙进程
+- 自写薄客户端：不绑定 pi 框架私有 RpcClient
 
 ### 生命周期
 
 ```
-queued → running ──→ completed（通知）／ failed（API 错误/崩溃，通知）／ stopped（超限，通知；AgentControl.stop，无通知）
+queued → running ──→ completed（通知）
+                  ├── failed（API 错误/崩溃，通知）
+                  └── stopped（超限，通知；AgentControl.stop，无通知）
 ```
 
-- **就绪判定**：prompt 命令 preflight 回执（`success:true`）——两道信号之一；`agent_settled` 为完成信号
-- **前台**：spawnAndSend → waitForCompletion（含 graceful limits 循环）→ lastOutput → stdin.end()（优雅退出）；**失败与超限（stopped）都返回 isError 工具结果**（details.error → 红底；超限 stopped 标注 `(stopped — reached the task time/token limit; the output above is partial)`，用户主动 cancel 的 stopped 仅标 `Sub-agent stopped.`，不嫁祸超限）
-- **后台**：spawnAndSend 后立即返回 agent_id；waitForCompletion resolve 后投递通知 → stdin.end() 退出
-- **steer**：写 `steer` 命令（turn 结束后注入，排队语义）；仅 running 期间有效；子进程在 steer 途中死掉/结束时返回结构化失败（status line + dim 原因），不裸 throw
-- **stop**：stdin.end() 优雅退出，5s 未退 SIGTERM 兜底；`stoppedByControl` 抑制通知；对已结束的 agent 报 `already finished`（不谎报 "Stopped"）
-- **异常**：agent_end `stopReason:"error"` → failed（错误信息进输出）；子进程非零退出 → failed；RPC stdin 关闭竞态（write-after-end）→ 结构化 reject（details 带 action/title，保留状态行形态）
+- **就绪判定**：prompt 命令 preflight 回执
+- **steer**：turn 结束后注入，排队语义；仅 running 期间有效
+- **stop**：stdin EOF 优雅退出，`stoppedByControl` 抑制通知
+- **失败与超限都返回 isError 工具结果**，与 bash 的 `exit N` / `(cancelled)` 对齐
 
 ### 完成通知
 
-- `pi.sendMessage({customType:"subagent-notification", content: <JSON>, display:true, details}, {deliverAs:"followUp", triggerTurn:true})`
-- content：`{status, agent_id, result, session_path}`（LLM 一次拿全）
-- details：`{title, result, usage, sessionPath, sessionId}`（卡片渲染，不进 LLM）
-- 一次投递、无重试、无查询工具
-- **spawn 失败不投递通知**（原 D15 双通道）：isError 工具结果已把失败交给 LLM、状态行/结果卡展示给用户——followUp 通知会重复同一失败两次（LLM 收到两份 + 用户看到两个失败卡）
+- `pi.sendMessage` → `deliverAs: "followUp"` + `triggerTurn: true`
+- content：`{status, agent_id, result, session_path}`（LLM 可见）
+- details：渲染数据，不进 LLM 上下文
+- spawn 失败不投递通知：isError 工具结果已经同时告知 LLM 和用户，followUp 通知会重复
 
-### Graceful turn limits（默认不限，显式传才启用）
+### Graceful turn limits
 
-- 对齐 Codex/CC 的克制姿态：**Pi 扩展不默认施加隐藏 deadline**——唯一的任务级限制是 `timeoutMs`（可选正整数，毫秒，Codex 的 `timeout_ms` 同风格），未传 = 无限制（子 agent 跑到完成、被 stop 为止）
-- `timeoutMs` 生效：总时长 ≥ timeoutMs → `abort` 命令 → grace 窗口观察 settled → stdin.end() 兜底（三段式）
-- token 无任何限制（不设 wrap-up / 硬限——不做这类干预）；`get_session_stats` 仅用于通知卡统计
-- 限制触发的 stopped：**产出不回传**（stopped 时子进程已死，`get_last_assistant_text` 查询必然失败；完整产出已在 session 文件里，无需单独保存）
+- **默认不限**——对齐 Codex/CC 的克制姿态。唯一限制是可选 `timeoutMs`（毫秒），未传 = 无限制
+- token 无任何限制；`get_session_stats` 仅用于通知卡统计
 
 ### 会话存储
 
-- 目录：`<agentDir>/subagent-sessions`（默认 `~/.pi/agent/subagent-sessions/`；`PI_SUBAGENT_SESSION_DIR` 覆盖；尊重 `PI_CODING_AGENT_DIR`）
-- 刻意在 pi 标准会话树之外——`pi -r` 保持干净；主会话（工具卡 + 通知卡携带 session path）作为索引
-- 文件命名与 pi 一致（`{timestamp}_{sessionId}.jsonl`），永不删除
-- `--name` 仅当显式提供 title 时传（否则跟随 pi 默认：firstMessage）
-- attach：`pi --session <path>`（resolveSessionPath 支持文件路径）
+- 目录在 pi 标准会话树之外——`pi -r` 保持干净；永不删除
+- `--name` 仅当显式提供 title 时传（否则跟随 pi 默认）
+- attach：`pi --session <path>`
 
 ### 嵌套
 
-子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth；agent_id 用随机 UUID 全局唯一。
+子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。
 
 ### 上游限制：isError 被丢弃（workaround）
 
-- **现象**：扩展工具 `execute()` 返回 `{ isError: true }` 时，TUI 卡片仍显示成功背景（toolSuccessBg），与 bash 失败（toolErrorBg 淡红底）不一致。
-- **根因**：pi-agent-core 的 `executePreparedToolCall` 在工具正常返回时硬编码 `return { result, isError: false }`——只有 **throw** 异常（走 catch 分支）才能拿到 `isError: true`。该行为自 2025-09-09 引入（`98a876f3a0`，pi-ai 0.5.31），历经重构未变；上游 issue **#5209**（“Custom tools always rendered as success…”）被维护者拒绝（“throw an error to signal an error as per the documentation”），main 分支（0.83.0）未修复，预期不会修复。
-- **workaround**：① 所有错误路径的 `details` 带 `error` 字段；② 注册 `pi.on("tool_result")` hook，检测自家工具（Agent/AgentControl）的 `details.error` → 返回 `{ isError: true }`。该 hook 走的是 agent-loop `afterToolCall` 的**官方覆盖通道**（`isError = afterResult.isError ?? isError`），既修正 isError（→ toolErrorBg 红底）又保留 details（状态行不丢）；官方推荐的 throw 方式会清空 details，故不采用。
-- **局限**：hook 拿到的 `event.isError` 已是丢弃后的 false，故必须以 details.error 为判据（不能看 event.isError）。
-
-### 状态行双渲染修复（updateDisplay 重入）
-
-- **现象**：steer 状态行 + quote 渲染两组（同一个 toolCallId）。
-- **根因**：`renderAgentControlResult` 的 title carry-back（`context.state.title` 写回 + `context.invalidate()`）在渲染期间同步触发 `ToolExecutionComponent.updateDisplay()` **重入**——重入先 clear 并重建 children，返回后第一次的 `addChild` 才执行，旧 resultContainer 被追加 → selfRenderContainer 含两份内容。
-- **修复**：carry-back 是为旧版 header（`Agent steer <title>`）传 title 用的，header 改为空后已无用——直接删除，并清理 `TimerState.title`。
-- **启示**：renderResult/renderCall 内不得同步调用 `context.invalidate()`（会重入 updateDisplay）；动画间隔由 `context.invalidate` 的 interval 驱动（在渲染函数外）。
+- **现象**：扩展工具 `execute()` 返回 `{ isError: true }` 时，TUI 卡片仍显示成功背景。
+- **根因**：pi-agent-core 的 `executePreparedToolCall` 在工具正常返回时硬编码 `isError: false`——只有 throw 异常才能拿到 `isError: true`。该行为自 2025-09-09 引入，上游 issue **#5209** 被维护者拒绝，预期不会修复。
+- **workaround**：所有错误路径的 `details` 带 `error` 字段；注册 `pi.on("tool_result")` hook 检测 `details.error` → 返回 `{ isError: true }`。该 hook 走 `afterToolCall` 的官方覆盖通道，既修正 isError 又保留 details；官方推荐的 throw 方式会清空 details，故不采用。
 
 ## 开发约束
 
-- 所有 UI 渲染使用 pi 原生组件（`Text`、`Container`、`setWidget`、`registerMessageRenderer`），不引入第三方 UI 库。
+- 不引入第三方 UI 库。
 - 参数枚举用 `StringEnum`（Gemini 兼容）。
 
 ## 测试决策
 
-- 纯函数全面单测：`protocol.ts`（序列化/解析）、`model.ts`（模型解析）。
-- 状态化语义经 seam 测试：`agent-process.ts` 通过 `createClient` 注入 fake，确定性驱动状态机（完成 / wrap-up / 硬中止 / API 错误 / stop / onDelta）。
-- 基础设施不测：真实 spawn / rpc 传输（依赖外部进程），以 E2E 冒烟验证（`pi -p` 真实调用）。
+- 纯函数全面单测：`protocol.ts`、`model.ts`、`event-interpret.ts`
+- 状态化语义经 seam 测试：`agent-process.ts`（createClient 注入 fake）、`rpc-client.ts`（命令关联 + UTF-8）、`registry.ts`（生命周期 + 完成策略）
+- 渲染语义测试：`render.ts` 通过 mock details 驱动纯渲染输出
+- LLM context 截断：`truncateForContext` 直接单测
+- 基础设施不测：真实 spawn / rpc 传输，以 E2E 冒烟验证
 
 ## 不在此范围
 
-- **预定义 agent 类型系统**：不定义预设 agent 人格/类型文件；agent 由调用者参数完全定义。
+- **预定义 agent 类型系统**：agent 由调用者参数完全定义。
 - **schedule / 定时任务**。
 - **worktree 隔离**。
 - **fleet view / conversation viewer**：不渲染子对话流；attach 走 pi 原生 `--session <path>`。
