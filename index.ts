@@ -266,7 +266,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
 		promptGuidelines: [
 			"Use Agent when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
-			"Use Agent for independent parallel work: spawn several with run_in_background: true — each completion notification carries its own result.",
+			"Use Agent for independent parallel work: several foreground calls already run in parallel. Reserve run_in_background: true for when you need to keep working or reply to the user while the sub-agent runs.",
 			"Write Agent prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
 			"Never poll a background Agent — its completion notification carries the result.",
 		],
