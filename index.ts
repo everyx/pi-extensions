@@ -144,12 +144,13 @@ const AgentControlParamsSchema = Type.Object({
 
 function toErrorResult(err: unknown): {
 	content: { type: "text"; text: string }[];
-	details: Record<string, never>;
+	details: Record<string, unknown>;
 	isError: true;
 } {
+	const message = err instanceof Error ? err.message : String(err);
 	return {
-		content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-		details: {},
+		content: [{ type: "text", text: message }],
+		details: { error: message },
 		isError: true,
 	};
 }
@@ -192,6 +193,19 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 // ─── Default export (pi extension entry) ───────────────────────
 
 export default function (pi: ExtensionAPI) {
+	// pi's agent-core drops the execute() isError flag when a tool returns
+	// normally (bash gets its error background by throwing instead) — see
+	// agent-core executePreparedToolCall. Re-attach it for our tools by
+	// marking every error path in `details.error`; the handler restores
+	// isError so failed Agent/AgentControl calls render with toolErrorBg
+	// like bash, while keeping the details (status line) intact.
+	pi.on("tool_result", async (event) => {
+		if (event.toolName !== "Agent" && event.toolName !== "AgentControl") return undefined;
+		const details = event.details as { error?: unknown } | undefined;
+		if (!details || details.error === undefined) return undefined;
+		return { isError: true };
+	});
+
 	// One registry per session: owns the running-agent bookkeeping and the
 	// completion policy (notify unless user-stopped; cleanup on every path).
 	const registry = new AgentRegistry({
@@ -226,12 +240,24 @@ export default function (pi: ExtensionAPI) {
 			const params = raw as AgentParams;
 			const task = params.prompt?.trim();
 			if (!task) {
-				return { content: [{ type: "text", text: "`prompt` is required." }], details: {}, isError: true };
+				return {
+					content: [{ type: "text", text: "`prompt` is required." }],
+					details: { error: "`prompt` is required." },
+					isError: true,
+				};
 			}
 
 			const resolved = resolveModel(ctx.modelRegistry, ctx.model, params.model);
 			if (resolved.error) {
-				return { content: [{ type: "text", text: resolved.error }], details: {}, isError: true };
+				// Background: render as the status line `Agent <title> · start failed:
+				// <reason>` (the id never exists yet — spawn didn't happen).
+				return {
+					content: [{ type: "text", text: resolved.error }],
+					details: params.run_in_background
+						? { runInBackground: true, title: params.title, error: resolved.error }
+						: { error: resolved.error },
+					isError: true,
+				};
 			}
 
 			const startedAt = Date.now();
@@ -279,6 +305,15 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			try {
+				// Background: show the starting spinner line while the child spawns.
+				// (Foreground keeps the tool header `Agent <title> (model)`.)
+				if (params.run_in_background) {
+					onUpdate?.({
+						content: [{ type: "text", text: `Starting ${agent.title}\u2026` }],
+						details: { runInBackground: true, title: agent.title },
+					});
+				}
+
 				const started = await agent.spawnAndSend(task);
 
 				// ── Background: return agent_id now, notify on completion ──
@@ -295,7 +330,7 @@ export default function (pi: ExtensionAPI) {
 						});
 						return {
 							content: [{ type: "text", text: started.error }],
-							details: {},
+							details: { runInBackground: true, title: agent.title, error: started.error },
 							isError: true,
 						};
 					}
@@ -311,7 +346,7 @@ export default function (pi: ExtensionAPI) {
 
 					onUpdate?.({
 						content: [{ type: "text", text: `Started ${agent.title} (background)` }],
-						details: { agentId: agent.agentId, runInBackground: true, startedAt },
+						details: { agentId: agent.agentId, runInBackground: true, title: agent.title, startedAt },
 					});
 					return {
 						content: [
@@ -320,7 +355,7 @@ export default function (pi: ExtensionAPI) {
 								text: `Started background agent ${agent.agentId}. Completion arrives as a notification.`,
 							},
 						],
-						details: { agentId: agent.agentId, runInBackground: true, startedAt },
+						details: { agentId: agent.agentId, runInBackground: true, title: agent.title, startedAt },
 					};
 				}
 
@@ -329,7 +364,7 @@ export default function (pi: ExtensionAPI) {
 					await agent.stop().catch(() => {});
 					return {
 						content: [{ type: "text", text: started.error }],
-						details: {},
+						details: { error: started.error },
 						isError: true,
 					};
 				}
@@ -386,8 +421,11 @@ export default function (pi: ExtensionAPI) {
 			'Use AgentControl with action "stop" when a background agent is consuming tokens on a wrong path — stop it and respawn with a corrected prompt.',
 		],
 		parameters: AgentControlParamsSchema,
+		// Status lines, not cards: steer/stop render bare working-style lines
+		// (no Box shell) — same visual language as pi's Loader.
+		renderShell: "self",
 
-		async execute(_toolCallId, raw) {
+		async execute(_toolCallId, raw, _signal, onUpdate) {
 			const params = raw as AgentControlParams;
 			// The registry stores full AgentProcess objects — the narrow
 			// RegisteredAgent surface is the seam; steer needs the whole child.
@@ -396,7 +434,10 @@ export default function (pi: ExtensionAPI) {
 			if (!agent) {
 				return {
 					content: [{ type: "text", text: `Agent ${params.agent_id} not found or already finished.` }],
-					details: {},
+					details: {
+						action: params.action,
+						error: `agent ${params.agent_id} not found or already finished`,
+					},
 					isError: true,
 				};
 			}
@@ -405,12 +446,18 @@ export default function (pi: ExtensionAPI) {
 			if (params.action !== "steer" && params.action !== "stop") {
 				return {
 					content: [{ type: "text", text: 'action must be "steer" or "stop".' }],
-					details: {},
+					details: { error: 'action must be "steer" or "stop".' },
 					isError: true,
 				};
 			}
 
 			if (params.action === "stop") {
+				// Partial update first — drives the `⠋ Agent <title> · stopping…`
+				// spinner line while the child is being stopped.
+				onUpdate?.({
+					content: [{ type: "text", text: `Stopping ${agent.title}\u2026` }],
+					details: { action: "stop", title: agent.title },
+				});
 				await registry.stopAndRemove(params.agent_id);
 				return {
 					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
@@ -423,7 +470,11 @@ export default function (pi: ExtensionAPI) {
 			if (!message) {
 				return {
 					content: [{ type: "text", text: '`message` is required when action is "steer".' }],
-					details: {},
+					details: {
+						action: "steer",
+						title: agent.title,
+						error: '`message` is required when action is "steer".',
+					},
 					isError: true,
 				};
 			}
@@ -435,14 +486,20 @@ export default function (pi: ExtensionAPI) {
 							text: `Agent ${params.agent_id} is not running (status: ${agent.status}).`,
 						},
 					],
-					details: {},
+					details: {
+						action: "steer",
+						title: agent.title,
+						error: `not running (status: ${agent.status})`,
+					},
 					isError: true,
 				};
 			}
 
 			await agent.steer(message);
 			return {
-				content: [{ type: "text", text: `Steered agent ${params.agent_id}.` }],
+				// The injected message rides in the tool content so the LLM keeps
+				// it across compaction; the user sees it as the quote line on the card.
+				content: [{ type: "text", text: `Steered agent ${params.agent_id}: "${message}".` }],
 				details: { agentId: agent.agentId, action: "steer", title: agent.title, message },
 			};
 		},
