@@ -36,6 +36,7 @@ import {
 	renderAgentControlResult,
 	renderAgentResult,
 	renderNotification,
+	safeTitle,
 } from "./render.js";
 import { AgentWidget } from "./widget.js";
 
@@ -123,6 +124,16 @@ const AgentParamsSchema = Type.Object({
 			description:
 				"If true, return an agent_id immediately and notify you on completion — you can " +
 				"keep working meanwhile. If false (default), block until the result is ready.",
+		}),
+	),
+	timeoutMs: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			description:
+				"Optional wall-clock deadline for the whole task, in milliseconds. Omit for no " +
+				"time limit (the default — the child runs until it finishes or is stopped). " +
+				"Pass a value when you want to bound a risky/looping task; on expiry the agent is " +
+				"stopped and the call reports stopped.",
 		}),
 	),
 });
@@ -249,7 +260,7 @@ export default function (pi: ExtensionAPI) {
 
 			const resolved = resolveModel(ctx.modelRegistry, ctx.model, params.model);
 			if (resolved.error) {
-				// Background: render as the status line `Agent <title> · start failed:
+				// Background: render as the status line `Agent <title> start failed:
 				// <reason>` (the id never exists yet — spawn didn't happen).
 				return {
 					content: [{ type: "text", text: resolved.error }],
@@ -261,8 +272,10 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const startedAt = Date.now();
-			// Widget label: the (required) title, truncated defensively.
-			const sessionName = params.title.slice(0, 80);
+			// Widget label + session name: the (required) title, rendered safe
+			// (flattened, quote-neutral, capped) — same treatment as every other
+			// surface the title appears on.
+			const sessionName = safeTitle(params.title);
 
 			// Foreground: stream assistant deltas into the tool card (live output).
 			let streamed = "";
@@ -275,6 +288,7 @@ export default function (pi: ExtensionAPI) {
 				title: params.title,
 				sessionName,
 				sessionDir: SUBAGENT_SESSION_DIR,
+				timeoutMs: params.timeoutMs,
 				onDelta: (delta) => {
 					if (params.run_in_background) return; // widget + notification cover background
 					streamed += delta;
@@ -366,6 +380,7 @@ export default function (pi: ExtensionAPI) {
 				// ── Foreground: block until completion ──
 				if (!started.ok) {
 					await agent.stop().catch(() => {});
+					signal?.removeEventListener("abort", onAbort);
 					return {
 						content: [{ type: "text", text: started.error }],
 						details: { error: started.error },
@@ -437,8 +452,8 @@ export default function (pi: ExtensionAPI) {
 			'Use AgentControl with action "stop" when a background agent is consuming tokens on a wrong path — stop it and respawn with a corrected prompt.',
 		],
 		parameters: AgentControlParamsSchema,
-		// Status lines, not cards: steer/stop render bare working-style lines
-		// (no Box shell) — same visual language as pi's Loader.
+		// Final results are cards (Box shell); only the running phase stays
+		// bare — same visual language as pi's Loader.
 		renderShell: "self",
 
 		async execute(_toolCallId, raw, _signal, onUpdate) {
@@ -468,7 +483,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (params.action === "stop") {
-				// Partial update first — drives the `⠋ Agent <title> · stopping…`
+				// Partial update first — drives the `⠋ Agent <title> stopping…`
 				// spinner line while the child is being stopped.
 				onUpdate?.({
 					content: [{ type: "text", text: `Stopping ${agent.title}\u2026` }],

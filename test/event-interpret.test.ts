@@ -160,6 +160,18 @@ describe("interpretEvent — agent_end", () => {
 		};
 		assert.deepEqual(interpretEvent(raw), []);
 	});
+
+	it("ignores agent_end that pi will transparently retry (willRetry)", () => {
+		// The first agent_end of a retried turn carries the error AND willRetry:
+		// true — it is not a failure, the final agent_end decides. Skipping it
+		// keeps the stale error out of agentError (which has no reset path).
+		const raw = {
+			type: "agent_end",
+			willRetry: true,
+			messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "429 Rate limited" }],
+		};
+		assert.deepEqual(interpretEvent(raw), []);
+	});
 });
 
 describe("interpretEvent — unknown events", () => {

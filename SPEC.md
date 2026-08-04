@@ -56,7 +56,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 ### 统一视觉语法
 
 - **内容型**（前台 Agent、通知卡）：`<status icon?> + <bold 工具名> + <"title" 引号 bashMode> + <muted 括号 meta>` → 1 空行 → `toolOutput body（prompt 与输出同一流，折叠为尾部预览）` → 1 空行 → `muted footer`。
-- **控制型**（后台 spawn / steer / stop）：单行状态行 `[marker] Agent "title" · <状态词>`（marker = accent spinner / success ✓ / error ✗，原地切换不追加新行），颜色与卡片 header 同构。
+- **控制型**（后台 spawn / steer / stop）：单行状态行 `[marker] Agent "title" <状态词>`（marker = accent spinner / success ✓ / error ✗，原地切换不追加新行），颜色与卡片 header 同构。状态词是自然语言动词短语（`started` / `starting…`），空格直接连接；**`·` 只用于数据分隔**（widget 计时、通知卡 meta 列表），不分割动词短语
 - **title 视觉约定**：任务名始终以**引号包裹、bashMode 色**出现（对齐 bash 卡 `$ cmd` 的命令色）——与工具名 `Agent`（toolTitle bold）区分；widget 状态区里 title 保持 muted（避免与 accent spinner 撞色）。
 - **占位/兜底**：`dim` 色 + 括号（如 `(no details)`，对齐 pi bash 卡的 `(no output)`）。
 
@@ -79,35 +79,36 @@ session: /path/...jsonl
 - body：prompt 与输出**同一流**——prompt 在流头、header 的 title 承担固定标识，折叠时整流截为尾部 5 行（`... N earlier lines (<key> to expand)`，N 含被折叠的 prompt 与早期输出）；展开全显（prompt 在顶部随滚动流逝）；折叠/展开经 keyHint 绑定键切换
 - footer：`Took/Elapsed X.Xs`（muted）+ `session: <path>`（前台完成时）
 - 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值（`pi.getThinkingLevel()`），经 `--thinking` 传给子进程
-- **后台 spawn 状态行**（renderResult，壳内单行，原地切换）：
+- **后台 spawn 结果卡**（renderResult，Box 壳，原地切换）：
 
 ```
-⠋ Agent "检查 CI 配置" · starting…        ← 进行中：accent spinner（100ms 帧）
-✓ Agent "检查 CI 配置" · started          ← 成功：success ✓ + muted 状态词
-✗ Agent "检查 CI 配置" · start failed     ← 失败：error ✗ + error 状态词
+⠋ Agent "检查 CI 配置" starting…        ← 进行中：accent spinner（100ms 帧）
+✓ Agent "检查 CI 配置" started          ← 成功：success ✓ + muted 状态词
+✗ Agent "检查 CI 配置" start failed     ← 失败：error ✗ + error 状态词
   Model not found                          ← 原因：dim 第二行（缩进对齐）
 ```
 
-- 状态一眼可辨（icon 前置），失败原因独立 dim 行弱化——新手读状态不用啃长句
+- 状态一眼可辨（icon 前置），失败原因独立 dim 行**完整显示**（不截断——错误里的模型名/堆栈不能丢），新手读状态不用啃长句
 - 后台 agent id 只进 LLM 的 tool content（`Started background agent a1. …`），卡片上不出现
 
-### AgentControl 状态行（renderShell "self"，无卡片壳）
+### AgentControl 结果卡（renderShell "self"，Box 壳）
 
 ```
-✓ Agent "research db schema" · steered      ← 成功：success ✓ + muted 状态词
+✓ Agent "research db schema" steered      ← 成功：success ✓ + muted 状态词
 │ 重点看 orders 表的索引和慢查询             ← 消息行：pi 原生 markdown quote（│ mdQuoteBorder + italic mdQuote）
+│ 第二行指令也完整显示                      ← **完整多行**（逐行 quote 前缀，不截断首行）
 
-⠹ Agent "slow query probe" · stopping…      ← stop 进行中：accent spinner（原地动画）
-✓ Agent "slow query probe" · stopped        ← stop 完成：success ✓ + muted
+⠹ Agent "slow query probe" stopping…      ← stop 进行中：accent spinner（原地动画）
+✓ Agent "slow query probe" stopped        ← stop 完成：success ✓ + muted
 
-✗ Agent "slow query probe" · stop failed    ← 失败：error ✗ + error 状态词
+✗ Agent "slow query probe" stop failed    ← 失败：error ✗ + error 状态词
   agent not found                            ← 原因：dim 第二行
 ```
 
-- steer/stop 是**瞬时控制操作**，渲染为单行状态行（无 Box 壳，贴 pi working 指示器），标题格式与卡片 header 同构（`Agent` toolTitle bold + `"title"` bashMode + marker/状态词）
-- steer 注入的消息以 markdown quote 显示在状态行下——tool call 参数不展示给用户，卡上是用户唯一可见的消息层；消息同时进 LLM 的 tool content（compaction 后不丢）
+- steer/stop 的**完成态是结果卡**（Box 壳，success/error 底色同通知卡）：状态行元素原样进卡片；**进行中**（spinner）保持无壳（贴 pi working 指示器/Loader）——统一原则：完成态全部卡片，进行中无壳动画
+- steer 注入的消息以 markdown quote **完整多行**显示在卡片内（逐行 `> ` 前缀，不截断）——用户看到的与注入子 agent 的内容一致；消息同时进 LLM 的 tool content（compaction 后不丢）
 - 动画帧在**同一行内**切换（spinner 帧 + 状态词），绝不追加新行
-- 错误保持同一形态：`✗ Agent "title" · <verb> failed`（error 色）+ dim 原因行；完整错误仍在 LLM content
+- 错误保持同一形态：`✗ Agent "title" <verb> failed`（error 色）+ dim 原因行；完整错误仍在 LLM content
 
 ### 完成通知卡片（registerMessageRenderer）
 
@@ -184,11 +185,14 @@ queued → running ──→ completed（通知）／ failed（API 错误/崩溃
 - content：`{status, agent_id, result, session_path}`（LLM 一次拿全）
 - details：`{title, result, usage, sessionPath, sessionId}`（卡片渲染，不进 LLM）
 - 一次投递、无重试、无查询工具
-- **spawn 失败不投递通知**（原 D15 双通道）：isError 工具结果已把失败交给 LLM、状态行展示给用户——followUp 通知会重复同一失败两次（LLM 收到两份 + 用户看到两个失败卡）
+- **spawn 失败不投递通知**（原 D15 双通道）：isError 工具结果已把失败交给 LLM、状态行/结果卡展示给用户——followUp 通知会重复同一失败两次（LLM 收到两份 + 用户看到两个失败卡）
 
-### Graceful turn limits
+### Graceful turn limits（默认不限，显式传才启用）
 
-- 每轮 settled 后查 `get_session_stats`：≥400k tokens → steer "wrap up"；≥500k tokens 或总时长 ≥600s → `abort` 命令 → 观察 settled → stdin.end() 兜底（三段式）
+- 对齐 Codex/CC 的克制姿态：**Pi 扩展不默认施加隐藏 deadline**——唯一的任务级限制是 `timeoutMs`（可选正整数，毫秒，Codex 的 `timeout_ms` 同风格），未传 = 无限制（子 agent 跑到完成、被 stop 为止）
+- `timeoutMs` 生效：总时长 ≥ timeoutMs → `abort` 命令 → grace 窗口观察 settled → stdin.end() 兜底（三段式）
+- token 无任何限制（不设 wrap-up / 硬限——不做这类干预）；`get_session_stats` 仅用于通知卡统计
+- 限制触发的 stopped：**产出不回传**（stopped 时子进程已死，`get_last_assistant_text` 查询必然失败；完整产出已在 session 文件里，无需单独保存）
 
 ### 会话存储
 

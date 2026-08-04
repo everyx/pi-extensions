@@ -43,6 +43,8 @@ export interface AgentParams {
 	thinking?: string;
 	tools?: string[];
 	run_in_background?: boolean;
+	/** Wall-clock limit for the whole task (ms). Omitted = no limit (the default). */
+	timeoutMs?: number;
 }
 
 export interface AgentControlParams {
@@ -191,8 +193,11 @@ function dimOneLiner(text: string | undefined, theme: Theme): Text {
 }
 
 /**
- * One-line agent status: `[marker] Agent "title" · <state>` — the shared shape
- * for background-start / steer / stop lines. `Agent` keeps the tool-card
+ * One-line agent status: `[marker] Agent "title" <state>` — the shared shape
+ * for background-start / steer / stop lines. The state is a natural-language
+ * verb phrase ("started", "starting…") joined with a plain space — the
+ * `·` separator is reserved for data (widget elapsed time, notification meta)
+ * so it never splits a phrase. `Agent` keeps the tool-card
  * header style (toolTitle bold); the quoted title uses bashMode like the
  * bash card's `$ cmd`. The marker is a status icon (accent spinner while
  * running / success ✓ / error ✗) so the state reads at a glance. Failure
@@ -213,7 +218,7 @@ function statusLine(
 				? theme.fg("error", "\u2717")
 				: theme.fg("success", "\u2713");
 	if (phase === "failed") {
-		return `${marker} ${agent} ${theme.fg("error", `\u00b7 ${verb} failed`)}`;
+		return `${marker} ${agent} ${theme.fg("error", `${verb} failed`)}`;
 	}
 	const state =
 		phase === "running"
@@ -227,7 +232,7 @@ function statusLine(
 					: verb === "steer"
 						? "steered"
 						: "finished";
-	return `${marker} ${agent} ${theme.fg("muted", `\u00b7 ${state}`)}`;
+	return `${marker} ${agent} ${theme.fg("muted", state)}`;
 }
 
 /**
@@ -293,9 +298,10 @@ export function renderAgentResult(
 	const details = result.details;
 	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
-	// Background spawn: a single status line — starting… → started, or
-	// `start failed: <reason>`. The agent id stays in the tool content (the
-	// LLM's AgentControl handle); users only ever see the title.
+	// Background spawn: `starting…` spinner (bare, Loader style) → a small
+	// result card (`✓ started` / `✗ start failed` + dim reason). The agent id
+	// stays in the tool content (the LLM's AgentControl handle); users only
+	// ever see the title.
 	if (details?.runInBackground && !details.task) {
 		const state = context.state;
 		if (isPartial && !details.error) {
@@ -311,15 +317,15 @@ export function renderAgentResult(
 			state.interval = undefined;
 		}
 		if (details.error) {
-			// Dim reason line, indented +1 past the status line (the card Box
-			// shell supplies the base padding — same relative indent as the
-			// control status lines in renderAgentControlResult).
-			const cmp = new Container();
+			const cmp = new Box(1, 1, (t: string) => theme.bg("toolErrorBg", t));
 			cmp.addChild(new Text(statusLine(details.title, "start", "failed", theme), 0, 0));
-			cmp.addChild(new Text(theme.fg("dim", truncateTail(details.error, 80)), 1, 0));
+			// Full reason, never truncated — wraps inside the card instead.
+			cmp.addChild(new Text(theme.fg("dim", details.error), 1, 0));
 			return cmp;
 		}
-		return new Text(statusLine(details.title, "start", "done", theme), 0, 0);
+		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
+		cmp.addChild(new Text(statusLine(details.title, "start", "done", theme), 0, 0));
+		return cmp;
 	}
 
 	// Control ack / bare error — dim one-liner.
@@ -377,15 +383,15 @@ export interface AgentControlDetails {
 	title?: string;
 	/** The injected steer message (card body input). */
 	message?: string;
-	/** Failure reason — rendered as `· <verb> failed: <reason>` on the status line. */
+	/** Failure reason — rendered as `<verb> failed: <reason>` on the status line. */
 	error?: string;
 }
 
 /**
- * Steer/stop render as single status lines (no card shell — renderShell
- * "self"): `Agent <title> · steered` + the injected message as a pi-native
- * markdown quote; stop animates `⠋ Agent <title> · stopping…` → `Agent
- * <title> · stopped`. Errors keep the same line shape with the error color.
+ * Steer/stop render as small result cards (Box shell, success/error
+ * background); only the running phases stay bare — spinner + `Agent
+ * <title> stopping…` → `Agent <title> stopped`. Errors keep the same line
+ * shape with the error color, plus a dim reason line inside the card.
  */
 export function renderAgentControlResult(
 	result: { details?: AgentControlDetails; content: { type: string; text?: string }[] },
@@ -400,52 +406,65 @@ export function renderAgentControlResult(
 
 	const verb = d?.action === "steer" ? "steer" : d?.action === "stop" ? "stop" : "control";
 
-	// Errors keep the status-line shape: `✗ Agent "title" · <verb> failed` with
-	// the reason as a dim second line (kept out of the state line so new users
-	// can read the state at a glance). renderShell "self" has no Box, so the
-	// lines carry their own left padding and a bottom Spacer (Box paddingY
-	// parity).
+	// Final results are small cards (Box shell, error/success background like
+	// the notification card); only the running phases stay bare (spinner,
+	// Loader style). Errors keep the status-line shape: `✗ Agent "title"
+	// <verb> failed` with the reason as a dim second line (kept out of the
+	// state line so new users can read the state at a glance).
 	if (d?.error) {
-		const cmp = new Container();
-		cmp.addChild(new Text(statusLine(d.title, verb, "failed", theme), 1, 0));
-		cmp.addChild(new Text(theme.fg("dim", truncateTail(d.error, 80)), 2, 0));
-		cmp.addChild(new Spacer(1));
+		// A stop that failed mid-animation must stop the spinner: the partial
+		// stop frame started a 100ms interval that would otherwise invalidate
+		// the display forever.
+		const state = context.state;
+		if (state.interval) {
+			clearInterval(state.interval);
+			state.interval = undefined;
+		}
+		const cmp = new Box(1, 1, (t: string) => theme.bg("toolErrorBg", t));
+		cmp.addChild(new Text(statusLine(d.title, verb, "failed", theme), 0, 0));
+		// Full error, never truncated — a truncated reason hides the very
+		// detail the user needs (e.g. the offending model name). Wraps across
+		// lines inside the card instead.
+		cmp.addChild(new Text(theme.fg("dim", d.error), 1, 0));
 		return cmp;
 	}
 
 	// Steer: status line + the injected message as a pi-native markdown quote.
 	if (d?.action === "steer" && d.message) {
-		const cmp = new Container();
-		cmp.addChild(new Text(statusLine(d.title, "steer", "done", theme), 1, 0));
-		const first = d.message.trim().split(/\n/)[0];
-		const line = first.length > 60 ? `${first.slice(0, 57)}\u2026` : first;
-		if (line) {
-			cmp.addChild(new Markdown(`> ${line}`, 1, 0, getMarkdownTheme()));
-		}
-		cmp.addChild(new Spacer(1));
+		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
+		cmp.addChild(new Text(statusLine(d.title, "steer", "done", theme), 0, 0));
+		// The full message, quoted line-by-line — steer instructions must be
+		// readable in full, not clipped to a first-line preview.
+		const quoted = d.message
+			.trim()
+			.split(/\r?\n/)
+			.map((l) => `> ${l}`)
+			.join("\n");
+		cmp.addChild(new Markdown(quoted, 0, 0, getMarkdownTheme()));
 		return cmp;
 	}
 
-	// Stop: spinner while stopping, then a single completed line.
+	// Stop: spinner while stopping, then a single completed card.
 	if (d?.action === "stop") {
 		const state = context.state;
-		const cmp = new Container();
 		if (isPartial) {
-			// Working-indicator style: spinner + "Agent <title> · stopping…"
+			// Working-indicator style: bare spinner + "Agent <title> stopping…"
 			// (same accent spinner / cadence as pi's Loader).
+			const cmp = new Container();
 			if (state.frame === undefined) state.frame = 0;
 			if (!state.interval) state.interval = setInterval(() => context.invalidate(), 100);
 			const spinner = SPINNER[state.frame % SPINNER.length];
 			state.frame++;
 			cmp.addChild(new Text(statusLine(d.title, "stop", "running", theme, spinner), 1, 0));
-		} else {
-			if (state.interval) {
-				clearInterval(state.interval);
-				state.interval = undefined;
-			}
-			cmp.addChild(new Text(statusLine(d.title, "stop", "done", theme), 1, 0));
+			cmp.addChild(new Spacer(1));
+			return cmp;
 		}
-		cmp.addChild(new Spacer(1));
+		if (state.interval) {
+			clearInterval(state.interval);
+			state.interval = undefined;
+		}
+		const cmp = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
+		cmp.addChild(new Text(statusLine(d.title, "stop", "done", theme), 0, 0));
 		return cmp;
 	}
 

@@ -71,14 +71,13 @@ export interface AgentProcessOptions {
 	sessionName?: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
 	sessionDir?: string;
-	/** Total wall-clock timeout for the whole task (incl. multi-turn). */
+	/** Total wall-clock timeout for the whole task (incl. multi-turn).
+	 *  Omitted = no limit (the default): the child runs until it finishes,
+	 *  is stopped, or hits an explicit token limit. */
 	timeoutMs?: number;
+	/** Token threshold: at/above this, inject a "wrap up" steer. Omitted = disabled. */
 	/** After an abort, how long to wait for the child to settle before hard-stopping it. */
 	abortSettleGraceMs?: number;
-	/** Token threshold: at/above this, inject a "wrap up" steer. */
-	wrapUpTokens?: number;
-	/** Token threshold: at/above this, hard abort. */
-	hardLimitTokens?: number;
 	/** Streamed assistant text deltas (rpc message_update/text_delta) — for live tool-card output. */
 	onDelta?: (delta: string) => void;
 	/** Thinking/tool activity transitions (no text delta involved) — for live tool-card rows. */
@@ -90,14 +89,12 @@ export interface AgentProcessDeps {
 	createClient?: (options: RpcClientOptions) => RpcClient;
 }
 
-export const DEFAULT_TIMEOUT_MS = 600_000;
 export const DEFAULT_ABORT_SETTLE_GRACE_MS = 30_000;
-export const DEFAULT_WRAP_UP_TOKENS = 400_000;
-export const DEFAULT_HARD_LIMIT_TOKENS = 500_000;
 export const STOP_GRACE_MS = 5_000;
 
-export const WRAP_UP_MESSAGE =
-	"Please wrap up now: do not start any new work. Finish summarizing your current task and stop.";
+// The only task-level limit is the opt-in timeoutMs: the Agent tool passes
+// it when the caller wants a bound — the default is no limit (a Pi extension
+// should not impose hidden deadlines on sub-agents).
 
 /** Build a "<name>: <args summary>" label for a tool call (widget excerpt). */
 export class AgentProcess {
@@ -113,10 +110,8 @@ export class AgentProcess {
 	stoppedByControl = false;
 
 	private readonly client: RpcClient;
-	private readonly timeoutMs: number;
+	private readonly timeoutMs: number | undefined;
 	private readonly abortSettleGraceMs: number;
-	private readonly wrapUpTokens: number;
-	private readonly hardLimitTokens: number;
 
 	private settleWaiters = new Set<() => void>();
 	/** Total agent_settled events seen; lets awaitSettled skip settles that
@@ -125,7 +120,6 @@ export class AgentProcess {
 	/** settleCount observed at the last awaitSettled() call. */
 	private lastSettledCount = 0;
 	private done = false;
-	private wrappedUp = false;
 	private hardAborted = false;
 	/** Model API error captured from agent_end (stopReason "error"). */
 	private agentError: string | null = null;
@@ -139,10 +133,8 @@ export class AgentProcess {
 		this.agentId = options.agentId;
 		this.title = options.title;
 		this.sessionName = options.sessionName ?? options.title;
-		this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+		this.timeoutMs = options.timeoutMs;
 		this.abortSettleGraceMs = options.abortSettleGraceMs ?? DEFAULT_ABORT_SETTLE_GRACE_MS;
-		this.wrapUpTokens = options.wrapUpTokens ?? DEFAULT_WRAP_UP_TOKENS;
-		this.hardLimitTokens = options.hardLimitTokens ?? DEFAULT_HARD_LIMIT_TOKENS;
 		this.onDelta = options.onDelta;
 		this.onActivityChange = options.onActivityChange;
 
@@ -242,11 +234,15 @@ export class AgentProcess {
 	 * to settle, then hard-stop it.
 	 */
 	async waitForCompletion(): Promise<AgentCompletion> {
-		const deadline = Date.now() + this.timeoutMs;
+		// No deadline when timeoutMs is omitted — the child runs until it
+		// settles, is stopped, or hits an explicit token limit. `deadline` stays
+		// undefined so `remaining` is undefined and awaitSettled waits forever
+		// (its own `timeoutMs !== undefined` guard skips the timer).
+		const deadline = this.timeoutMs === undefined ? undefined : Date.now() + this.timeoutMs;
 
 		try {
 			while (this.status === "running" && !this.done) {
-				const remaining = Math.max(0, deadline - Date.now());
+				const remaining = deadline === undefined ? undefined : Math.max(0, deadline - Date.now());
 				const settled = await this.awaitSettled(remaining);
 				if (this.done) break;
 				if (!settled) {
@@ -256,19 +252,6 @@ export class AgentProcess {
 					break;
 				}
 
-				const stats = await this.getStats();
-				const total = stats?.tokens ?? 0;
-
-				if (total >= this.hardLimitTokens) {
-					this.hardAborted = true;
-					await this.abortAndWait();
-					break;
-				}
-				if (total >= this.wrapUpTokens && !this.wrappedUp) {
-					this.wrappedUp = true;
-					await this.steer(WRAP_UP_MESSAGE).catch(() => {});
-					continue;
-				}
 				break; // normal completion
 			}
 		} finally {

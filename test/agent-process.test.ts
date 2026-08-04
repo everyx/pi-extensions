@@ -221,34 +221,6 @@ describe("AgentProcess — waitForCompletion", () => {
 		assert.equal(completion.sessionPath, "/tmp/fake.jsonl");
 	});
 
-	it("steers wrap-up when tokens cross the threshold, then completes", async () => {
-		const { agent, fake } = makeAgent({ cwd: "/tmp", wrapUpTokens: 50, hardLimitTokens: 1_000_000 });
-		await agent.spawnAndSend("do it");
-
-		const completionPromise = agent.waitForCompletion();
-		fake.emitSettled(); // first turn: tokens 100 ≥ wrapUp 50 → steer
-		fake.emitSettled(); // second turn (after steer): still under hard limit → complete
-
-		const completion = await completionPromise;
-		assert.equal(completion.status, "completed");
-		const steerCmds = fake.commands.filter((c) => c.type === "steer");
-		assert.equal(steerCmds.length, 1);
-		assert.match(steerCmds[0]?.message ?? "", /wrap up/i);
-	});
-
-	it("hard-aborts when tokens cross the hard limit", async () => {
-		const { agent, fake } = makeAgent({ cwd: "/tmp", wrapUpTokens: 50, hardLimitTokens: 100 });
-		await agent.spawnAndSend("do it");
-
-		const completionPromise = agent.waitForCompletion();
-		fake.emitSettled(); // tokens 100 ≥ hardLimit 100 → abort
-		fake.emitSettled(); // settle after abort
-
-		const completion = await completionPromise;
-		assert.equal(completion.status, "stopped");
-		assert.ok(fake.commands.some((c) => c.type === "abort"));
-	});
-
 	it("hard-stops a child that never settles after timeout", async () => {
 		const { agent, fake } = makeAgent({
 			cwd: "/tmp",
@@ -280,6 +252,26 @@ describe("AgentProcess — waitForCompletion", () => {
 		const completion = await completionPromise;
 		assert.equal(completion.status, "stopped");
 		assert.equal(fake.endInputCalls, 0, "grace settle avoids the hard stop");
+	});
+
+	it("waits forever when no timeoutMs is given (no hidden deadline)", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		await agent.spawnAndSend("do it");
+
+		// No settle, no explicit timeout — the wait must stay pending rather
+		// than escalating to an abort/stop. Probe for a spell, then release.
+		let resolved = false;
+		const completionPromise = agent.waitForCompletion().then((c) => {
+			resolved = true;
+			return c;
+		});
+		await new Promise((r) => setTimeout(r, 120));
+		assert.equal(resolved, false, "no deadline → no automatic stop");
+		assert.ok(!fake.commands.some((c) => c.type === "abort"), "no abort was sent");
+
+		fake.emitSettled();
+		const completion = await completionPromise;
+		assert.equal(completion.status, "completed");
 	});
 
 	it("marks failed when the child exits non-zero without settling", async () => {

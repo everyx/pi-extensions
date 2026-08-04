@@ -92,6 +92,12 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 	}
 
 	if (raw.type === "agent_end") {
+		// pi marks an agent_end with `willRetry: true` when it will transparently
+		// retry the turn (e.g. transient API errors). That first error is not a
+		// failure — the final agent_end decides. Without this gate the stale
+		// error would land in agentError, which has no reset path, and a
+		// retried-and-successful sub-agent would report failed.
+		if (raw.willRetry === true) return [];
 		const messages = raw.messages as Array<{ role?: string; stopReason?: string; errorMessage?: unknown }> | undefined;
 		if (Array.isArray(messages)) {
 			for (let i = messages.length - 1; i >= 0; i--) {

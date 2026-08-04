@@ -177,7 +177,7 @@ test("background start animates starting, then settles on started", () => {
 			ctx,
 		);
 		const settled = renderText(done, 120);
-		assert.ok(settled.includes("· started"), "started state");
+		assert.ok(settled.includes("started"), "started state");
 		// The id stays in the LLM content, never on the card.
 		assert.ok(!settled.includes("background agent a1"), "no id on the card");
 	} finally {
@@ -196,7 +196,7 @@ test("background start failure renders start failed with the reason", () => {
 		context,
 	);
 	const text = renderText(cmp, 120);
-	assert.ok(text.includes('✗ Agent "research db schema" · start failed'), "failed state line with icon + quoted title");
+	assert.ok(text.includes('✗ Agent "research db schema" start failed'), "failed state line with icon + quoted title");
 	assert.ok(text.includes("model not found"), "reason on its own line");
 });
 
@@ -217,7 +217,7 @@ test("stop animates stopping then settles on stopped", () => {
 			ctx,
 		);
 		const running = renderText(partial, 120);
-		assert.ok(running.includes("· stopping…"), "stopping state");
+		assert.ok(running.includes("stopping…"), "stopping state");
 
 		const done = renderAgentControlResult(
 			{
@@ -229,7 +229,7 @@ test("stop animates stopping then settles on stopped", () => {
 			ctx,
 		);
 		const settled = renderText(done, 120);
-		assert.ok(settled.includes("· stopped"), "stopped state");
+		assert.ok(settled.includes("stopped"), "stopped state");
 	} finally {
 		if (ctx.state.interval) clearInterval(ctx.state.interval);
 	}
@@ -247,12 +247,34 @@ test("steer renders the status line plus the message as a quote", () => {
 	);
 	const lines = render(cmp, 120).map(strip);
 	assert.ok(
-		lines.some((l) => l.includes("· steered")),
+		lines.some((l) => l.includes("steered")),
 		"steered state",
 	);
 	assert.ok(
 		lines.some((l) => l.includes("│ 重点看 orders 表的索引和慢查询")),
 		"message as a quote line",
+	);
+});
+
+test("steer shows the full multi-line message, not a first-line preview", () => {
+	const message = "第一行指令\n第二行补充说明\n第三行收尾";
+	const cmp = renderAgentControlResult(
+		{
+			content: [{ type: "text", text: "Steered." }],
+			details: { action: "steer", title: "probe", message },
+		},
+		{ expanded: false, isPartial: false },
+		theme,
+		context,
+	);
+	const lines = render(cmp, 120).map(strip);
+	assert.ok(
+		lines.some((l) => l.includes("第二行补充说明")),
+		"second line shown",
+	);
+	assert.ok(
+		lines.some((l) => l.includes("第三行收尾")),
+		"third line shown",
 	);
 });
 
@@ -268,9 +290,52 @@ test("control failures keep the status-line shape with error color", () => {
 	);
 	const lines = render(cmp, 120).map(strip);
 	assert.ok(
-		lines.some((l) => l.includes("· steer failed")),
+		lines.some((l) => l.includes("steer failed")),
 		"failed state with reason",
 	);
+});
+
+test("control failures show the full error, never truncated", () => {
+	const longError = `模型 "no-such-model-xyz-very-long-name-\u2026" not available in the registry. `
+		.concat("This is a deliberately long error message that must survive rendering ".repeat(3))
+		.trim();
+	const cmp = renderAgentControlResult(
+		{
+			content: [{ type: "text", text: longError }],
+			details: { action: "stop", title: "probe", error: longError },
+		},
+		{ expanded: false, isPartial: false },
+		theme,
+		context,
+	);
+	const lines = render(cmp, 120).map(strip);
+	assert.ok(
+		lines.some((l) => l.includes("survive rendering")),
+		"full error text visible",
+	);
+});
+
+test("a stop that fails mid-animation clears the spinner interval", () => {
+	// Partial stop frame starts the 100ms invalidate interval…
+	renderAgentControlResult(
+		{ content: [{ type: "text", text: "Stopping…" }], details: { action: "stop", title: "probe" } },
+		{ expanded: false, isPartial: true },
+		theme,
+		context,
+	);
+	const st = (context as { state: { interval?: unknown } }).state;
+	assert.ok(st.interval, "spinner interval started");
+	// …and a failed stop (isError, details.error) must stop it.
+	renderAgentControlResult(
+		{
+			content: [{ type: "text", text: "agent died" }],
+			details: { action: "stop", title: "probe", error: "agent died" },
+		},
+		{ expanded: false, isPartial: false },
+		theme,
+		context,
+	);
+	assert.equal(st.interval, undefined, "interval cleared on failed stop");
 });
 
 // ── Notification card: status icon distinguishes it from the tool card ──
