@@ -41,7 +41,10 @@ export interface SubagentDetails {
 	agentId?: string;
 	/** Agent title — used by the background-start status line (the tool header is empty for background). */
 	title?: string;
+	/** Resolved "provider/id" model string, or default when omitted. */
 	model?: string;
+	/** Reasoning intensity ("off"…"max"), or inherited level when omitted. */
+	thinking?: string;
 	runInBackground?: boolean;
 	/** Spawn failure reason — rendered as `start failed: <reason>` on the status line. */
 	error?: string;
@@ -67,6 +70,10 @@ export interface NotificationDetails {
 	agent_id: string;
 	/** Required — always passed by notifyCompletion (AgentProcess.title). */
 	title: string;
+	/** Resolved model string, or default when omitted. */
+	model?: string;
+	/** Reasoning intensity, or inherited level when omitted. */
+	thinking?: string;
 	/** Final output — rendered as the card body (never enters LLM context). */
 	result?: string;
 	usage?: {

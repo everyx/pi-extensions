@@ -67,8 +67,8 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 ### Agent 工具卡片
 
 ```
-✓ Agent "检查 CI 配置" (sonnet · Took 27.5s)
-⠙ Agent "检查 CI 配置" (claude-sonnet · Elapsed 12.3s)
+✓ Agent "检查 CI 配置" (sonnet · high · Took 27.5s)
+⠙ Agent "检查 CI 配置" (claude-sonnet · high · Elapsed 12.3s)
 Thinking...
 bash: pnpm check
 <空行>
@@ -115,7 +115,7 @@ session: /path/...jsonl
 ### 完成通知卡片
 
 ```
-✓ Agent "检查 CI 配置" (Took 27.5s · 1,250 tokens · 3 tool uses)
+✓ Agent "检查 CI 配置" (sonnet · high · Took 27.5s · 1,250 tokens · 3 tool uses)
 <空行>
 ... (3 earlier lines, ctrl+o to expand)
 Found 5 files handling authentication: src/auth/*.ts …

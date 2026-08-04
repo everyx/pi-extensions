@@ -26,6 +26,8 @@ import type { AgentCompletion } from "./agent-process.js";
 export interface RegisteredAgent {
 	readonly agentId: string;
 	readonly title: string;
+	readonly model?: string;
+	readonly thinking?: string;
 	stoppedByControl: boolean;
 	stop(): Promise<void>;
 }

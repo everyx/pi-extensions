@@ -101,6 +101,8 @@ export class AgentProcess {
 	/** Session display name ("<title>"), what the widget and session list show. */
 	readonly sessionName: string | undefined;
 	readonly startedAt = Date.now();
+	readonly model: string | undefined;
+	readonly thinking: string | undefined;
 
 	status: AgentStatus = "queued";
 
@@ -135,6 +137,8 @@ export class AgentProcess {
 		this.sessionName = options.sessionName ?? options.title;
 		this.timeoutMs = options.timeoutMs;
 		this.abortSettleGraceMs = options.abortSettleGraceMs ?? DEFAULT_ABORT_SETTLE_GRACE_MS;
+		this.model = options.model;
+		this.thinking = options.thinking;
 		this.onDelta = options.onDelta;
 		this.onActivityChange = options.onActivityChange;
 

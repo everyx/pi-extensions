@@ -195,6 +195,8 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 		status: completion.status,
 		agent_id: agent.agentId,
 		title: agent.title,
+		model: agent.model,
+		thinking: agent.thinking,
 		// Card body (never enters LLM context — verified against convertToLlm).
 		result: completion.output,
 		usage: {
@@ -320,7 +322,14 @@ export default function (pi: ExtensionAPI) {
 					streamed += delta;
 					onUpdate?.({
 						content: [{ type: "text", text: streamed }],
-						details: { task, startedAt, activity: agent.getLatestActivity() ?? undefined, events: agent.getEvents() },
+						details: {
+							task,
+							startedAt,
+							model: agent.model,
+							thinking: agent.thinking,
+							activity: agent.getLatestActivity() ?? undefined,
+							events: agent.getEvents(),
+						},
 					});
 				},
 				onActivityChange: (activity) => {
@@ -328,7 +337,14 @@ export default function (pi: ExtensionAPI) {
 					if (activity.kind === "text") return; // covered by onDelta
 					onUpdate?.({
 						content: [{ type: "text", text: streamed }],
-						details: { task, startedAt, activity, events: agent.getEvents() },
+						details: {
+							task,
+							startedAt,
+							model: agent.model,
+							thinking: agent.thinking,
+							activity,
+							events: agent.getEvents(),
+						},
 					});
 				},
 			});
@@ -352,7 +368,7 @@ export default function (pi: ExtensionAPI) {
 				if (params.run_in_background) {
 					onUpdate?.({
 						content: [{ type: "text", text: `Starting ${agent.title}\u2026` }],
-						details: { runInBackground: true, title: agent.title },
+						details: { runInBackground: true, title: agent.title, model: agent.model, thinking: agent.thinking },
 					});
 				}
 
@@ -389,7 +405,14 @@ export default function (pi: ExtensionAPI) {
 
 					onUpdate?.({
 						content: [{ type: "text", text: `Started ${agent.title} (background)` }],
-						details: { agentId: agent.agentId, runInBackground: true, title: agent.title, startedAt },
+						details: {
+							agentId: agent.agentId,
+							runInBackground: true,
+							title: agent.title,
+							model: agent.model,
+							thinking: agent.thinking,
+							startedAt,
+						},
 					});
 					return {
 						content: [
@@ -398,7 +421,14 @@ export default function (pi: ExtensionAPI) {
 								text: `Started background agent ${agent.agentId}. Completion arrives as a notification.`,
 							},
 						],
-						details: { agentId: agent.agentId, runInBackground: true, title: agent.title, startedAt },
+						details: {
+							agentId: agent.agentId,
+							runInBackground: true,
+							title: agent.title,
+							model: agent.model,
+							thinking: agent.thinking,
+							startedAt,
+						},
 					};
 				}
 
@@ -415,7 +445,7 @@ export default function (pi: ExtensionAPI) {
 
 				onUpdate?.({
 					content: [{ type: "text", text: "Working\u2026" }],
-					details: { task, startedAt },
+					details: { task, startedAt, model: agent.model, thinking: agent.thinking },
 				});
 
 				const completion = await agent.waitForCompletion();
@@ -444,6 +474,8 @@ export default function (pi: ExtensionAPI) {
 							startedAt,
 							endedAt: Date.now(),
 							error: message,
+							model: agent.model,
+							thinking: agent.thinking,
 							truncation,
 							sessionPath: completion.sessionPath,
 							events: agent.getEvents(),
@@ -460,6 +492,8 @@ export default function (pi: ExtensionAPI) {
 						sessionId: completion.sessionId,
 						startedAt,
 						endedAt: Date.now(),
+						model: agent.model,
+						thinking: agent.thinking,
 						truncation,
 					},
 				};

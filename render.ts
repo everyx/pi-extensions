@@ -53,6 +53,10 @@ interface TimerState {
 	interval?: ReturnType<typeof setInterval>;
 	/** Spinner frame index for the stop/start animation. */
 	frame?: number;
+	/** Resolved model (populated by renderResult on first update). */
+	resolvedModel?: string;
+	/** Resolved thinking level (populated by renderResult on first update). */
+	resolvedThinking?: string;
 }
 
 // ─── Render context (from pi framework) ────────────────────────
@@ -67,10 +71,15 @@ interface RenderContext {
 }
 
 /** Muted metadata suffix, mirroring bash's ` (timeout 10s)` pattern. */
-function buildMetaSuffix(args: AgentParams, theme: Theme, time?: string): string {
+function buildMetaSuffix(
+	model: string | undefined,
+	thinking: string | undefined,
+	time: string | undefined,
+	theme: Theme,
+): string {
 	const parts: string[] = [];
-	const model = args.model;
 	if (model) parts.push(model);
+	if (thinking) parts.push(thinking);
 	if (time) parts.push(time);
 	if (parts.length === 0) return "";
 	return theme.fg("muted", ` (${parts.join(" \u00b7 ")})`);
@@ -110,8 +119,13 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 			: `${context.isPartial ? "Elapsed" : "Took"} ${formatDuration((context.state.endedAt ?? Date.now()) - (context.state.startedAt as number))}`;
 
 	const title = safeTitle(args.title.trim() || firstLine(args.prompt));
+	const state = context.state as TimerState;
+	// Resolved model/thinking from the first onUpdate carry-back (renderCall
+	// runs before execute() so args.model/thinking are the raw user inputs).
+	const metaModel = state.resolvedModel ?? args.model;
+	const metaThinking = state.resolvedThinking ?? args.thinking;
 	return new Text(
-		`${icon} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${title}"`)}${buildMetaSuffix(args, theme, timePart)}`,
+		`${icon} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${title}"`)}${buildMetaSuffix(metaModel, metaThinking, timePart, theme)}`,
 		0,
 		0,
 	);
@@ -356,6 +370,10 @@ export function renderAgentResult(
 	if (details?.startedAt !== undefined && state.startedAt === undefined) {
 		state.startedAt = details.startedAt;
 	}
+	// Carry resolved model/thinking from first onUpdate so renderCall can
+	// show them in the header meta (renderCall runs before execute()).
+	if (details?.model && state.resolvedModel === undefined) state.resolvedModel = details.model;
+	if (details?.thinking && state.resolvedThinking === undefined) state.resolvedThinking = details.thinking;
 	if (state.startedAt !== undefined && isPartial && !state.interval) {
 		state.interval = setInterval(() => context.invalidate(), 100);
 	}
@@ -532,6 +550,8 @@ export function renderNotification(
 				: "";
 
 	const metaParts: string[] = [];
+	if (d.model) metaParts.push(d.model);
+	if (d.thinking) metaParts.push(d.thinking);
 	if (d.usage?.durationMs != null) metaParts.push(`Took ${formatDuration(d.usage.durationMs)}`);
 	if (d.usage?.tokens != null) metaParts.push(`${formatTokens(d.usage.tokens)} tokens`);
 	if (d.usage?.toolUses != null) metaParts.push(`${d.usage.toolUses} tool use${d.usage.toolUses === 1 ? "" : "s"}`);
