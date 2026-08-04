@@ -156,7 +156,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 
 	const title = args.title.trim() || firstLine(args.prompt);
 	return new Text(
-		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", title)}${buildMetaSuffix(args, theme)}`,
+		`${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${title}"`)}${buildMetaSuffix(args, theme)}`,
 		0,
 		0,
 	);
@@ -177,11 +177,12 @@ function dimOneLiner(text: string | undefined, theme: Theme): Text {
 }
 
 /**
- * One-line agent status: `[⠋] Agent <title> · <state>` — the shared shape for
- * background-start / steer / stop lines. `Agent` and `<title>` keep the
- * tool-card header style; the state word is muted (running/done) or error
- * (failed, with a muted reason). The optional spinner animates in place —
- * never appending lines (pi/CC spinner discipline).
+ * One-line agent status: `[marker] Agent "title" · <state>` — the shared shape
+ * for background-start / steer / stop lines. `Agent` keeps the tool-card
+ * header style (toolTitle bold); the quoted title uses bashMode like the
+ * bash card's `$ cmd`. The marker is a status icon (accent spinner while
+ * running / success ✓ / error ✗) so the state reads at a glance. Failure
+ * reasons are rendered separately (dim second line) — not in this line.
  */
 function statusLine(
 	title: string | undefined,
@@ -189,13 +190,16 @@ function statusLine(
 	phase: "running" | "done" | "failed",
 	theme: Theme,
 	spinner?: string,
-	reason?: string,
 ): string {
-	const agent = `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("toolTitle", title)}` : ""}`;
-	const head = spinner ? `${theme.fg("accent", spinner)} ${agent}` : agent;
+	const agent = `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${title}"`)}` : ""}`;
+	const marker =
+		phase === "running"
+			? theme.fg("accent", spinner ?? "")
+			: phase === "failed"
+				? theme.fg("error", "\u2717")
+				: theme.fg("success", "\u2713");
 	if (phase === "failed") {
-		const note = reason ? `: ${theme.fg("muted", reason)}` : "";
-		return `${head} ${theme.fg("error", `· ${verb} failed`)}${note}`;
+		return `${marker} ${agent} ${theme.fg("error", `\u00b7 ${verb} failed`)}`;
 	}
 	const state =
 		phase === "running"
@@ -207,7 +211,7 @@ function statusLine(
 				: verb === "stop"
 					? "stopped"
 					: "steered";
-	return `${head} ${theme.fg("muted", `· ${state}`)}`;
+	return `${marker} ${agent} ${theme.fg("muted", `\u00b7 ${state}`)}`;
 }
 
 /**
@@ -291,7 +295,10 @@ export function renderAgentResult(
 			state.interval = undefined;
 		}
 		if (details.error) {
-			return new Text(statusLine(details.title, "start", "failed", theme, undefined, details.error), 0, 0);
+			const cmp = new Container();
+			cmp.addChild(new Text(statusLine(details.title, "start", "failed", theme), 0, 0));
+			cmp.addChild(new Text(theme.fg("dim", truncateTail(details.error, 80)), 1, 0));
+			return cmp;
 		}
 		return new Text(statusLine(details.title, "start", "done", theme), 0, 0);
 	}
@@ -374,12 +381,15 @@ export function renderAgentControlResult(
 
 	const verb = d?.action === "steer" ? "steer" : "stop";
 
-	// Errors keep the status-line shape: `Agent <title> · <verb> failed: <reason>`.
-	// renderShell "self" has no Box, so the line carries its own left padding
-	// (1) and a bottom Spacer for breathing room (Box paddingY parity).
+	// Errors keep the status-line shape: `✗ Agent "title" · <verb> failed` with
+	// the reason as a dim second line (kept out of the state line so new users
+	// can read the state at a glance). renderShell "self" has no Box, so the
+	// lines carry their own left padding and a bottom Spacer (Box paddingY
+	// parity).
 	if (d?.error) {
 		const cmp = new Container();
-		cmp.addChild(new Text(statusLine(d.title, verb, "failed", theme, undefined, d.error), 1, 0));
+		cmp.addChild(new Text(statusLine(d.title, verb, "failed", theme), 1, 0));
+		cmp.addChild(new Text(theme.fg("dim", truncateTail(d.error, 80)), 2, 0));
 		cmp.addChild(new Spacer(1));
 		return cmp;
 	}
@@ -465,7 +475,7 @@ export function renderNotification(
 
 	if (!d) {
 		const cmp = new Container();
-		cmp.addChild(new Text(theme.fg("dim", "no details"), 0, 0));
+		cmp.addChild(new Text(theme.fg("dim", "(no details)"), 0, 0));
 		return cmp;
 	}
 
@@ -495,7 +505,7 @@ export function renderNotification(
 
 	cmp.addChild(
 		new Text(
-			`${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("toolTitle", d.title)}${statusWord}${metaSuffix}`,
+			`${theme.fg(iconColor as "success" | "error" | "warning", icon)} ${theme.fg("toolTitle", theme.bold("Agent"))} ${theme.fg("bashMode", `"${d.title}"`)}${statusWord}${metaSuffix}`,
 			0,
 			0,
 		),

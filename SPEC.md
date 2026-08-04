@@ -55,13 +55,15 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 ### 统一视觉语法
 
-- **内容型**（前台 Agent、通知卡）：`<bold 工具名> + <status icon?> + <title> + <muted 括号 meta>` → 1 空行 → `toolOutput body（prompt 与输出同一流，折叠为尾部预览）` → 1 空行 → `muted footer`。
-- **控制型**（后台 spawn / steer / stop）：单行状态行 `[⠋] Agent <title> · <状态词>`（原地切换，不追加新行），颜色与卡片 header 同构。
+- **内容型**（前台 Agent、通知卡）：`<status icon?> + <bold 工具名> + <"title" 引号 bashMode> + <muted 括号 meta>` → 1 空行 → `toolOutput body（prompt 与输出同一流，折叠为尾部预览）` → 1 空行 → `muted footer`。
+- **控制型**（后台 spawn / steer / stop）：单行状态行 `[marker] Agent "title" · <状态词>`（marker = accent spinner / success ✓ / error ✗，原地切换不追加新行），颜色与卡片 header 同构。
+- **title 视觉约定**：任务名始终以**引号包裹、bashMode 色**出现（对齐 bash 卡 `$ cmd` 的命令色）——与工具名 `Agent`（toolTitle bold）区分；widget 状态区里 title 保持 muted（避免与 accent spinner 撞色）。
+- **占位/兜底**：`dim` 色 + 括号（如 `(no details)`，对齐 pi bash 卡的 `(no output)`）。
 
 ### Agent 工具卡片
 
 ```
-Agent 检查 CI 配置 (sonnet)
+Agent "检查 CI 配置" (sonnet)
 Thinking...                  ← 活动行（思考中：italic + thinkingText，pi 隐藏 thinking 同款）
 bash: pnpm check             ← 活动行（工具调用：工具名 toolTitle + 冒号 + muted 参数）
 <空行>
@@ -72,7 +74,7 @@ Took 27.5s
 session: /path/...jsonl
 ```
 
-- header：`Agent`（bold toolTitle）+ title（必填 3-5 词）+ muted meta `(model)`——只显示显式参数（model），对齐 bash 的 ` (timeout 10s)`；**后台 spawn 无 header**（`run_in_background` 时 renderCall 返回空），只渲染单行状态行（见下）
+- header：`Agent`（bold toolTitle）+ `"title"`（bashMode 色，引号同色）+ muted meta `(model)`——title 用 bash 命令同款色系，与工具名区分；`run_in_background` 时 renderCall 返回空，只渲染单行状态行（见下）
 - 活动行（widget 对齐，仅前台流式期间）：`Thinking...`（italic + thinkingText）与工具调用（工具名 toolTitle + 参数），数据同 widget 的 `latestActivity`（不进 LLM context）；正文本身已流式，故不重复显示 text 活动
 - body：prompt 与输出**同一流**——prompt 在流头、header 的 title 承担固定标识，折叠时整流截为尾部 5 行（`... N earlier lines (<key> to expand)`，N 含被折叠的 prompt 与早期输出）；展开全显（prompt 在顶部随滚动流逝）；折叠/展开经 keyHint 绑定键切换
 - footer：`Took/Elapsed X.Xs`（muted）+ `session: <path>`（前台完成时）
@@ -80,34 +82,37 @@ session: /path/...jsonl
 - **后台 spawn 状态行**（renderResult，壳内单行，原地切换）：
 
 ```
-⠋ Agent 检查 CI 配置 · starting…        ← 进行中：accent spinner（100ms 帧）
-Agent 检查 CI 配置 · started            ← 成功：muted
-Agent 检查 CI 配置 · start failed: 原因  ← 失败：error 色 + muted 原因
+⠋ Agent "检查 CI 配置" · starting…        ← 进行中：accent spinner（100ms 帧）
+✓ Agent "检查 CI 配置" · started          ← 成功：success ✓ + muted 状态词
+✗ Agent "检查 CI 配置" · start failed     ← 失败：error ✗ + error 状态词
+  Model not found                          ← 原因：dim 第二行（缩进对齐）
 ```
 
+- 状态一眼可辨（icon 前置），失败原因独立 dim 行弱化——新手读状态不用啃长句
 - 后台 agent id 只进 LLM 的 tool content（`Started background agent a1. …`），卡片上不出现
 
 ### AgentControl 状态行（renderShell "self"，无卡片壳）
 
 ```
-Agent research db schema · steered            ← 状态行（muted 状态词）
-│ 重点看 orders 表的索引和慢查询               ← 消息行：pi 原生 markdown quote（│ mdQuoteBorder + italic mdQuote）
+✓ Agent "research db schema" · steered      ← 成功：success ✓ + muted 状态词
+│ 重点看 orders 表的索引和慢查询             ← 消息行：pi 原生 markdown quote（│ mdQuoteBorder + italic mdQuote）
 
-⠹ Agent slow query probe · stopping…          ← stop 进行中：accent spinner（原地动画）
-Agent slow query probe · stopped              ← stop 完成：muted
+⠹ Agent "slow query probe" · stopping…      ← stop 进行中：accent spinner（原地动画）
+✓ Agent "slow query probe" · stopped        ← stop 完成：success ✓ + muted
 
-Agent slow query probe · stop failed: agent not found    ← 失败：error 色 + muted 原因
+✗ Agent "slow query probe" · stop failed    ← 失败：error ✗ + error 状态词
+  agent not found                            ← 原因：dim 第二行
 ```
 
-- steer/stop 是**瞬时控制操作**，渲染为单行状态行（无 Box 壳，贴 pi working 指示器），标题格式与卡片 header 同构（`Agent` toolTitle bold + title toolTitle + muted 状态词）
+- steer/stop 是**瞬时控制操作**，渲染为单行状态行（无 Box 壳，贴 pi working 指示器），标题格式与卡片 header 同构（`Agent` toolTitle bold + `"title"` bashMode + marker/状态词）
 - steer 注入的消息以 markdown quote 显示在状态行下——tool call 参数不展示给用户，卡上是用户唯一可见的消息层；消息同时进 LLM 的 tool content（compaction 后不丢）
 - 动画帧在**同一行内**切换（spinner 帧 + 状态词），绝不追加新行
-- 错误保持同一形态：`· <verb> failed: <原因>`（error 色），完整错误仍在 LLM content
+- 错误保持同一形态：`✗ Agent "title" · <verb> failed`（error 色）+ dim 原因行；完整错误仍在 LLM content
 
 ### 完成通知卡片（registerMessageRenderer）
 
 ```
-✓ Agent 检查 CI 配置 (Took 27.5s · 1,250 tokens · 3 tool uses)
+✓ Agent "检查 CI 配置" (Took 27.5s · 1,250 tokens · 3 tool uses)
 <空行>
 ... 3 earlier lines (ctrl+o to expand)      ← 折叠提示（同工具卡；muted + keyHint）
 Found 5 files handling authentication: src/auth/*.ts …
@@ -115,7 +120,7 @@ Found 5 files handling authentication: src/auth/*.ts …
 session: /path/...jsonl
 ```
 
-- header：**状态 icon 在最前**（`✓` success / `✗` error / `■` warning）+ `Agent` + title + muted meta（usage 并入括号）；失败/停止时追加彩色状态词（`failed` error / `stopped` warning，同 bash `(exit N)` 语言）
+- header：**状态 icon 在最前**（`✓` success / `✗` error / `■` warning）+ `Agent` + `"title"`（bashMode）+ muted meta（usage 并入括号）；失败/停止时追加彩色状态词（`failed` error / `stopped` warning，同 bash `(exit N)` 语言）
 - icon 把**完成通知卡**与 **Agent 工具卡**区分开（工具卡无 icon）——背景色不再单独承担状态传达
 - body：结果预览，同一流折叠策略（尾部 5 行 + `... N earlier lines (<key> to expand)`；展开全显）
 - footer：session 路径
@@ -126,12 +131,11 @@ session: /path/...jsonl
 ```
 （容器级 1 空行，pi 自动）
   ● Agents                    ← accent 标题
-  ⠋ 检查 CI 配置 · 42.0s       ← 运行中：accent spinner（80ms 帧）+ muted 文本；1 空格左 padding（对齐 pi string[] widget 形式）
-  ✓ 慢查询探针 · 3.2s · stopped  ← 完成 linger：icon（✓ success / ✗ error / ■ warning）+ muted 文本；保留 4s 后移除
+  ⠋ "检查 CI 配置" · 42.0s      ← 运行中：accent spinner（80ms 帧）+ muted 文本；1 空格左 padding（对齐 pi string[] widget 形式）
 ```
 
 - 仅跟踪后台 agent（前台已 inline 流式，不重复）
-- **完成/停止后延迟 4s 消失**（`FINISHED_LINGER_MS`）——期间显示 icon + 时长 + 状态词，给用户确认窗口；全部清空后 widget 自动清除
+- **完成/停止立即移除**——完成结果由通知卡（followUp，立即出现）承担，widget 不留冗余确认行
 - 与 pi 内置 working 指示器（Loader）同一视觉语言
 - 每行下方追加**最新活动摘录**（缩进 3 字符，与标题左对齐）：工具调用（工具名 toolTitle 色 + 冒号 + muted 参数摘要）、`Thinking...`（italic + thinkingText，pi 隐藏 thinking 同款）、或最新正文尾部（muted，截断 60 字符）；数据取自 `message_update` 累积消息的最新 content 部分，不进 LLM context
 

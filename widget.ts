@@ -26,23 +26,12 @@ import { activityRow, formatDuration, SPINNER } from "./render.js";
 const WIDGET_KEY = "subagents";
 const TICK_MS = 80;
 
-/** How long a finished agent lingers in the widget (confirmation window). */
-const FINISHED_LINGER_MS = 4000;
-
 /** Widget line indent: 1 (widget padding) + ⠋ + space → excerpt aligns with the title. */
 const EXCERPT_INDENT = "   ";
 
 interface WidgetRow {
 	agent: AgentProcess;
 	frame: number;
-}
-
-/** Finished agent snapshot — lingers briefly so the user can confirm the outcome. */
-interface FinishedRow {
-	title: string;
-	status: string;
-	startedAt: number;
-	completedAt: number;
 }
 
 interface WidgetRender {
@@ -53,8 +42,6 @@ interface WidgetRender {
 export class AgentWidget {
 	private readonly ui: ExtensionUIContext;
 	private readonly rows = new Map<string, WidgetRow>();
-	/** Finished agents lingering briefly with their terminal status (icon + elapsed). */
-	private readonly finished = new Map<string, FinishedRow>();
 	private interval: ReturnType<typeof setInterval> | undefined;
 	private registered = false;
 	private tui: { requestRender(): void } | undefined;
@@ -70,21 +57,9 @@ export class AgentWidget {
 		this.ensureRunning();
 	}
 
-	/** Stop tracking (agent finished/stopped — lingers briefly, then the notification card takes over). */
+	/** Stop tracking (agent finished/stopped — the completion notification card takes over immediately). */
 	remove(agentId: string): void {
-		const row = this.rows.get(agentId);
-		if (row) {
-			this.rows.delete(agentId);
-			this.finished.set(agentId, {
-				title: row.agent.title,
-				status: row.agent.status,
-				startedAt: row.agent.startedAt,
-				completedAt: Date.now(),
-			});
-			// Keep ticking through the linger window so the finished row clears.
-			this.ensureRunning();
-		}
-		if (this.rows.size === 0 && this.finished.size === 0) {
+		if (this.rows.delete(agentId) && this.rows.size === 0) {
 			this.dispose();
 			return;
 		}
@@ -98,7 +73,6 @@ export class AgentWidget {
 			this.interval = undefined;
 		}
 		this.rows.clear();
-		this.finished.clear();
 		if (this.registered) {
 			this.ui.setWidget(WIDGET_KEY, undefined);
 			this.registered = false;
@@ -115,29 +89,12 @@ export class AgentWidget {
 	}
 
 	private tick(): void {
-		// Running rows animate; agents that reached a terminal state move to
-		// the finished linger list (defensive — registry.remove is the main path).
+		// Drop rows whose agent reached a terminal state.
 		for (const [id, row] of this.rows) {
-			if (row.agent.status !== "running") {
-				this.rows.delete(id);
-				if (!this.finished.has(id)) {
-					this.finished.set(id, {
-						title: row.agent.title,
-						status: row.agent.status,
-						startedAt: row.agent.startedAt,
-						completedAt: Date.now(),
-					});
-				}
-			} else {
-				row.frame++;
-			}
+			if (row.agent.status !== "running") this.rows.delete(id);
+			else row.frame++;
 		}
-		// Drop finished rows after their linger window.
-		const now = Date.now();
-		for (const [id, finishedRow] of this.finished) {
-			if (now - finishedRow.completedAt > FINISHED_LINGER_MS) this.finished.delete(id);
-		}
-		if (this.rows.size === 0 && this.finished.size === 0) {
+		if (this.rows.size === 0) {
 			this.dispose();
 			return;
 		}
@@ -173,20 +130,14 @@ export class AgentWidget {
 		for (const row of this.rows.values()) {
 			const { agent, frame } = row;
 			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
-			// Task label — same as the session display name (no prefix).
+			// Task label (quoted, bashMode-style like the card header titles) —
+			// same as the session display name.
 			const name = agent.title;
 			const elapsed = formatDuration(Date.now() - agent.startedAt);
-			lines.push(` ${spinner} ${theme.fg("muted", `${name} \u00b7 ${elapsed}`)}`);
+			lines.push(` ${spinner} ${theme.fg("muted", `"${name}" \u00b7 ${elapsed}`)}`);
 
 			const activity = agent.getLatestActivity();
 			if (activity) lines.push(this.renderExcerpt(activity, theme));
-		}
-		// Finished agents lingering briefly: `✓ <title> · 3.2s · stopped`.
-		for (const f of this.finished.values()) {
-			const icon = f.status === "completed" ? "\u2713" : f.status === "failed" ? "\u2717" : "\u25a0";
-			const color = f.status === "completed" ? "success" : f.status === "failed" ? "error" : "warning";
-			const elapsed = formatDuration(f.completedAt - f.startedAt);
-			lines.push(` ${theme.fg(color, icon)} ${theme.fg("muted", `${f.title} \u00b7 ${elapsed} \u00b7 ${f.status}`)}`);
 		}
 		return lines;
 	}

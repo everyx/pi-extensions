@@ -196,7 +196,8 @@ test("background start failure renders start failed with the reason", () => {
 		context,
 	);
 	const text = renderText(cmp, 120);
-	assert.ok(text.includes("· start failed: model not found"), "failed state with reason");
+	assert.ok(text.includes('✗ Agent "research db schema" · start failed'), "failed state line with icon + quoted title");
+	assert.ok(text.includes("model not found"), "reason on its own line");
 });
 
 // ── AgentControl: status lines (no card shell) ──
@@ -267,7 +268,7 @@ test("control failures keep the status-line shape with error color", () => {
 	);
 	const lines = render(cmp, 120).map(strip);
 	assert.ok(
-		lines.some((l) => l.includes("· steer failed: agent a2")),
+		lines.some((l) => l.includes("· steer failed")),
 		"failed state with reason",
 	);
 });
@@ -288,7 +289,7 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(ok, 120).includes("✓ Agent research db schema"), "completed icon");
+	assert.ok(renderText(ok, 120).includes('✓ Agent "research db schema"'), "completed icon");
 
 	const failed = renderNotification(
 		{
@@ -303,7 +304,7 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(failed, 120).includes("✗ Agent research db schema failed"), "failed icon + word");
+	assert.ok(renderText(failed, 120).includes('✗ Agent "research db schema" failed'), "failed icon + word");
 
 	const stopped = renderNotification(
 		{
@@ -317,5 +318,5 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(stopped, 120).includes("■ Agent slow query probe stopped"), "stopped icon + word");
+	assert.ok(renderText(stopped, 120).includes('■ Agent "slow query probe" stopped'), "stopped icon + word");
 });
