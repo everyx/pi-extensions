@@ -25,7 +25,6 @@ export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopp
 
 export type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
 
-/** Latest activity for the widget excerpt line (never enters LLM context). */
 /**
  * Latest activity for the widget excerpt line (never enters LLM context).
  * Tool calls carry structured name/args — the producer (event-interpret.ts)

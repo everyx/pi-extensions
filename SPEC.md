@@ -62,7 +62,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 - **统一折叠**：所有卡内容超 5 视觉行折叠为尾部预览 + `... (N earlier lines, <key> to expand)`（对齐 bash 工具卡的 BASH_PREVIEW_LINES 和 hint 格式）；展开全显。
 - **LLM context 截断保护**：进 LLM 的 content 经 truncateTail（尾部 2000 行 / 50KB）；UI 渲染源（events）不截断——用户展开看全部，只有 LLM 看到截断版。
 - **title 视觉约定**：卡片中任务名以引号包裹、bashMode 色出现——与工具名 `Agent`（toolTitle bold）区分；widget 里 `Agents` 用 toolTitle bold、title 用 bashMode（无引号）。
-- **占位/兜底**：dim 色 + 括号（对齐 pi bash 卡的 `(no output)`）。
+- **占位/兜底（仅 TUI 渲染层）**：卡内容缺失时以 dim 色 + 括号占位（对齐 pi bash 卡的 `(no output)`，如通知卡 `(no details)`）。
 
 ### Agent 工具卡片
 
@@ -154,6 +154,7 @@ types.ts           — 共享协议类型（RenderEvent / SubagentDetails / Noti
 format.ts          — 纯函数格式化工具（SPINNER / formatDuration / safeTitle / activityRow 等）
 render.ts          — TUI 渲染（工具卡 / 控制卡 / 通知卡）
 widget.ts          — Agents 状态 widget
+preview.ts         — dev-only storybook：`npm run preview` 逐组件渲染预览（不进生产包）
 ```
 
 ### RPC 协议

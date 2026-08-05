@@ -623,6 +623,10 @@ export function renderNotification(
 	// Shell: the notification renders outside the tool shell (message
 	// renderer), so it paints its own background; cardContent supplies the
 	// header/body/footer layout shared with every tool card.
+	// Pi themes expose exactly three tool-shell backgrounds (toolPendingBg /
+	// toolSuccessBg / toolErrorBg) — there is no warning background. A stopped
+	// agent is an error for the caller (isError), so it takes the error red;
+	// the warning-yellow "stopped" status word carries the nuance.
 	return card(
 		theme,
 		isError ? "toolErrorBg" : "toolSuccessBg",
