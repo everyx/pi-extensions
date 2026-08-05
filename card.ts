@@ -58,8 +58,6 @@ export interface CardConfig {
 	body?: CardBody;
 	footer?: string;
 	expanded: boolean;
-	/** Render the failure reason even while partial (background-start failures show early). */
-	showBodyError?: boolean;
 }
 
 // ─── Internal building blocks ──────────────────────────────
@@ -142,16 +140,27 @@ function renderIcon(icon: CardIcon, theme: Theme): string {
 }
 
 function stateWord(verb: "start" | "steer" | "stop" | "control", phase: "running" | "done" | "failed"): string {
-	if (phase === "running") return verb === "start" ? "starting…" : "stopping…";
-	switch (verb) {
-		case "start":
-			return "started";
-		case "stop":
-			return "stopped";
-		case "steer":
-			return "steered";
-		default:
-			return "finished";
+	switch (phase) {
+		case "running":
+			// Only start/stop animate while running (steer/control results are
+			// terminal-only) — the fallthrough would mislabel them.
+			return verb === "start" ? "starting…" : "stopping…";
+		case "failed":
+			return `${verb} failed`;
+		default: {
+			// done — only start/stop/steer reach here (control never renders a
+			// success surface, only the failed word).
+			switch (verb) {
+				case "start":
+					return "started";
+				case "stop":
+					return "stopped";
+				case "steer":
+					return "steered";
+				case "control":
+					return "finished"; // unreachable — control never renders done
+			}
+		}
 	}
 }
 
@@ -168,9 +177,10 @@ export function renderHeader(header: CardHeader, theme: Theme): string {
 	const title = agentTitle(header.title, theme);
 	let tail = "";
 	if (header.state) {
+		// The verb phrase is the single source of truth (stateWord); only the
+		// color varies — error red for the failure word, muted for the rest.
 		const { verb, phase } = header.state;
-		tail =
-			phase === "failed" ? ` ${theme.fg("error", `${verb} failed`)}` : ` ${theme.fg("muted", stateWord(verb, phase))}`;
+		tail = ` ${theme.fg(phase === "failed" ? "error" : "muted", stateWord(verb, phase))}`;
 	} else if (header.status) {
 		tail = ` ${theme.fg(header.status.color, header.status.word)}`;
 	}
@@ -309,7 +319,7 @@ export function renderCard(config: CardConfig, theme: Theme): Container {
 			const body = renderBody(b, config.expanded, theme);
 			if (body) bodyParts.push(body);
 		}
-		if (b.error && (config.showBodyError ?? true)) {
+		if (b.error) {
 			bodyParts.push(contentBlock(b.error, (l) => theme.fg("dim", l), config.expanded, theme));
 		}
 		if (b.message) {

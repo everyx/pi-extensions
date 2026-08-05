@@ -17,7 +17,7 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Container, Text } from "@earendil-works/pi-tui";
-import type { CardBody, CardIcon } from "./card.js";
+import type { CardBody, CardConfig, CardIcon } from "./card.js";
 import { renderCard, renderHeader, renderNoDetailsCard, renderNotificationCard } from "./card.js";
 import { formatDuration, Spinner } from "./format.js";
 import type { NotificationDetails, SubagentDetails } from "./types.js";
@@ -141,6 +141,34 @@ function dimOneLiner(text: string | undefined, theme: Theme): Text {
 	return new Text(theme.fg("dim", text), 0, 0);
 }
 
+/**
+ * Result-card shape: `✗ Agent <title> <verb> failed` + dim reason — shared by
+ * background-start and control failures.
+ */
+function errorCard(
+	title: string | undefined,
+	verb: "start" | "steer" | "stop" | "control",
+	error: string,
+	expanded: boolean,
+): CardConfig {
+	return { header: { icon: { type: "error" }, title, state: { verb, phase: "failed" } }, body: { error }, expanded };
+}
+
+/**
+ * Result-card shape: `✓ Agent <title> <verb> done` — shared by start, steer
+ * and stop completion (steer passes its message as the body).
+ */
+function doneCard(
+	title: string | undefined,
+	verb: "start" | "steer" | "stop",
+	expanded: boolean,
+	body?: CardBody,
+): CardConfig {
+	const config: CardConfig = { header: { icon: { type: "success" }, title, state: { verb, phase: "done" } }, expanded };
+	if (body) config.body = body;
+	return config;
+}
+
 export type { RenderEvent } from "./types.js";
 
 /** Start the 80ms invalidate loop (if not running); returns the spinner instance. */
@@ -194,22 +222,9 @@ export function renderAgentResult(
 			// Full reason under the uniform fold — content is never dropped, only
 			// capped to the tail preview + expand hint; a blank line separates it
 			// from the header like every other card.
-			return renderCard(
-				{
-					header: { icon: { type: "error" }, title: details.title, state: { verb: "start", phase: "failed" } },
-					body: { error: details.error },
-					expanded,
-				},
-				theme,
-			);
+			return renderCard(errorCard(details.title, "start", details.error, expanded), theme);
 		}
-		return renderCard(
-			{
-				header: { icon: { type: "success" }, title: details.title, state: { verb: "start", phase: "done" } },
-				expanded,
-			},
-			theme,
-		);
+		return renderCard(doneCard(details.title, "start", expanded), theme);
 	}
 
 	// Control ack / bare error — dim one-liner.
@@ -300,14 +315,7 @@ export function renderAgentControlResult(
 		// The reason rides the uniform fold (never dropped, only capped to a
 		// tail preview + expand hint) — wrapping inside the card, blank line
 		// separating it from the header like every other card.
-		return renderCard(
-			{
-				header: { icon: { type: "error" }, title: d.title, state: { verb, phase: "failed" } },
-				body: { error: d.error },
-				expanded,
-			},
-			theme,
-		);
+		return renderCard(errorCard(d.title, verb, d.error, expanded), theme);
 	}
 
 	// Steer: status line + the injected message as a plain content line
@@ -315,14 +323,7 @@ export function renderAgentControlResult(
 	if (d?.action === "steer" && d.message) {
 		// The full message under the uniform fold (never dropped); blank line
 		// separates it from the header, content starts at the card edge.
-		return renderCard(
-			{
-				header: { icon: { type: "success" }, title: d.title, state: { verb: "steer", phase: "done" } },
-				body: { message: d.message },
-				expanded,
-			},
-			theme,
-		);
+		return renderCard(doneCard(d.title, "steer", expanded, { message: d.message }), theme);
 	}
 
 	// Stop: spinner while stopping, then a single completed card.
@@ -344,13 +345,7 @@ export function renderAgentControlResult(
 			);
 		}
 		stopSpinner(state);
-		return renderCard(
-			{
-				header: { icon: { type: "success" }, title: d.title, state: { verb: "stop", phase: "done" } },
-				expanded,
-			},
-			theme,
-		);
+		return renderCard(doneCard(d.title, "stop", expanded), theme);
 	}
 
 	// Bare fallback (no details) — dim one-liner.
