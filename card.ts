@@ -1,0 +1,340 @@
+/**
+ * pi-subagent — card component layer.
+ *
+ * The Card is the shared visual shell for every surface: a header row
+ * (status icon + `Agent "title"` + optional state word / muted meta), an
+ * optional body (prompt + activity stream / failure reason / steer message,
+ * uniformly folded), and an optional footer (session path). Tool results
+ * return `renderCard` directly — the framework's default-shell Box paints
+ * the background; the notification card wraps it in its own shell
+ * (`renderNotificationCard`), because the message renderer renders outside
+ * the tool shell.
+ *
+ * Components follow Pi's own TUI organization: small self-contained
+ * renderers fed by plain config objects (like pi-tui's Box / Container),
+ * with the Spinner instance owned by the caller so animation state lives
+ * with the render loop, not inside the card.
+ */
+
+import { homedir } from "node:os";
+import { sep } from "node:path";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
+import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { type Spinner, safeTitle } from "./format.js";
+import type { RenderEvent } from "./types.js";
+
+// ─── Card config types ─────────────────────────────────────
+
+export type CardIcon =
+	| { type: "spinner"; spinner: Spinner }
+	| { type: "success" }
+	| { type: "error" }
+	| { type: "stopped" };
+
+export interface CardHeader {
+	icon: CardIcon;
+	title?: string;
+	/** Verb-state line: "<verb> <phase>" — "starting…" / "started" / "start failed". */
+	state?: { verb: "start" | "steer" | "stop" | "control"; phase: "running" | "done" | "failed" };
+	/** Plain colored status word (notifications): "failed" (error) / "stopped" (warning). */
+	status?: { word: string; color: "error" | "warning" };
+	/** Muted parenthesized meta segments, joined with `·` (bash `(timeout 10s)` parity). */
+	meta?: string[];
+}
+
+export interface CardBody {
+	/** Prompt + activity stream (foreground tool card). */
+	prompt?: string;
+	events?: RenderEvent[];
+	/** Failure reason — dim folded block below the body. */
+	error?: string;
+	/** Steer message — plain content line. */
+	message?: string;
+}
+
+export interface CardConfig {
+	header?: CardHeader;
+	body?: CardBody;
+	footer?: string;
+	expanded: boolean;
+	/** Render the failure reason even while partial (background-start failures show early). */
+	showBodyError?: boolean;
+}
+
+// ─── Internal building blocks ──────────────────────────────
+
+type BodyComponent = Text | Container | { invalidate: () => void; render: (w: number) => string[] };
+
+/** Output preview line limit when collapsed. */
+const PREVIEW_LINES = 5;
+
+/** Expand `~`-style home prefix to a display path (cross-platform). */
+function shortenHome(p: string): string {
+	// `~` is not understood by Windows terminals (cmd/PowerShell) — keep the
+	// full path there so the printed path stays copy-paste runnable.
+	if (process.platform === "win32") return p;
+	const home = homedir();
+	if (p === home) return "~";
+	return p.startsWith(home + sep) ? `~${p.slice(home.length)}` : p;
+}
+
+/**
+ * Content row below a header/footer: a leading blank line separates it
+ * (bash card parity). Must be a literal `\n` inside the text — an empty
+ * Text (Text("")/Text("\n")) renders ZERO lines in pi-tui, so a bare gap
+ * would vanish; `\n` + content renders "blank line + content".
+ */
+function contentRow(styled: string, x = 0): Text {
+	return new Text(`\n${styled}`, x, 0);
+}
+
+/**
+ * Card background shell — Box(1, 1): 1-space horizontal padding, 1 row of
+ * vertical padding top and bottom (like the framework's tool shell, so
+ * notification cards match tool cards exactly). Only the notification card
+ * needs it (registerMessageRenderer renders outside the tool shell); tool
+ * cards get their background from the framework's default-shell Box instead
+ * and must NOT wrap in card(). The blank rows are the shell's own padding —
+ * content starts directly below the top padding row.
+ */
+function card(theme: Theme, bg: Parameters<typeof theme.bg>[0], ...children: BodyComponent[]): Box {
+	const cmp = new Box(1, 1, (t: string) => theme.bg(bg, t));
+	for (const child of children) cmp.addChild(child);
+	return cmp;
+}
+
+/**
+ * Unified card CONTENT (no background): optional header row + optional body
+ * sections + optional session footer, assembled in order. Shared by every
+ * card — tool results return it directly (the framework's default-shell Box
+ * paints the background across header + body + footer); the notification
+ * card wraps it in card() to paint its own. Headers start at the card edge
+ * (the shell's padding row precedes them); body/footer sections carry their
+ * own blank-line prefix so sections read header / blank / body / blank /
+ * footer. Fold/blank-line/footer behavior lives here once, so every card
+ * changes together.
+ */
+function cardContent(theme: Theme, sections: { header?: string; body?: BodyComponent[]; footer?: string }): Container {
+	const cmp = new Container();
+	if (sections.header) cmp.addChild(new Text(sections.header, 0, 0));
+	for (const part of sections.body ?? []) cmp.addChild(part);
+	if (sections.footer) cmp.addChild(contentRow(theme.fg("muted", `session: ${shortenHome(sections.footer)}`)));
+	return cmp;
+}
+
+/** Shared `Agent "title"` segment — toolTitle bold name + bashMode quoted title. */
+function agentTitle(title: string | undefined, theme: Theme): string {
+	return `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : ""}`;
+}
+
+function renderIcon(icon: CardIcon, theme: Theme): string {
+	switch (icon.type) {
+		case "spinner":
+			return theme.fg("accent", icon.spinner.current());
+		case "success":
+			return theme.fg("success", "\u2713");
+		case "error":
+			return theme.fg("error", "\u2717");
+		case "stopped":
+			return theme.fg("warning", "\u25a0");
+	}
+}
+
+function stateWord(verb: "start" | "steer" | "stop" | "control", phase: "running" | "done" | "failed"): string {
+	if (phase === "running") return verb === "start" ? "starting…" : "stopping…";
+	switch (verb) {
+		case "start":
+			return "started";
+		case "stop":
+			return "stopped";
+		case "steer":
+			return "steered";
+		default:
+			return "finished";
+	}
+}
+
+/**
+ * One header row: `[marker] Agent "title" <state word / status> (<meta>)`.
+ * The state is a natural-language verb phrase joined with a plain space —
+ * `·` is reserved for data separators (widget elapsed time, notification
+ * meta). The marker is a status icon (accent spinner / ✓ / ✗ / ■) so the
+ * state reads at a glance; the quoted title uses bashMode like the bash
+ * card's `$ cmd`, the `Agent` name keeps toolTitle bold.
+ */
+export function renderHeader(header: CardHeader, theme: Theme): string {
+	const marker = renderIcon(header.icon, theme);
+	const title = agentTitle(header.title, theme);
+	let tail = "";
+	if (header.state) {
+		const { verb, phase } = header.state;
+		tail =
+			phase === "failed" ? ` ${theme.fg("error", `${verb} failed`)}` : ` ${theme.fg("muted", stateWord(verb, phase))}`;
+	} else if (header.status) {
+		tail = ` ${theme.fg(header.status.color, header.status.word)}`;
+	}
+	const meta = header.meta?.length ? theme.fg("muted", ` (${header.meta.join(" \u00b7 ")})`) : "";
+	return `${marker} ${title}${tail}${meta}`;
+}
+
+/** Card content block with uniform folding: short content renders in full
+ * (blank line + content); content past PREVIEW_LINES folds to a tail preview
+ * with the expand hint (Ctrl+O to expand reveals everything — folding never
+ * loses content, it only caps how much fills the screen). Shared by every
+ * card body so the fold behavior is identical across surfaces. */
+function foldedBlock(styledRows: string[], theme: Theme): BodyComponent {
+	// Short content resolves through truncateToVisualLines with zero skipped
+	// lines (so a single prompt that wraps across many visual rows still folds
+	// correctly); only the fold hint distinguishes short from long.
+	const body = styledRows.join("\n");
+	return {
+		invalidate: () => {},
+		render: (w: number) => {
+			const preview = truncateToVisualLines(body, PREVIEW_LINES, w, 0);
+			if (preview.skippedCount === 0) return ["", ...preview.visualLines];
+			// Same hint as pi's core/tools/bash.js result card:
+			// `... (N earlier lines, KEY to expand)` — paren wraps the whole phrase.
+			const hint = `${theme.fg("muted", `... (${preview.skippedCount} earlier lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+			return ["", truncateToWidth(hint, w, "..."), ...preview.visualLines];
+		},
+	};
+}
+
+/** foldedBlock over a single colored string (split per line so colors survive folding). */
+function foldedContent(styled: string, color: (line: string) => string, theme: Theme): BodyComponent {
+	return foldedBlock(styled.split("\n").map(color), theme);
+}
+
+/**
+ * Content block that honors the expanded flag: collapsed uses the uniform
+ * fold (tail preview + expand hint); expanded renders every line in full
+ * (blank-line prefix preserved in both modes — bash card parity). Content is
+ * never dropped in either mode.
+ */
+function contentBlock(styled: string, color: (line: string) => string, expanded: boolean, theme: Theme): BodyComponent {
+	if (expanded) {
+		const lines = styled.split("\n");
+		const cmp = new Container();
+		cmp.addChild(contentRow(color(lines[0])));
+		for (const line of lines.slice(1)) cmp.addChild(new Text(color(line), 0, 0));
+		return cmp;
+	}
+	return foldedContent(styled, color, theme);
+}
+
+/** Style one body row per its kind (pi-native colors). */
+function styleRow(row: { style: "prompt" | "thinking" | "tool" | "text"; content: string }, theme: Theme): string {
+	switch (row.style) {
+		case "thinking":
+			return theme.italic(theme.fg("thinkingText", "Thinking..."));
+		case "tool": {
+			const sepIdx = row.content.indexOf(":");
+			if (sepIdx === -1) return theme.fg("toolTitle", row.content);
+			return `${theme.fg("toolTitle", row.content.slice(0, sepIdx))}${theme.fg("muted", row.content.slice(sepIdx))}`;
+		}
+		default:
+			return theme.fg("toolOutput", row.content);
+	}
+}
+
+/** Flatten prompt + events into styled rows (text chunks split per line). */
+function bodyRows(
+	input: string | undefined,
+	events: RenderEvent[] | undefined,
+): { style: "prompt" | "thinking" | "tool" | "text"; content: string }[] {
+	const rows: { style: "prompt" | "thinking" | "tool" | "text"; content: string }[] = [];
+	const promptText = input?.trim();
+	if (promptText) {
+		rows.push({ style: "prompt", content: promptText });
+		if (events?.length) rows.push({ style: "text", content: "" }); // blank line after the prompt
+	}
+	for (const ev of events ?? []) {
+		if (ev.kind === "thinking") {
+			rows.push({ style: "thinking", content: "Thinking..." });
+		} else if (ev.kind === "tool") {
+			rows.push({ style: "tool", content: `${ev.name}:${ev.args ? ` ${ev.args}` : ""}` });
+		} else {
+			for (const line of ev.text.split("\n")) rows.push({ style: "text", content: line });
+		}
+	}
+	return rows;
+}
+
+/**
+ * Shared output body: the prompt and the sub-agent's activity stream are one
+ * stream — the prompt rides at the head and flows away as output grows
+ * (terminal-scroll feel; the header title is the card's fixed identifier).
+ * Events render in order with their pi-native styles (Thinking... italic,
+ * tool calls toolTitle, text in toolOutput). Collapsed folds the stream to
+ * the tail PREVIEW_LINES with an "N earlier lines" hint; expanded shows
+ * everything. Returns null when there is nothing to show.
+ */
+function renderBody(body: CardBody, expanded: boolean, theme: Theme): BodyComponent | null {
+	const rows = bodyRows(body.prompt, body.events);
+	if (rows.length === 0) return null;
+
+	if (expanded) {
+		const cmp = new Container();
+		// First row carries the blank-line prefix (blank + content).
+		cmp.addChild(contentRow(styleRow(rows[0], theme)));
+		for (const row of rows.slice(1)) cmp.addChild(new Text(styleRow(row, theme), 0, 0));
+		return cmp;
+	}
+
+	// Collapsed: uniform fold — short content in full, long content tail-5
+	// preview + expand hint (same foldedBlock as every other card).
+	return foldedBlock(
+		rows.map((r) => styleRow(r, theme)),
+		theme,
+	);
+}
+
+// ─── Card components ───────────────────────────────────────
+
+/**
+ * Assemble a full card (no background shell): header row + optional body
+ * sections (activity stream, failure reason, steer message) + optional
+ * session footer. Tool results return this directly — the framework's
+ * default-shell Box paints the background.
+ */
+export function renderCard(config: CardConfig, theme: Theme): Container {
+	const sections: { header?: string; body?: BodyComponent[]; footer?: string } = {};
+	if (config.header) sections.header = renderHeader(config.header, theme);
+
+	const bodyParts: BodyComponent[] = [];
+	const b = config.body;
+	if (b) {
+		if (b.prompt !== undefined || b.events?.length) {
+			const body = renderBody(b, config.expanded, theme);
+			if (body) bodyParts.push(body);
+		}
+		if (b.error && (config.showBodyError ?? true)) {
+			bodyParts.push(contentBlock(b.error, (l) => theme.fg("dim", l), config.expanded, theme));
+		}
+		if (b.message) {
+			bodyParts.push(contentBlock(b.message, (l) => theme.fg("toolOutput", l), config.expanded, theme));
+		}
+	}
+	if (bodyParts.length) sections.body = bodyParts;
+	if (config.footer) sections.footer = config.footer;
+
+	return cardContent(theme, sections);
+}
+
+/**
+ * Notification card: renderCard wrapped in its own background shell — the
+ * message renderer renders outside the tool shell, so it paints its own
+ * background. Pi themes expose exactly three tool-shell backgrounds
+ * (toolPendingBg / toolSuccessBg / toolErrorBg) — there is no warning
+ * background; a stopped agent is an error for the caller, so it takes the
+ * error red, and the warning-yellow "stopped" status word carries the nuance.
+ */
+export function renderNotificationCard(config: CardConfig, theme: Theme, bg: "error" | "success"): Container {
+	return card(theme, bg === "error" ? "toolErrorBg" : "toolSuccessBg", renderCard(config, theme));
+}
+
+/** Notification fallback when no details arrived — dim one-liner in an error shell. */
+export function renderNoDetailsCard(theme: Theme): Container {
+	return card(theme, "toolErrorBg", contentRow(theme.fg("dim", "(no details)")));
+}

@@ -17,7 +17,7 @@
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { AgentActivity, AgentProcess } from "./agent-process.js";
+import type { AgentProcess } from "./agent-process.js";
 import { activityRow, formatDuration, Spinner, safeTitle } from "./format.js";
 
 // A single Spinner class drives both the widget and the card animation — same
@@ -29,19 +29,52 @@ const TICK_MS = 80;
 /** Widget line indent: 1 (widget padding) + ⠋ + space → excerpt aligns with the title. */
 const EXCERPT_INDENT = "   ";
 
-interface WidgetRow {
-	agent: AgentProcess;
-	spinner: Spinner;
-}
-
 interface WidgetRender {
 	render(): string[];
 	invalidate(): void;
 }
 
+/**
+ * One widget line: spinner + quoted title + elapsed time, plus the latest
+ * activity excerpt — the per-agent child of AgentWidget (pi Loader-style:
+ * owns its spinner, renders its own line).
+ */
+class AgentRow {
+	readonly agent: AgentProcess;
+	readonly spinner = new Spinner();
+
+	constructor(agent: AgentProcess) {
+		this.agent = agent;
+	}
+
+	/** Advance the spinner frame (called by the container's single clock). */
+	tick(): void {
+		this.spinner.tick();
+	}
+
+	/** Status line: ` ⠋ "title" (12.3s)` — accent spinner, bashMode title, muted meta. */
+	statusLine(theme: Theme): string {
+		const label = safeTitle(this.agent.title, 40);
+		const elapsed = formatDuration(Date.now() - this.agent.startedAt);
+		// Meta is parenthesized like every other component's meta (bash
+		// `(timeout 10s)`, notification `(Took …)`); `·` only separates
+		// multiple meta items, so a lone elapsed time drops it.
+		return ` ${theme.fg("accent", this.spinner.current())} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`;
+	}
+
+	/**
+	 * Latest-activity excerpt, aligned to the title column — shared format
+	 * with the tool card activity row (activityRow in format.ts).
+	 */
+	excerpt(theme: Theme): string | null {
+		const activity = this.agent.getLatestActivity();
+		return activity ? `${EXCERPT_INDENT}${activityRow(activity, theme, 60)}` : null;
+	}
+}
+
 export class AgentWidget {
 	private readonly ui: ExtensionUIContext;
-	private readonly rows = new Map<string, WidgetRow>();
+	private readonly rows = new Map<string, AgentRow>();
 	private interval: ReturnType<typeof setInterval> | undefined;
 	private registered = false;
 	private tui: { requestRender(): void } | undefined;
@@ -53,7 +86,7 @@ export class AgentWidget {
 	/** Track a background agent. No-op when the row is already present. */
 	add(agent: AgentProcess): void {
 		if (this.rows.has(agent.agentId)) return;
-		this.rows.set(agent.agentId, { agent, spinner: new Spinner() });
+		this.rows.set(agent.agentId, new AgentRow(agent));
 		this.ensureRunning();
 	}
 
@@ -92,7 +125,7 @@ export class AgentWidget {
 		// Drop rows whose agent reached a terminal state.
 		for (const [id, row] of this.rows) {
 			if (row.agent.status !== "running") this.rows.delete(id);
-			else row.spinner.tick();
+			else row.tick();
 		}
 		if (this.rows.size === 0) {
 			this.dispose();
@@ -128,27 +161,11 @@ export class AgentWidget {
 		// form (Text(line, 1, 0)).
 		const lines: string[] = [` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold("Agents"))}`];
 		for (const row of this.rows.values()) {
-			const { agent, spinner } = row;
-			const label = safeTitle(agent.title, 40);
-			const elapsed = formatDuration(Date.now() - agent.startedAt);
-			// Meta is parenthesized like every other component's meta (bash
-			// `(timeout 10s)`, notification `(Took …)`); `·` only separates
-			// multiple meta items, so a lone elapsed time drops it.
-			lines.push(
-				` ${theme.fg("accent", spinner.current())} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`,
-			);
+			lines.push(row.statusLine(theme));
 
-			const activity = agent.getLatestActivity();
-			if (activity) lines.push(this.renderExcerpt(activity, theme));
+			const excerpt = row.excerpt(theme);
+			if (excerpt) lines.push(excerpt);
 		}
 		return lines;
-	}
-
-	/**
-	 * Latest-activity excerpt, aligned to the title column — shared format
-	 * with the tool card activity row (activityRow in render.ts).
-	 */
-	private renderExcerpt(activity: AgentActivity, theme: Theme): string {
-		return `${EXCERPT_INDENT}${activityRow(activity, theme, 60)}`;
 	}
 }
