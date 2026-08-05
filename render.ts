@@ -16,7 +16,7 @@ import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
-import { formatDuration, SPINNER, safeTitle } from "./format.js";
+import { formatDuration, Spinner, safeTitle } from "./format.js";
 import type { NotificationDetails, RenderEvent, SubagentDetails } from "./types.js";
 
 // ─── Tool params ───────────────────────────────────────────
@@ -51,8 +51,8 @@ interface TimerState {
 	startedAt?: number;
 	endedAt?: number;
 	interval?: ReturnType<typeof setInterval>;
-	/** Spinner frame index for the stop/start animation. */
-	frame?: number;
+	/** Spinner animation for the stop/start animation. */
+	spinner?: Spinner;
 	/** Resolved model (populated by renderResult on first update). */
 	resolvedModel?: string;
 	/** Resolved thinking level (populated by renderResult on first update). */
@@ -102,9 +102,10 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 	// ✓/✗ on completion (the framework marks the result via isError).
 	const icon = context.isPartial
 		? (() => {
-				const state = context.state as TimerState & { frame?: number };
-				state.frame = (state.frame ?? 0) + 1;
-				return theme.fg("accent", SPINNER[state.frame % SPINNER.length]);
+				const state = context.state as TimerState & { spinner?: Spinner };
+				state.spinner = state.spinner ?? new Spinner();
+				state.spinner.tick();
+				return theme.fg("accent", state.spinner.current());
 			})()
 		: context.isError
 			? theme.fg("error", "\u2717")
@@ -253,13 +254,12 @@ function agentTitle(title: string | undefined, theme: Theme): string {
 	return `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : ""}`;
 }
 
-/** Start the 100ms invalidate loop (if not running); returns the current spinner frame. */
+/** Start the 80ms invalidate loop (if not running); returns the current spinner frame. */
 function startSpinner(state: TimerState, invalidate: () => void): string {
-	if (state.frame === undefined) state.frame = 0;
-	if (!state.interval) state.interval = setInterval(() => invalidate(), 100);
-	const spinner = SPINNER[state.frame % SPINNER.length];
-	state.frame++;
-	return spinner;
+	if (state.spinner === undefined) state.spinner = new Spinner();
+	if (!state.interval) state.interval = setInterval(() => invalidate(), 80);
+	state.spinner.tick();
+	return state.spinner.current();
 }
 
 /** Stop the invalidate loop (if running). */
@@ -444,7 +444,7 @@ export function renderAgentResult(
 	if (details?.model && state.resolvedModel === undefined) state.resolvedModel = details.model;
 	if (details?.thinking && state.resolvedThinking === undefined) state.resolvedThinking = details.thinking;
 	if (state.startedAt !== undefined && isPartial && !state.interval) {
-		state.interval = setInterval(() => context.invalidate(), 100);
+		state.interval = setInterval(() => context.invalidate(), 80);
 	}
 	if (!isPartial || context.isError) {
 		state.endedAt ??= details?.endedAt ?? Date.now();

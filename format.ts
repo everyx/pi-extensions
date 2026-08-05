@@ -10,9 +10,9 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity } from "./agent-process.js";
 
-/** Spinner frames shared by the Agents widget (80ms tick) and the stop animation (100ms). */
+/** Spinner frames (80ms tick — matches Pi's native loader interval). */
 export const SPINNER = [
-	"\u281b",
+	"\u280b",
 	"\u2819",
 	"\u2839",
 	"\u2838",
@@ -23,6 +23,17 @@ export const SPINNER = [
 	"\u2807",
 	"\u280f",
 ];
+
+/** Spinner animation: owns the frame index, ticks forward on each interval. */
+export class Spinner {
+	private frame = 0;
+	tick() {
+		this.frame++;
+	}
+	current(): string {
+		return SPINNER[this.frame % SPINNER.length];
+	}
+}
 
 /** Seconds with one decimal — shared by cards and the Agents widget. */
 export function formatDuration(ms: number): string {

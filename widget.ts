@@ -18,10 +18,10 @@
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity, AgentProcess } from "./agent-process.js";
-import { activityRow, formatDuration, SPINNER, safeTitle } from "./format.js";
+import { activityRow, formatDuration, Spinner, safeTitle } from "./format.js";
 
-// Same frames and cadence as pi-tui Loader's DEFAULT_FRAMES / DEFAULT_INTERVAL_MS.
-// (SPINNER lives in format.ts — shared with the stop animation.)
+// A single Spinner class drives both the widget and the card animation — same
+// frames, same 80ms cadence, same implementation (see format.ts).
 
 const WIDGET_KEY = "subagents";
 const TICK_MS = 80;
@@ -31,7 +31,7 @@ const EXCERPT_INDENT = "   ";
 
 interface WidgetRow {
 	agent: AgentProcess;
-	frame: number;
+	spinner: Spinner;
 }
 
 interface WidgetRender {
@@ -53,7 +53,7 @@ export class AgentWidget {
 	/** Track a background agent. No-op when the row is already present. */
 	add(agent: AgentProcess): void {
 		if (this.rows.has(agent.agentId)) return;
-		this.rows.set(agent.agentId, { agent, frame: 0 });
+		this.rows.set(agent.agentId, { agent, spinner: new Spinner() });
 		this.ensureRunning();
 	}
 
@@ -92,7 +92,7 @@ export class AgentWidget {
 		// Drop rows whose agent reached a terminal state.
 		for (const [id, row] of this.rows) {
 			if (row.agent.status !== "running") this.rows.delete(id);
-			else row.frame++;
+			else row.spinner.tick();
 		}
 		if (this.rows.size === 0) {
 			this.dispose();
@@ -128,17 +128,15 @@ export class AgentWidget {
 		// form (Text(line, 1, 0)).
 		const lines: string[] = [` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold("Agents"))}`];
 		for (const row of this.rows.values()) {
-			const { agent, frame } = row;
-			const spinner = theme.fg("accent", SPINNER[frame % SPINNER.length]);
-			// Task label — same colors as the card header title (bashMode quotes),
-			// rendered safe for one line: newlines/quotes flattened, capped
-			// (mirrors safeTitle in render.ts).
+			const { agent, spinner } = row;
 			const label = safeTitle(agent.title, 40);
 			const elapsed = formatDuration(Date.now() - agent.startedAt);
 			// Meta is parenthesized like every other component's meta (bash
 			// `(timeout 10s)`, notification `(Took …)`); `·` only separates
 			// multiple meta items, so a lone elapsed time drops it.
-			lines.push(` ${spinner} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`);
+			lines.push(
+				` ${theme.fg("accent", spinner.current())} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`,
+			);
 
 			const activity = agent.getLatestActivity();
 			if (activity) lines.push(this.renderExcerpt(activity, theme));
