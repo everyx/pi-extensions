@@ -16,7 +16,7 @@ import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
-import { firstLine, formatDuration, SPINNER, safeTitle } from "./format.js";
+import { formatDuration, SPINNER, safeTitle } from "./format.js";
 import type { NotificationDetails, RenderEvent, SubagentDetails } from "./types.js";
 
 // ─── Tool params ───────────────────────────────────────────
@@ -118,7 +118,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 			? undefined
 			: `${context.isPartial ? "Elapsed" : "Took"} ${formatDuration((context.state.endedAt ?? Date.now()) - (context.state.startedAt as number))}`;
 
-	const title = args.title.trim() || firstLine(args.prompt);
+	const title = args.title.trim();
 	const state = context.state as TimerState;
 	// Resolved model/thinking from the first onUpdate carry-back (renderCall
 	// runs before execute() so args.model/thinking are the raw user inputs).

@@ -26,8 +26,6 @@ export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopp
 export type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
 
 /** Latest activity for the widget excerpt line (never enters LLM context). */
-export type AgentActivityKind = "thinking" | "text" | "tool";
-
 /**
  * Latest activity for the widget excerpt line (never enters LLM context).
  * Tool calls carry structured name/args — the producer (event-interpret.ts)
@@ -91,7 +89,6 @@ export const STOP_GRACE_MS = 5_000;
 // it when the caller wants a bound — the default is no limit (a Pi extension
 // should not impose hidden deadlines on sub-agents).
 
-/** Build a "<name>: <args summary>" label for a tool call (widget excerpt). */
 export class AgentProcess {
 	readonly agentId: string;
 	readonly title: string;
@@ -220,11 +217,10 @@ export class AgentProcess {
 	}
 
 	/**
-	 * Wait until the agent reaches a terminal state, applying graceful turn
-	 * limits (wrap-up steer → hard abort) along the way.
+	 * Wait until the agent reaches a terminal state.
 	 *
-	 * Every settle wait is bounded by the overall deadline: a child stuck in a
-	 * hung model call would otherwise make us wait forever (issue #10, session
+	 * The wait is bounded by the overall deadline: a child stuck in a hung
+	 * model call would otherwise make us wait forever (issue #10, session
 	 * 019fc63c: sub-agent completed but never settled; only a user interrupt
 	 * released the wait). On deadline we abort, give the child a grace window
 	 * to settle, then hard-stop it.
@@ -236,22 +232,16 @@ export class AgentProcess {
 		// (its own `timeoutMs !== undefined` guard skips the timer).
 		const deadline = this.timeoutMs === undefined ? undefined : Date.now() + this.timeoutMs;
 
-		try {
-			while (this.status === "running" && !this.done) {
-				const remaining = deadline === undefined ? undefined : Math.max(0, deadline - Date.now());
-				const settled = await this.awaitSettled(remaining);
-				if (this.done) break;
-				if (!settled) {
-					// Total wall-clock timeout: abort and bound the settle wait.
-					this.hardAborted = true;
-					await this.abortAndWait();
-					break;
-				}
-
-				break; // normal completion
+		// Wait for the first settle to resolve, the child to exit (onExit flips
+		// `done`), or the deadline. A deadline with neither is outright stuck:
+		// abort and give the child a bound to settle, hard-stopping if it can't.
+		if (this.status === "running" && !this.done) {
+			const remaining = deadline === undefined ? undefined : Math.max(0, deadline - Date.now());
+			const settled = await this.awaitSettled(remaining);
+			if (!this.done && !settled) {
+				this.hardAborted = true;
+				await this.abortAndWait();
 			}
-		} finally {
-			/* no timer to clear — waits are deadline-bounded */
 		}
 
 		this.done = true;
@@ -267,8 +257,16 @@ export class AgentProcess {
 			this.status = "completed";
 		}
 
+		// A failed child usually leaves empty terminal text; the real root cause
+		// lives in the model error (agentError) or the stderr the RpcClient
+		// captured before exit — surface it instead of a blank "Sub-agent failed."
 		const output = await this.lastOutput();
-		const finalOutput = this.agentError && !output.trim() ? this.agentError : output;
+		const finalOutput =
+			this.agentError && !output.trim()
+				? this.agentError
+				: this.status === "failed" && !output.trim()
+					? this.client.stderrText
+					: output;
 		const stats = await this.getStats();
 		return {
 			status: this.status,

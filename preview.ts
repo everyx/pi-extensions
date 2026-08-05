@@ -77,8 +77,6 @@ function renderLines(component: unknown, width = 100): string[] {
 	return c.render(width);
 }
 
-/** Build a component via a callback (fresh render each story), then show it. */
-
 /**
  * Simulate pi's framework tool shell (tool-execution.js): for renderShell
  * "default" tools (Agent/AgentControl are default), the framework wraps both
@@ -598,7 +596,6 @@ const notifSection: LiveSection = {
 	height: 0,
 };
 
-// Measure fixed canvas heights over a full cycle (covers both the spin and
 // Measure fixed canvas heights over a full cycle (covers both the spin and
 // card phases of the flow animations, every stream step, and every card of
 // the two carousels), then run all sections concurrently forever.

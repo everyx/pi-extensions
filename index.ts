@@ -91,6 +91,7 @@ const AgentParamsSchema = Type.Object({
 		description: "The task for the sub-agent (self-contained: it starts with zero context).",
 	}),
 	title: Type.String({
+		minLength: 1,
 		description:
 			"Short task title (3-5 words) — required. Identifies the agent in the UI, " +
 			"notification card, and session name.",
@@ -184,6 +185,12 @@ function spawnErrorResult(
 		details: { error: started.error, ...extra },
 		isError: true as const,
 	};
+}
+
+/** One-shot cleanup shared by every exit path: detach the abort handler, then stop the child. */
+async function teardownAgent(agent: AgentProcess, signal: AbortSignal | undefined, onAbort: () => void): Promise<void> {
+	signal?.removeEventListener("abort", onAbort);
+	await agent.stop().catch(() => {});
 }
 
 /** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
@@ -367,8 +374,7 @@ export default function (pi: ExtensionAPI) {
 					// to the LLM and the status line shows it to the user — a
 					// followUp notification would deliver the same failure twice.
 					if (!started.ok) {
-						signal?.removeEventListener("abort", onAbort);
-						await agent.stop().catch(() => {});
+						await teardownAgent(agent, signal, onAbort);
 						return spawnErrorResult(started, { runInBackground: true, title: agent.title });
 					}
 
@@ -415,8 +421,7 @@ export default function (pi: ExtensionAPI) {
 
 				// ── Foreground: block until completion ──
 				if (!started.ok) {
-					await agent.stop().catch(() => {});
-					signal?.removeEventListener("abort", onAbort);
+					await teardownAgent(agent, signal, onAbort);
 					return spawnErrorResult(started);
 				}
 
@@ -426,8 +431,7 @@ export default function (pi: ExtensionAPI) {
 				});
 
 				const completion = await agent.waitForCompletion();
-				await agent.stop().catch(() => {});
-				signal?.removeEventListener("abort", onAbort);
+				await teardownAgent(agent, signal, onAbort);
 
 				// Failures and limit-stops are both errors for the caller: the
 				// stopped case (total timeout / hard token limit) must not look
@@ -475,8 +479,7 @@ export default function (pi: ExtensionAPI) {
 					},
 				};
 			} catch (err) {
-				signal?.removeEventListener("abort", onAbort);
-				await agent.stop().catch(() => {});
+				await teardownAgent(agent, signal, onAbort);
 				return toErrorResult(err);
 			}
 		},

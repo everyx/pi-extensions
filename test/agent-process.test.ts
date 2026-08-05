@@ -3,7 +3,7 @@
  *
  * The stateful transport (rpc-client.ts) is NOT tested — a fake client is
  * injected via the `createClient` seam so we can drive the state machine
- * deterministically: spawnAndSend → settle → completion, wrap-up steering,
+ * deterministically: spawnAndSend → settle → completion,
  * hard abort, external stop, and failure paths.
  */
 
@@ -31,10 +31,12 @@ class FakeClient {
 
 	/** Simulated session stats returned by get_session_stats. */
 	stats: { tokens: number; toolCalls: number } = { tokens: 100, toolCalls: 2 };
-	/** Simulated prompt preflight result. */
+	/** Simulated preflight result. */
 	promptOk = true;
 	/** Simulated last assistant text. */
 	lastText = "final answer";
+	/** Simulated captured stderr (crash root cause). */
+	stderrText = "";
 	/** sessionFile/sessionId returned by get_state. */
 	sessionFile = "/tmp/fake.jsonl";
 	sessionId = "sess-1";
@@ -272,6 +274,20 @@ describe("AgentProcess — waitForCompletion", () => {
 
 		const completion = await completionPromise;
 		assert.equal(completion.status, "failed");
+	});
+
+	it("surfaces captured stderr as the output when a failed child left no text", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		await agent.spawnAndSend("do it");
+		fake.lastText = ""; // no assistant output before the crash
+		fake.stderrText = "FATAL: bad API key";
+
+		const completionPromise = agent.waitForCompletion();
+		fake.emitExit(1);
+
+		const completion = await completionPromise;
+		assert.equal(completion.status, "failed");
+		assert.equal(completion.output, "FATAL: bad API key");
 	});
 });
 

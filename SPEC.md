@@ -92,10 +92,10 @@ session: /path/...jsonl
   Model not found
 ```
 
-- 状态一眼可辨（icon 前置），失败原因完整显示，不截断
+- 状态一眼可辨（icon 前置）；失败原因按统一折叠规则处理（默认尾部预览 + 展开全显，对齐 bash 工具卡）
 - 后台 agent id 只进 LLM 的 tool content，卡片上不出现
 
-### AgentControl 结果卡（renderShell "self"）
+### AgentControl 结果卡
 
 ```
 ✓ Agent "research db schema" steered
@@ -123,7 +123,7 @@ Found 5 files handling authentication: src/auth/*.ts …
 session: /path/...jsonl
 ```
 
-- header：状态 icon 在最前（✓/✗/■）——与 Agent 工具卡区分（工具卡无 icon）
+- header：状态 icon 在最前（✓/✗/■）——icon 与 Agent 工具卡同款（工具卡同样前置 icon）；通知卡独有的是追加状态词（`failed` error / `stopped` warning）与 token/工具统计
 - 失败/停止时追加彩色状态词（`failed` error / `stopped` warning）
 - 渲染数据在 `details`，不进 LLM 上下文
 

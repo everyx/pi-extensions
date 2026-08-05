@@ -59,12 +59,6 @@ export function activityRow(activity: AgentActivity, theme: Theme, max?: number)
 	return theme.fg("muted", max === undefined ? activity.text : clipTail(activity.text, max));
 }
 
-/** Extract a one-line summary of a long string: first line, ellipsis if truncated. */
-export function firstLine(s: string): string {
-	const idx = s.indexOf("\n");
-	return idx < 0 ? s : `${s.slice(0, idx)}\u2026`;
-}
-
 /**
  * Task title, rendered safe for a single quoted line: tabs/newlines are
  * flattened and embedded double quotes neutralized (so the bashMode quotes

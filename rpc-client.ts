@@ -102,6 +102,11 @@ export class RpcClient {
 		});
 	}
 
+	/** Best-effort stderr text captured before exit — the crash root cause. */
+	get stderrText(): string {
+		return this.stderr;
+	}
+
 	get isClosed(): boolean {
 		return this.closed;
 	}
