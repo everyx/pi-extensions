@@ -248,7 +248,14 @@ function styleRow(row: { style: "prompt" | "thinking" | "tool" | "text"; content
 	}
 }
 
-/** Flatten prompt + events into styled rows (text chunks split per line). */
+/**
+ * Flatten prompt + events into styled rows (text chunks split per line).
+ * Leading/trailing blank rows are trimmed — bash.js parity: the result card
+ * trims the whole output (`output.trim()`), so only head/tail padding goes;
+ * blank separators *inside* the stream (the prompt divider, markdown
+ * paragraph gaps) survive. Trim happens here so collapsed and expanded
+ * render the same stream.
+ */
 function bodyRows(
 	input: string | undefined,
 	events: RenderEvent[] | undefined,
@@ -268,7 +275,19 @@ function bodyRows(
 			for (const line of ev.text.split("\n")) rows.push({ style: "text", content: line });
 		}
 	}
-	return rows;
+	// Drop blank (zero-length or whitespace-only) head/tail rows — bash.js
+	// trims the whole output (`output.trim()`), which likewise drops trailing
+	// blank lines; interior blank separators survive. Bash's trim would also
+	// strip horizontal padding off the first/last content line, which we
+	// deliberately keep (code-fence indentation must survive).
+	const isBlank = (c: string) => c.trim() === "";
+	// Two-pointer scan trims head/tail blanks in O(n); shift()/pop() on the
+	// head would be O(n²). `first <= last` also covers the all-blank case.
+	let first = 0;
+	let last = rows.length - 1;
+	while (first < rows.length && isBlank(rows[first].content)) first++;
+	while (last >= 0 && isBlank(rows[last].content)) last--;
+	return first <= last ? rows.slice(first, last + 1) : [];
 }
 
 /**

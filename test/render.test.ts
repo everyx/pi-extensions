@@ -144,6 +144,32 @@ test("collapsed keeps the whole stream when it fits", () => {
 	assert.ok(!lines.some((l) => l.includes("earlier lines")), "no hint when nothing is folded");
 });
 
+test("body trims leading/trailing blank rows (bash parity) but keeps inner blanks", () => {
+	const cmp = renderAgentResult(
+		{
+			content: [{ type: "text", text: "done" }],
+			details: {
+				task: "probe",
+				startedAt: 0,
+				endedAt: 100,
+				// leading blank + inner blank + trailing blank (incl. whitespace-only)
+				events: [{ kind: "text", text: "\nfirst\n\nsecond\n   \n" }],
+			},
+		},
+		{ expanded: true, isPartial: false },
+		theme,
+		context,
+	);
+	const text = renderText(cmp, 120);
+	assert.ok(text.includes("first"), "first line visible");
+	assert.ok(text.includes("second"), "second line visible");
+	assert.ok(text.includes("first\n\nsecond"), "inner blank line survives");
+	// The trailing whitespace-only row is the real exercise of the isBlank
+	// predicate (both head/tail trim loops share it); a leading blank is
+	// unreachable here because the prompt always opens the stream.
+	assert.ok(!text.endsWith("\n"), "trailing blank rows (incl whitespace-only) trimmed");
+});
+
 // ── Background start: single status line, no agent id on the card ──
 
 test("background start animates starting, then settles on started", () => {
