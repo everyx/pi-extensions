@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Box, Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { type Spinner, safeTitle } from "./format.js";
 import type { RenderEvent } from "./types.js";
 
@@ -249,30 +249,54 @@ function styleRow(row: { style: "prompt" | "thinking" | "tool" | "text"; content
 }
 
 /**
- * Flatten prompt + events into styled rows (text chunks split per line).
- * Leading/trailing blank rows are trimmed — bash.js parity: the result card
- * trims the whole output (`output.trim()`), so only head/tail padding goes;
- * blank separators *inside* the stream (the prompt divider, markdown
- * paragraph gaps) survive. Trim happens here so collapsed and expanded
- * render the same stream.
+ * Flatten prompt + events into styled rows with pi-parity block spacing:
+ * each activity block (thinking run, individual tool call, text run) is
+ * separated from the next by a blank row — pi's assistant message uses
+ * Spacer(1) between thinking/text and each tool execution card carries its
+ * own top spacer, so blocks never touch. Text rows inside one run stay
+ * tight (a streamed chunk may split across events). Leading/trailing blank
+ * rows are trimmed — bash.js parity: the result card trims the whole
+ * output (`output.trim()`), so only head/tail padding goes; blank
+ * separators *inside* the stream (the prompt divider, markdown paragraph
+ * gaps) survive. Trim happens here so collapsed and expanded render the
+ * same stream.
  */
 function bodyRows(
 	input: string | undefined,
 	events: RenderEvent[] | undefined,
 ): { style: "prompt" | "thinking" | "tool" | "text"; content: string }[] {
 	const rows: { style: "prompt" | "thinking" | "tool" | "text"; content: string }[] = [];
+	/** Blank separator row — only ever inserted at a block boundary. */
+	const pushSeparator = () => {
+		const last = rows[rows.length - 1];
+		if (last && last.content !== "") rows.push({ style: "text", content: "" });
+	};
+	/** Start a block: separated from a preceding different block (a text row
+	 * continuing a text run is not a block boundary). */
+	const pushBlock = (style: "prompt" | "thinking" | "tool" | "text", content: string) => {
+		const last = rows[rows.length - 1];
+		const continuesText = style === "text" && last?.style === "text";
+		if (last && !continuesText) pushSeparator();
+		rows.push({ style, content });
+	};
+
 	const promptText = input?.trim();
-	if (promptText) {
-		rows.push({ style: "prompt", content: promptText });
-		if (events?.length) rows.push({ style: "text", content: "" }); // blank line after the prompt
-	}
+	if (promptText) pushBlock("prompt", promptText);
+
 	for (const ev of events ?? []) {
 		if (ev.kind === "thinking") {
-			rows.push({ style: "thinking", content: "Thinking..." });
+			pushBlock("thinking", "Thinking...");
 		} else if (ev.kind === "tool") {
-			rows.push({ style: "tool", content: `${ev.name}:${ev.args ? ` ${ev.args}` : ""}` });
+			pushBlock("tool", `${ev.name}:${ev.args ? ` ${ev.args}` : ""}`);
 		} else {
-			for (const line of ev.text.split("\n")) rows.push({ style: "text", content: line });
+			// A text event may split across streamed chunks — the first line
+			// opens the run (separated from the previous block), the rest join
+			// it tight.
+			const lines = ev.text.split("\n");
+			lines.forEach((line, i) => {
+				if (i === 0) pushBlock("text", line);
+				else rows.push({ style: "text", content: line });
+			});
 		}
 	}
 	// Drop blank (zero-length or whitespace-only) head/tail rows — bash.js
@@ -307,7 +331,13 @@ function renderBody(body: CardBody, expanded: boolean, theme: Theme): BodyCompon
 		const cmp = new Container();
 		// First row carries the blank-line prefix (blank + content).
 		cmp.addChild(contentRow(styleRow(rows[0], theme)));
-		for (const row of rows.slice(1)) cmp.addChild(new Text(styleRow(row, theme), 0, 0));
+		for (const row of rows.slice(1)) {
+			// Block separators are real blank rows — pi-tui's Text renders zero
+			// lines for empty content, so a Spacer is the only way to draw the
+			// pi-parity gap between activity blocks.
+			if (row.content === "") cmp.addChild(new Spacer(1));
+			else cmp.addChild(new Text(styleRow(row, theme), 0, 0));
+		}
 		return cmp;
 	}
 

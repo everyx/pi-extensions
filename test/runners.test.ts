@@ -35,7 +35,8 @@ test("reapRunners terminates live runner processes and clears the ledger", async
 	const file = runnerFilePath(dir);
 	// Detached so -pid signals the group (same as the real rpc children).
 	const child = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
-	const pid = child.pid!;
+	if (!child.pid) throw new Error("failed to spawn test child");
+	const pid = child.pid;
 	const exited = new Promise<number>((resolve) => child.on("exit", () => resolve(pid)));
 	saveRunners(file, [{ pid, agentId: "a1", title: "t", startedAt: Date.now() }]);
 

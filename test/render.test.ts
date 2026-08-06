@@ -480,6 +480,55 @@ test("foreground card shows the failure reason below the body", () => {
 	assert.ok(idxErr > -1 && idxSess > idxErr, "reason above footer");
 });
 
+test("activity blocks (thinking/tool/text) are separated by blank rows", () => {
+	const details: SubagentDetails = {
+		task: "t",
+		events: [
+			{ kind: "thinking" },
+			{ kind: "tool", name: "bash", args: "ls" },
+			{ kind: "text", text: "found 5 files" },
+			{ kind: "tool", name: "read", args: "x" },
+			{ kind: "text", text: "done" },
+		],
+	};
+	const lines = render(
+		renderAgentResult(
+			{ content: [{ type: "text", text: "" }], details },
+			{ expanded: true, isPartial: false },
+			theme,
+			context,
+		),
+		80,
+	).map(strip);
+
+	// Every distinct activity block is separated by exactly one blank row:
+	// Thinking / bash: ls / found 5 files / read: x / done.
+	const idxT = lines.indexOf("Thinking...");
+	const idxB = lines.indexOf("bash: ls");
+	const idxF = lines.indexOf("found 5 files");
+	const idxR = lines.indexOf("read: x");
+	const idxD = lines.indexOf("done");
+	assert.ok(idxT > 0, "body opens below the header with a leading gap");
+	assert.ok(idxB - idxT === 2, "blank between thinking and tool");
+	assert.ok(idxF - idxB === 2, "blank between tool and text");
+	assert.ok(idxR - idxF === 2, "blank between text and next tool");
+	assert.ok(idxD - idxR === 2, "blank between tool and final text");
+
+	// Collapsed uses the same stream — the fold hint counts the separators too.
+	const collapsed = renderText(
+		renderAgentResult(
+			{ content: [{ type: "text", text: "" }], details },
+			{ expanded: false, isPartial: false },
+			theme,
+			context,
+		),
+		80,
+	);
+	assert.ok(collapsed.includes("read: x"), "tail tool row visible collapsed");
+	assert.ok(collapsed.includes("done"), "tail text visible collapsed");
+	assert.ok(collapsed.includes("earlier lines"), "fold hint present");
+});
+
 test("thinking events render as a single marker, folded or expanded", () => {
 	const details: SubagentDetails = { task: "t", events: [{ kind: "thinking" }] };
 
