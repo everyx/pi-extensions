@@ -47,11 +47,6 @@ class AgentRow {
 		this.agent = agent;
 	}
 
-	/** Advance the spinner frame (called by the container's single clock). */
-	tick(): void {
-		this.spinner.tick();
-	}
-
 	/** Status line: ` ⠋ "title" (12.3s)` — accent spinner, bashMode title, muted meta. */
 	statusLine(theme: Theme): string {
 		const label = safeTitle(this.agent.title, 40);
@@ -122,10 +117,11 @@ export class AgentWidget {
 	}
 
 	private tick(): void {
-		// Drop rows whose agent reached a terminal state.
+		// Drop rows whose agent reached a terminal state. The spinner is
+		// wall-clock driven (format.ts), so the interval only needs to keep
+		// re-rendering the elapsed time / latest frame.
 		for (const [id, row] of this.rows) {
 			if (row.agent.status !== "running") this.rows.delete(id);
-			else row.tick();
 		}
 		if (this.rows.size === 0) {
 			this.dispose();

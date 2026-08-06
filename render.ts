@@ -92,7 +92,6 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 		? (() => {
 				const state = context.state as TimerState & { spinner?: Spinner };
 				state.spinner = state.spinner ?? new Spinner();
-				state.spinner.tick();
 				return { type: "spinner", spinner: state.spinner };
 			})()
 		: context.isError
@@ -171,11 +170,15 @@ function doneCard(
 
 export type { RenderEvent } from "./types.js";
 
-/** Start the 80ms invalidate loop (if not running); returns the spinner instance. */
+/**
+ * Start the 80ms invalidate loop (if not running); returns the spinner
+ * instance. The spinner itself is wall-clock driven (format.ts), so the
+ * interval only exists to make the UI periodically repaint and reflect the
+ * advancing frames/elapsed — re-renders never advance the frames.
+ */
 function startSpinner(state: TimerState, invalidate: () => void): Spinner {
 	if (state.spinner === undefined) state.spinner = new Spinner();
 	if (!state.interval) state.interval = setInterval(() => invalidate(), 80);
-	state.spinner.tick();
 	return state.spinner;
 }
 

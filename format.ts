@@ -10,7 +10,10 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentActivity } from "./agent-process.js";
 
-/** Spinner frames (80ms tick — matches Pi's native loader interval). */
+/** Spinner frame interval (80ms — matches Pi's native loader cadence). */
+const SPINNER_TICK_MS = 80;
+
+/** Spinner frames (one Braille frame per tick). */
 export const SPINNER = [
 	"\u280b",
 	"\u2819",
@@ -24,14 +27,17 @@ export const SPINNER = [
 	"\u280f",
 ];
 
-/** Spinner animation: owns the frame index, ticks forward on each interval. */
+/**
+ * Spinner animation driven by wall-clock time: `current()` derives the frame
+ * from time elapsed since construction, so the cadence stays a steady 80ms no
+ * matter how often the UI re-renders. A fast body/event stream must not speed
+ * the animation up (render-call-count-driven tick was the bug). The widget
+ * and the Agents card share this one implementation.
+ */
 export class Spinner {
-	private frame = 0;
-	tick() {
-		this.frame++;
-	}
+	private readonly startedAt = Date.now();
 	current(): string {
-		return SPINNER[this.frame % SPINNER.length];
+		return SPINNER[Math.floor((Date.now() - this.startedAt) / SPINNER_TICK_MS) % SPINNER.length];
 	}
 }
 
