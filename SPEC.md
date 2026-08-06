@@ -175,6 +175,7 @@ queued → running ──→ completed（通知）
 - **steer**：turn 结束后注入，排队语义；仅 running 期间有效
 - **stop**：stdin EOF 优雅退出，`stoppedByControl` 抑制通知
 - **失败与超限都返回 isError 工具结果**，与 bash 的 `exit N` / `(cancelled)` 对齐
+- **扩展 reload / 宿主崩溃不留孤儿**：rpc 子进程是独立进程组，reload 时宿主不关 stdin 管道，否则会挂成常驻进程。spawn 时把 pid 写入会话目录 `.runners.json`（每次 spawn track、每次 exit untrack，正常运行期间 ledger 恒空）；新模块加载时 reap 残留孤儿（SIGTERM 进程组，级联孙进程），并告警提示已清理数
 
 ### 完成通知
 

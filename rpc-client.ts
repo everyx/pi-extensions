@@ -107,6 +107,12 @@ export class RpcClient {
 		return this.stderr;
 	}
 
+	/** The child's pid, or null before spawn completes. */
+	get pid(): number | null {
+		return this.proc.pid ?? null;
+	}
+
+	/** True when the child's stdout pipe has closed (process gone). */
 	get isClosed(): boolean {
 		return this.closed;
 	}

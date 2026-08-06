@@ -37,6 +37,7 @@ import {
 	renderAgentResult,
 	renderNotification,
 } from "./render.js";
+import { reapRunners, runnerFilePath } from "./runners.js";
 import type { NotificationDetails } from "./types.js";
 import { AgentWidget } from "./widget.js";
 
@@ -62,6 +63,18 @@ function resolveSubagentSessionDir(): string {
 }
 
 const SUBAGENT_SESSION_DIR = resolveSubagentSessionDir();
+
+/**
+ * Reap sub-agent runners orphaned by an extension reload or host crash: their
+ * rpc stdin pipe stays open, so without this ledger a /reload would leave
+ * resident child processes behind. Normal runs keep the ledger empty (every
+ * spawn is tracked, every exit untracked) — this only ever fires for runners
+ * whose owner vanished.
+ */
+const reaped = reapRunners(runnerFilePath(SUBAGENT_SESSION_DIR));
+if (reaped > 0) {
+	console.warn(`[pi-subagent] reaped ${reaped} orphaned sub-agent process(es) from a previous run`);
+}
 
 /** TUI-only background-agent status widget (created lazily, tui mode only). */
 let widget: AgentWidget | null = null;
