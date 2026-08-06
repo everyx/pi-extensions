@@ -16,7 +16,7 @@
  *   the child runs until it finishes or is stopped via AgentControl.
  */
 
-import { interpretEvent } from "./event-interpret.js";
+import { type AgentActivity, interpretEvent } from "./event-interpret.js";
 import type { RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
 import type { RenderEvent } from "./types.js";
@@ -24,17 +24,6 @@ import type { RenderEvent } from "./types.js";
 export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
 
 export type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
-
-/**
- * Latest activity for the widget excerpt line (never enters LLM context).
- * Tool calls carry structured name/args — the producer (event-interpret.ts)
- * emits the data; consumers decide how to display it (activityRow in
- * render.ts assembles the "name: args" label).
- */
-export type AgentActivity =
-	| { kind: "thinking"; text: string }
-	| { kind: "text"; text: string }
-	| { kind: "tool"; name: string; args: string; id?: string };
 
 export interface AgentStats {
 	tokens: number;
@@ -312,7 +301,7 @@ export class AgentProcess {
 
 	/**
 	 * Ordered activity stream accumulated from every RPC event this agent
-	 * processed. Thinking and tool-call events are recorded as they arrive;
+	 * processed. Thinking and tool-call activity are recorded as they arrive;
 	 * text_delta events are folded into the current text event (consecutive
 	 * deltas append). The stream mirrors pi's session replay order.
 	 */
@@ -320,72 +309,40 @@ export class AgentProcess {
 		return this.events;
 	}
 
-	/**
-	 * Index of the last tool event with a matching identity: same id when
-	 * both sides have one, otherwise same name (pre-id snapshots).
-	 */
-	private findToolEvent(name: string, id: string | undefined): number {
-		for (let i = this.events.length - 1; i >= 0; i--) {
-			const e = this.events[i];
-			if (e.kind !== "tool") continue;
-			if (id !== undefined && e.id !== undefined) {
-				if (e.id === id) return i;
-			} else if (e.name === name) {
-				return i;
-			}
-		}
-		return -1;
-	}
-
 	// ── Internal ───────────────────────────────────────────
 
 	private readonly onDelta: ((delta: string) => void) | undefined;
 	private readonly onActivityChange: ((activity: AgentActivity) => void) | undefined;
-	/** "kind\u0000text" of the activity last delivered via onActivityChange. */
-	private lastNotifiedActivityKey: string | undefined;
 
 	private onEvent(event: RpcEvent): void {
 		// Raw protocol shapes are interpreted in event-interpret.ts — the only
-		// place pi's event vocabulary is mapped onto ours. This switch is the
-		// whole policy surface: settle bookkeeping, activity dedup + push, and
-		// streamed deltas.
+		// place pi's event vocabulary is mapped onto ours. Since v0.84.0 the
+		// wire carries only assistantMessageEvent deltas, so each event maps to
+		// a discrete marker here: the policy surface is settle bookkeeping,
+		// thinking/tool activity push, and streamed text folding.
 		for (const ev of interpretEvent(event)) {
 			switch (ev.type) {
 				case "settled":
 					this.settle();
 					break;
-				case "activity": {
-					this.latestActivity = ev.activity;
-					// pi sends message_update fragments as the assistant message
-					// builds; each is a full snapshot. Tool args grow per fragment
-					// ({} → {"command":""} → …) and text deltas interleave — so
-					// merge by stable tool-call id, never by position (pi's own
-					// pendingTools map does the same). Consecutive thinking
-					// snapshots collapse to one marker.
-					const key =
-						ev.activity.kind === "tool"
-							? `tool\u0000${ev.activity.name}\u0000${ev.activity.args}`
-							: `${ev.activity.kind}\u0000${ev.activity.text}`;
-					if (ev.activity.kind !== "text" && key !== this.lastNotifiedActivityKey) {
-						this.lastNotifiedActivityKey = key;
-						if (ev.activity.kind === "thinking") {
-							const last = this.events[this.events.length - 1];
-							if (last?.kind !== "thinking") {
-								this.events.push({ kind: "thinking" });
-							}
-						} else if (ev.activity.kind === "tool") {
-							const idx = this.findToolEvent(ev.activity.name, ev.activity.id);
-							if (idx >= 0) {
-								const prev = this.events[idx];
-								if (prev.kind === "tool") prev.args = ev.activity.args;
-							} else {
-								const tool: RenderEvent = { kind: "tool", name: ev.activity.name, args: ev.activity.args };
-								if (ev.activity.id) tool.id = ev.activity.id;
-								this.events.push(tool);
-							}
-						}
-						this.onActivityChange?.(ev.activity);
+				case "thinking":
+					// Collapse consecutive thinking deltas into one marker.
+					if (this.events[this.events.length - 1]?.kind !== "thinking") {
+						this.events.push({ kind: "thinking" });
+						const activity: AgentActivity = { kind: "thinking", text: "" };
+						this.latestActivity = activity;
+						this.onActivityChange?.(activity);
 					}
+					break;
+				case "tool_call": {
+					// toolcall_end is the authoritative tool call: the wire streams
+					// the name on toolcall_start and the arguments on toolcall_delta,
+					// but only the end event carries the complete call, so the earlier
+					// events are deliberately ignored. The row stays visible while the
+					// tool actually executes, mirroring the pre-v0.84 card.
+					this.events.push(ev.activity);
+					this.latestActivity = ev.activity;
+					this.onActivityChange?.(ev.activity);
 					break;
 				}
 				case "text_delta": {
@@ -396,6 +353,8 @@ export class AgentProcess {
 					} else {
 						this.events.push({ kind: "text", text: ev.delta });
 					}
+					// Widget excerpt reflects the latest streamed text.
+					this.latestActivity = { kind: "text", text: last?.kind === "text" ? last.text : ev.delta };
 					this.onDelta?.(ev.delta);
 					break;
 				}

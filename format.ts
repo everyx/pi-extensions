@@ -8,7 +8,7 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { AgentActivity } from "./agent-process.js";
+import type { AgentActivity } from "./event-interpret.js";
 
 /** Spinner frame interval (80ms — matches Pi's native loader cadence). */
 const SPINNER_TICK_MS = 80;

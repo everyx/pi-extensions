@@ -9,7 +9,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type AgentActivity, AgentProcess, type AgentProcessOptions } from "../agent-process.js";
+import { AgentProcess, type AgentProcessOptions } from "../agent-process.js";
+import type { AgentActivity } from "../event-interpret.js";
 import type { RpcClientOptions } from "../rpc-client.js";
 
 /** Programmable fake standing in for RpcClient. */
@@ -89,7 +90,11 @@ class FakeClient {
 
 	emitEvent(event: {
 		type: string;
-		assistantMessageEvent?: { type: string; delta?: unknown };
+		assistantMessageEvent?: {
+			type: string;
+			delta?: unknown;
+			toolCall?: { id?: unknown; name?: unknown; arguments?: unknown };
+		};
 		messages?: Array<{ role?: string; stopReason?: string; errorMessage?: unknown; content?: unknown[] }>;
 		message?: {
 			content?: Array<{
@@ -312,7 +317,7 @@ describe("AgentProcess — onDelta", () => {
 	it("ignores non-delta message updates", async () => {
 		const deltas: string[] = [];
 		const { fake } = makeAgent({ cwd: "/tmp", onDelta: (d) => deltas.push(d) });
-		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta" } });
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "text_end" } });
 		assert.deepEqual(deltas, []);
 	});
 });
@@ -355,16 +360,11 @@ describe("AgentProcess — agent API errors", () => {
 });
 
 describe("AgentProcess — latest activity", () => {
-	it("tracks text as the latest content part", async () => {
+	it("tracks streamed text as the latest activity", async () => {
 		const { agent, fake } = makeAgent({ cwd: "/tmp" });
 		fake.emitEvent({
 			type: "message_update",
-			message: {
-				content: [
-					{ type: "thinking", thinking: "hmm" },
-					{ type: "text", text: "Found 5 files" },
-				],
-			},
+			assistantMessageEvent: { type: "text_delta", delta: "Found 5 files" },
 		});
 		assert.deepEqual(agent.getLatestActivity(), { kind: "text", text: "Found 5 files" });
 	});
@@ -373,16 +373,19 @@ describe("AgentProcess — latest activity", () => {
 		const { agent, fake } = makeAgent({ cwd: "/tmp" });
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "thinking", thinking: "Let me analyze the structure" }] },
+			assistantMessageEvent: { type: "thinking_delta", delta: "Let me analyze the structure" },
 		});
-		assert.deepEqual(agent.getLatestActivity(), { kind: "thinking", text: "Let me analyze the structure" });
+		assert.deepEqual(agent.getLatestActivity(), { kind: "thinking", text: "" });
 	});
 
 	it("summarizes tool calls with the friendly argument key", async () => {
 		const { agent, fake } = makeAgent({ cwd: "/tmp" });
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "sleep 20" } }] },
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { name: "bash", arguments: { command: "sleep 20" } },
+			},
 		});
 		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", name: "bash", args: "sleep 20" });
 	});
@@ -391,7 +394,10 @@ describe("AgentProcess — latest activity", () => {
 		const { agent, fake } = makeAgent({ cwd: "/tmp" });
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "custom_tool", arguments: { foo: 1 } }] },
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { name: "custom_tool", arguments: { foo: 1 } },
+			},
 		});
 		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", name: "custom_tool", args: '{"foo":1}' });
 	});
@@ -407,44 +413,49 @@ describe("AgentProcess — latest activity", () => {
 
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "thinking", thinking: "analyzing…" }] },
+			assistantMessageEvent: { type: "thinking_delta", delta: "analyzing…" },
 		});
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }] },
+			assistantMessageEvent: { type: "toolcall_end", toolCall: { name: "bash", arguments: { command: "ls" } } },
 		});
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "text", text: "done" }] },
+			assistantMessageEvent: { type: "text_delta", delta: "done" },
 		});
 
 		assert.deepEqual(events, [
-			{ kind: "thinking", text: "analyzing…" },
+			{ kind: "thinking", text: "" },
 			{ kind: "tool", name: "bash", args: "ls" },
 		]);
 	});
 
-	it("does not refire onActivityChange for the same activity", async () => {
+	it("records every tool call and collapses consecutive thinking", async () => {
 		const events: AgentActivity[] = [];
-		const { fake } = makeAgent({ cwd: "/tmp", onActivityChange: (a) => events.push(a) });
+		const { agent, fake } = makeAgent({ cwd: "/tmp", onActivityChange: (a) => events.push(a) });
 
+		// Two thinking_delta deltas → one thinking marker (dedup).
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "one" } });
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "two" } });
+		// Two bash calls → two tool rows, both recorded.
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "read", arguments: { path: "a.ts" } }] },
+			assistantMessageEvent: { type: "toolcall_end", toolCall: { name: "read", arguments: { path: "a.ts" } } },
 		});
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "read", arguments: { path: "a.ts" } }] },
-		});
-		fake.emitEvent({
-			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "read", arguments: { path: "b.ts" } }] },
+			assistantMessageEvent: { type: "toolcall_end", toolCall: { name: "read", arguments: { path: "b.ts" } } },
 		});
 
 		assert.deepEqual(events, [
+			{ kind: "thinking", text: "" },
 			{ kind: "tool", name: "read", args: "a.ts" },
 			{ kind: "tool", name: "read", args: "b.ts" },
 		]);
+		assert.deepEqual(
+			agent.getEvents().map((e) => e.kind),
+			["thinking", "tool", "tool"],
+		);
 	});
 
 	it("accumulates thinking, tool, and text events in order", async () => {
@@ -455,11 +466,11 @@ describe("AgentProcess — latest activity", () => {
 
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "thinking", thinking: "reasoning..." }] },
+			assistantMessageEvent: { type: "thinking_delta", delta: "reasoning..." },
 		});
 		fake.emitEvent({
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }] },
+			assistantMessageEvent: { type: "toolcall_end", toolCall: { name: "bash", arguments: { command: "ls" } } },
 		});
 		fake.emitEvent({
 			type: "message_update",
@@ -477,26 +488,36 @@ describe("AgentProcess — latest activity", () => {
 		]);
 	});
 
-	it("merges tool-arg growth across message_update snapshots into one event", async () => {
+	it("records each toolcall_end as its own tool event", async () => {
 		const { agent, fake } = makeAgent({ cwd: "/tmp" });
 		const starter = agent.spawnAndSend("prompt");
 		fake.emitEvent({ type: "agent_settled" }); // acks spawn
 		await starter;
 
-		// Same tool-call id, args growing — pi's message builds incrementally.
-		for (const args of [{}, { command: "" }, { command: "echo" }, { command: "echo hi" }]) {
-			fake.emitEvent({
-				type: "message_update",
-				message: { content: [{ type: "toolCall", id: "call_1", name: "bash", arguments: args }] },
-			});
-			// Text deltas interleave — the interleaving used to defeat the
-			// "last event" merge, pushing one tool event per snapshot.
-			fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
-		}
+		// Each tool call arrives as one authoritative toolcall_end (v0.84 — no
+		// incremental snapshots to merge anymore); text deltas interleave.
+		fake.emitEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { id: "call_1", name: "bash", arguments: { command: "echo hi" } },
+			},
+		});
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
+		fake.emitEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { id: "call_2", name: "read", arguments: { path: "a.ts" } },
+			},
+		});
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "y" } });
 
 		assert.deepEqual(agent.getEvents(), [
 			{ kind: "tool", name: "bash", args: "echo hi", id: "call_1" },
-			{ kind: "text", text: "xxxx" },
+			{ kind: "text", text: "x" },
+			{ kind: "tool", name: "read", args: "a.ts", id: "call_2" },
+			{ kind: "text", text: "y" },
 		]);
 	});
 });

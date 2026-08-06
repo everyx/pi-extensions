@@ -24,7 +24,8 @@ import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { type AgentActivity, type AgentCompletion, AgentProcess } from "./agent-process.js";
+import { type AgentCompletion, AgentProcess } from "./agent-process.js";
+import type { AgentActivity } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import {

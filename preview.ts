@@ -16,7 +16,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
-import type { AgentActivity, AgentProcess } from "./agent-process.js";
+import type { AgentProcess } from "./agent-process.js";
+import type { AgentActivity } from "./event-interpret.js";
 import {
 	type AgentParams,
 	type RenderEvent,

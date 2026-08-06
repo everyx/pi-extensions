@@ -8,7 +8,7 @@
  * render site (render.ts) both import from here.
  */
 
-import type { AgentActivity } from "./agent-process.js";
+import type { AgentActivity } from "./event-interpret.js";
 
 /**
  * One step of the sub-agent's session as shown in the card body: a thinking

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { safeTitle } from "../format.js";
 import { renderAgentControlResult, renderAgentResult, renderNotification } from "../render.js";
+import type { SubagentDetails } from "../types.js";
 
 // Fold hints render through keyHint, which reads the real global theme.
 initTheme("dark");
@@ -477,6 +478,32 @@ test("foreground card shows the failure reason below the body", () => {
 	const idxErr = out.indexOf("model not found");
 	const idxSess = out.indexOf("session: /tmp/sess");
 	assert.ok(idxErr > -1 && idxSess > idxErr, "reason above footer");
+});
+
+test("thinking events render as a single marker, folded or expanded", () => {
+	const details: SubagentDetails = { task: "t", events: [{ kind: "thinking" }] };
+
+	const expanded = renderText(
+		renderAgentResult(
+			{ content: [{ type: "text", text: "" }], details },
+			{ expanded: true, isPartial: false },
+			theme,
+			context,
+		),
+		120,
+	);
+	assert.ok(expanded.includes("Thinking..."), "thinking marker shown when expanded");
+
+	const folded = renderText(
+		renderAgentResult(
+			{ content: [{ type: "text", text: "" }], details },
+			{ expanded: false, isPartial: false },
+			theme,
+			context,
+		),
+		120,
+	);
+	assert.ok(folded.includes("Thinking..."), "thinking marker shown when folded");
 });
 
 // ── safeTitle (title rendered safe for a single quoted line) ──

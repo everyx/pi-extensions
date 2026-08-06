@@ -2,10 +2,10 @@
  * Tests for the raw RpcEvent → AgentEvent interpretation layer
  * (event-interpret.ts).
  *
- * interpretEvent maps pi's rpc protocol vocabulary (message_update content
- * arrays, assistantMessageEvent deltas, agent_end messages) onto our domain
- * vocabulary. It is a pure function — fed raw event shapes exactly as they
- * arrive off the wire, without any FakeClient indirection.
+ * interpretEvent maps pi's rpc protocol vocabulary (assistantMessageEvent
+ * deltas since v0.84.0, agent_end messages) onto our domain vocabulary. It
+ * is a pure function — fed raw event shapes exactly as they arrive off the
+ * wire, without any FakeClient indirection.
  */
 
 import assert from "node:assert/strict";
@@ -30,106 +30,88 @@ describe("interpretEvent — message_update deltas", () => {
 		);
 	});
 
+	it("maps thinking_delta to a thinking marker", () => {
+		assert.deepEqual(
+			expect({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "hmm" } }),
+			[{ type: "thinking" }],
+		);
+	});
+
 	it("ignores non-delta assistant message events", () => {
-		assert.deepEqual(expect({ type: "message_update", assistantMessageEvent: { type: "thinking_delta" } }), []);
+		assert.deepEqual(expect({ type: "message_update", assistantMessageEvent: { type: "toolcall_start" } }), []);
+		assert.deepEqual(expect({ type: "message_update", assistantMessageEvent: { type: "text_end", content: "x" } }), []);
 	});
 });
 
-describe("interpretEvent — message_update activity", () => {
-	it("extracts thinking from the last content part", () => {
-		const raw = {
-			type: "message_update",
-			message: {
-				content: [
-					{ type: "text", text: "old" },
-					{ type: "thinking", thinking: "let me think" },
-				],
-			},
-		};
-		assert.deepEqual(interpretEvent(raw), [{ type: "activity", activity: { kind: "thinking", text: "let me think" } }]);
-	});
-
-	it("extracts text from the last content part", () => {
-		const raw = {
-			type: "message_update",
-			message: { content: [{ type: "text", text: "writing…" }] },
-		};
-		assert.deepEqual(interpretEvent(raw), [{ type: "activity", activity: { kind: "text", text: "writing…" } }]);
-	});
-
+describe("interpretEvent — message_update tool calls (v0.84 toolcall_end)", () => {
 	it("summarizes a tool call with its friendly argument key", () => {
 		const raw = {
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "bash", arguments: { command: "ls -la", cwd: "/tmp" } }] },
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { type: "toolCall", name: "bash", arguments: { command: "ls -la", cwd: "/tmp" } },
+			},
 		};
 		assert.deepEqual(interpretEvent(raw), [
-			{ type: "activity", activity: { kind: "tool", name: "bash", args: "ls -la" } },
+			{ type: "tool_call", activity: { kind: "tool", name: "bash", args: "ls -la" } },
 		]);
 	});
 
 	it("summarizes a tool call with JSON when no friendly key exists", () => {
 		const raw = {
 			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "Agent", arguments: { prompt: "do it" } }] },
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { type: "toolCall", name: "Agent", arguments: { prompt: "do it" } },
+			},
 		};
 		assert.deepEqual(interpretEvent(raw), [
-			{ type: "activity", activity: { kind: "tool", name: "Agent", args: '{"prompt":"do it"}' } },
+			{ type: "tool_call", activity: { kind: "tool", name: "Agent", args: '{"prompt":"do it"}' } },
+		]);
+	});
+
+	it("carries the tool call id", () => {
+		const raw = {
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { type: "toolCall", name: "bash", arguments: { command: "ls" }, id: "abc123" },
+			},
+		};
+		assert.deepEqual(interpretEvent(raw), [
+			{ type: "tool_call", activity: { kind: "tool", name: "bash", args: "ls", id: "abc123" } },
 		]);
 	});
 
 	it("truncates long JSON summaries", () => {
 		const raw = {
 			type: "message_update",
-			message: {
-				content: [
-					{
-						type: "toolCall",
-						name: "bash",
-						arguments: { other: "x".repeat(120) },
-					},
-				],
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				toolCall: { type: "toolCall", name: "bash", arguments: { other: "x".repeat(120) } },
 			},
 		};
 		const events = interpretEvent(raw);
 		assert.equal(events.length, 1);
-		const ev = events[0] as Extract<AgentEvent, { type: "activity" }>;
-		const args = ev.activity.kind === "tool" ? ev.activity.args : "";
-		assert.ok(args.length <= 80 + 1, "summary truncated");
-		assert.ok(args.endsWith("\u2026"));
+		const ev = events[0] as Extract<AgentEvent, { type: "tool_call" }>;
+		assert.ok(ev.activity.args.length <= 80 + 1, "summary truncated");
+		assert.ok(ev.activity.args.endsWith("\u2026"));
 	});
 
-	it("ignores empty content, blank thinking, and non-content updates", () => {
-		assert.deepEqual(expect({ type: "message_update", message: { content: [] } }), []);
+	it("ignores toolcall_end without a name, and unrelated updates", () => {
 		assert.deepEqual(
-			expect({ type: "message_update", message: { content: [{ type: "thinking", thinking: "  " }] } }),
+			expect({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", toolCall: { arguments: {} } } }),
 			[],
 		);
-		assert.deepEqual(expect({ type: "message_update", message: {} }), []);
+		assert.deepEqual(expect({ type: "message_update", assistantMessageEvent: {} }), []);
 		assert.deepEqual(expect({ type: "message_update" }), []);
 	});
 
 	it("passes multibyte text through unchanged (UTF-8 integrity)", () => {
-		const raw = {
-			type: "message_update",
-			message: { content: [{ type: "text", text: "分析 src/auth/*.ts 的鉴权逻辑…" }] },
-			assistantMessageEvent: { type: "text_delta", delta: "已读文件" },
-		};
-		assert.deepEqual(interpretEvent(raw), [
-			{ type: "activity", activity: { kind: "text", text: "分析 src/auth/*.ts 的鉴权逻辑…" } },
-			{ type: "text_delta", delta: "已读文件" },
-		]);
-	});
-
-	it("combines activity and text_delta from one update", () => {
-		const raw = {
-			type: "message_update",
-			message: { content: [{ type: "toolCall", name: "read", arguments: { path: "a.ts" } }] },
-			assistantMessageEvent: { type: "text_delta", delta: "checking…" },
-		};
-		assert.deepEqual(interpretEvent(raw), [
-			{ type: "activity", activity: { kind: "tool", name: "read", args: "a.ts" } },
-			{ type: "text_delta", delta: "checking…" },
-		]);
+		assert.deepEqual(
+			expect({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "已读文件" } }),
+			[{ type: "text_delta", delta: "已读文件" }],
+		);
 	});
 });
 

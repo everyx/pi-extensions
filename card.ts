@@ -237,7 +237,7 @@ function contentBlock(styled: string, color: (line: string) => string, expanded:
 function styleRow(row: { style: "prompt" | "thinking" | "tool" | "text"; content: string }, theme: Theme): string {
 	switch (row.style) {
 		case "thinking":
-			return theme.italic(theme.fg("thinkingText", "Thinking..."));
+			return theme.italic(theme.fg("thinkingText", row.content));
 		case "tool": {
 			const sepIdx = row.content.indexOf(":");
 			if (sepIdx === -1) return theme.fg("toolTitle", row.content);
