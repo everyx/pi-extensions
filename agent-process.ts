@@ -19,7 +19,6 @@
 import { type AgentActivity, interpretEvent } from "./event-interpret.js";
 import type { RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
-import { defaultRunner, type RunnerRecord } from "./runners.js";
 import type { RenderEvent } from "./types.js";
 
 export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
@@ -69,12 +68,6 @@ export interface AgentProcessOptions {
 export interface AgentProcessDeps {
 	/** Test seam: override client creation (defaults to a real RpcClient). */
 	createClient?: (options: RpcClientOptions) => RpcClient;
-	/**
-	 * Test seam: runner ledger. Defaults to a real ledger under sessionDir
-	 * (no-op when sessionDir is absent) — tracks the live child pid so a
-	 * reload / host crash can reap it.
-	 */
-	runner?: { track(rec: RunnerRecord): void; untrack(pid: number): void };
 }
 
 export const DEFAULT_ABORT_SETTLE_GRACE_MS = 30_000;
@@ -104,9 +97,7 @@ export class AgentProcess {
 	/** Total agent_settled events seen; lets awaitSettled skip settles that
 	 *  arrived while no waiter was attached (synchronous test emit pattern). */
 	private settleCount = 0;
-	/** Settle count observed at the last awaitSettled() call. */
-	private readonly runner?: { track(rec: RunnerRecord): void; untrack(pid: number): void } | null;
-
+	/** settleCount observed at the last awaitSettled() call. */
 	private lastSettledCount = 0;
 	private done = false;
 	private hardAborted = false;
@@ -138,29 +129,17 @@ export class AgentProcess {
 		args.push("--name", options.title.slice(0, 80));
 		if (options.sessionDir) args.push("--session-dir", options.sessionDir);
 
-		// Runner ledger: record the live child so an extension reload / host
-		// crash can reap it (its rpc stdin pipe stays open — a reload would
-		// otherwise leave a resident orphan). No session dir → nothing tracked.
-		this.runner = deps.runner ?? (options.sessionDir ? defaultRunner(options.sessionDir) : null);
-
 		const clientOptions: RpcClientOptions = {
 			args,
 			cwd: options.cwd,
 			onEvent: (event) => this.onEvent(event),
 			onExit: () => {
 				// Process died (any reason): release everyone waiting on settle.
-				if (this.runner && this.client.pid) this.runner.untrack(this.client.pid);
 				this.settle();
 				this.done = true;
 			},
 		};
 		this.client = deps.createClient ? deps.createClient(clientOptions) : new RpcClient(clientOptions);
-
-		// The child exists (or a failed spawn is signalled via onExit); record
-		// it, then let onExit untrack it once it goes away.
-		if (this.runner && this.client.pid) {
-			this.runner.track({ pid: this.client.pid, agentId: this.agentId, title: this.title, startedAt: Date.now() });
-		}
 	}
 
 	// ── Public API ─────────────────────────────────────────

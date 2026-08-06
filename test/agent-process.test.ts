@@ -9,17 +9,15 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AgentProcess, type AgentProcessDeps, type AgentProcessOptions } from "../agent-process.js";
+import { AgentProcess, type AgentProcessOptions } from "../agent-process.js";
 import type { AgentActivity } from "../event-interpret.js";
 import type { RpcClientOptions } from "../rpc-client.js";
-import type { RunnerRecord } from "../runners.js";
 
 /** Programmable fake standing in for RpcClient. */
 class FakeClient {
 	commands: Array<{ type: string; message?: string }> = [];
 	endInputCalls = 0;
 	killCalls = 0;
-	pid = 4242;
 	exitCode: number | null = null;
 	isClosed = false;
 	/** argv captured at construction (--model/--tools/--session-dir). */
@@ -133,10 +131,7 @@ class FakeClient {
 	}
 }
 
-function makeAgent(
-	options: Partial<AgentProcessOptions> & { cwd: string },
-	deps: AgentProcessDeps = {},
-): { agent: AgentProcess; fake: FakeClient } {
+function makeAgent(options: Partial<AgentProcessOptions> & { cwd: string }): { agent: AgentProcess; fake: FakeClient } {
 	let fake!: FakeClient;
 	const agent = new AgentProcess(
 		{ ...options, agentId: options.agentId ?? "a1", title: options.title ?? "test agent" },
@@ -145,7 +140,6 @@ function makeAgent(
 				fake = new FakeClient(opts);
 				return fake as never;
 			},
-			...deps,
 		},
 	);
 	return { agent, fake };
@@ -362,24 +356,6 @@ describe("AgentProcess — agent API errors", () => {
 
 		const completion = await completionPromise;
 		assert.equal(completion.status, "completed");
-	});
-});
-
-describe("AgentProcess — runner ledger", () => {
-	it("tracks the child pid at construction and untracks it on exit", () => {
-		const tracked: RunnerRecord[] = [];
-		const untracked: number[] = [];
-		const { fake } = makeAgent(
-			{ cwd: "/tmp" },
-			{ runner: { track: (r) => tracked.push(r), untrack: (p) => untracked.push(p) } },
-		);
-
-		assert.equal(tracked.length, 1, "child tracked once on spawn");
-		assert.equal(tracked[0].pid, 4242);
-		assert.equal(tracked[0].agentId, "a1");
-
-		fake.emitExit(0);
-		assert.deepEqual(untracked, [4242], "child untracked when it exits");
 	});
 });
 
