@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-从 pi 启动隔离的 sub-agent。每个 sub-agent 都是一个完整 pi 实例、拥有独立上下文——主对话保持干净。
+**Pi 的极简子代理——双原语、无噪音、无限制。**
 
 ```
 你： 调研一下这个项目的数据库 schema
@@ -13,7 +13,38 @@
 
 ## 为什么需要它？
 
-Pi 没有内置 sub-agent。当一个任务会产生大量中间输出（搜索结果、日志、测试输出）污染你的上下文，或者你想并行跑独立任务而不阻塞主对话时——这就是本扩展的用武之地。
+Pi 没有内置 sub-agent。于是重活、并行的活、吃上下文的活，全都挤进你那一个窗口。pi-subagent 把活交给子 pi：噪音留在那边，只有答案回来。
+
+## 特性
+
+- **安静上下文** — 日志、搜索结果、测试输出留在子窗口里。你拿到最终结果，不是一片杂乱。
+- **真正并行** — 一次起多个后台 agent，各自完成时投递自己的通知。无队列、无取结果工具。
+- **全程可控** — `steer` 重定向运行中的 agent，`stop` 终止。不做"放了就不管"。
+- **Pi 原生** — 渲染、会话、attach 全复用 pi 自己的机制；卡片看起来像内置工具——因为它们就是。
+- **继承或覆盖** — 子 agent 默认继承你的模型与推理强度，也可逐个覆盖。便宜模型做侦察，强模型做实现。
+- **无隐藏限制** — 默认无 token 上限、无超时、无并发上限。需要时用可选 `timeoutMs` 加一道护栏。
+- **可复盘** — 每个会话持久化、永不删除；任何结果都能 `pi --session <path>` 回看。
+- **零依赖 + 可嵌套** — 仅 peerDependencies。子 agent 是完整 pi 实例，天然能再 spawn 孙 agent。
+- **Token 经济** — 系统侧保持克制：
+  - **系统提示** — 两个工具 + 简短指南，注入开销 **≈587 tokens**（约 2.3KB，随 tokenizer 略有出入）。
+  - **通知** — LLM 只看到最小结构化数据；装饰（title、用量、会话路径）留在渲染层，永不进入 LLM 上下文。
+  - **结果** — 自动截尾（2000 行 / 50KB）；展开任何卡片仍见全量。
+
+## 与同类插件的对比
+
+pi-subagent 与 [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents)、[`pi-subagents`](https://github.com/nicobailon/pi-subagents) 都能为 pi 提供隔离并行的子 agent。它们落在 *原语 → 框架* 的光谱上，pi-subagent 刻意站在最极简的**原语**这一端：两个原语、无预定义角色、无框架——组合由你。具体能力见[特性](#特性)；取舍落在哪里，见下表与两个最流行的同类插件对照。
+
+| | **pi-subagent** | **@tintinweb/pi-subagents** | **pi-subagents (nicobailon)** |
+|---|---|---|---|
+| 设计姿态 | 最小原语 | 全功能框架 | 全功能框架 |
+| 工具面 | `Agent` + `AgentControl`（2 个） | Claude Code 风格 `Agent` / `get_subagent_result` / `steer_subagent` | `subagent` + 管理/状态/控制工具族 |
+| 预定义角色 | 无——由 prompt 定义 | 自定义类型 `.pi/agents/*.md`（frontmatter） | 8 个内置（scout / reviewer / worker / oracle…） |
+| 并行 | 无并发上限（一 agent 一进程） | 队列，默认并发 4 | 有 spawn / turn / usage budget |
+| 默认限制 | 无（可选 `timeoutMs`） | graceful turn limits | turn / usage budget |
+| 可观测性 | pi 原生卡片 + widget + `pi --session` | FleetView + conversation viewer | FleetView inspector + fleet |
+| 嵌套 | 天然、无深度上限 | opt‑in、有深度上限 | recursion guard |
+| 附加能力 | token 经济、零运行时依赖、reload/崩溃零孤儿 | memory、worktree 隔离、定时任务、跨扩展 RPC、事件总线 | missions/定时、watchdog、worktree、intercom、chain 编排 |
+| 适合 | 自己掌控组合 | 开箱即用的完整子 agent 系统 | 内置角色 + 工作流编排 |
 
 ## 安装
 
@@ -33,26 +64,15 @@ ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
 
 重启 pi 后直接说"让子 agent 去…"。
 
-## 工具
-
-两个最小原语：
-
-- **`Agent`** — spawn 一个隔离的 sub-agent：`{ prompt, title, model?, thinking?, tools?, run_in_background? }`。`title`（3-5 词，**必填**）作为工具头、通知卡片、widget 行和会话名的标识——对齐 Claude Code 的 `description` / Codex 的 `task_name`。前台（默认）阻塞到结果就绪；`run_in_background: true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。
-- **`AgentControl`** — 干预运行中的后台 agent：`steer`（注入重定向消息）或 `stop`（终止）。
-
-LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使用指南：何时委派、prompt 必须自包含、绝不轮询。
-
-## 用法
+## 快速上手
 
 ### 发起一个任务
-
-对 pi 说：
 
 ```
 让一个子 agent 分析 src/ 下的认证逻辑
 ```
 
-Pi 调用 `Agent`（前台），子 agent 隔离运行，结果返回。
+Pi 调用 `Agent`（前台），子 agent 隔离运行，结果内联返回。
 
 ### 后台并行跑多个
 
@@ -68,7 +88,40 @@ Pi 调用三次 `Agent`（`run_in_background: true`）。每个完成通知携�
 那个数据层子 agent——方案行不通，改用组合式重写
 ```
 
-Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失控的 agent："干掉那个后台子 agent" → `stop`。
+Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失控的 agent："干掉那个后台子 agent" → `stop`。`steer` 和 `stop` 都要求 agent 仍在运行（完成通知到达之前）。
+
+## 配置
+
+### 环境变量
+
+| 变量 | 默认值 | 含义 |
+|---|---|---|
+| `PI_SUBAGENT_SESSION_DIR` | `<agentDir>/subagent-sessions/` | 子 agent 会话存放目录；设置可迁移位置。`<agentDir>` 为 pi 的 agent 目录（默认 `~/.pi/agent`，遵循 pi 的 `PI_CODING_AGENT_DIR`）。 |
+
+目录遵循 pi 的 agent-dir 约定，刻意放在 pi 标准会话树之外，让 `pi -r`（resume）保持干净。会话文件永不删除。
+
+### 工具参考
+
+#### `Agent` — spawn 一个隔离的 sub-agent
+
+| 参数 | 类型 | 默认值 | 含义 |
+|---|---|---|---|
+| `prompt` | string | **必填** | 子 agent 的自包含任务描述。 |
+| `title` | string（3-5 词） | **必填** | 作为工具卡、通知卡、widget 行和会话名的标识——对齐 Claude Code 的 `description` / Codex 的 `task_name`。 |
+| `model` | string | 继承 | 覆盖子 agent 的模型。指定但注册表中找不到 → **报错，不静默降级**。 |
+| `thinking` | `"off"`…`"max"` | 继承 | 覆盖推理强度；省略则用当前会话的级别。 |
+| `tools` | string[] | 全部 | 子 agent 可见的工具白名单——白名单之外全部不可见。 |
+| `run_in_background` | boolean | `false` | 前台（默认）阻塞到结果就绪；`true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。 |
+| `timeoutMs` | number | 无 | 可选截止时间（毫秒）。触发时扩展停止子进程、等其 settled 后优雅退出。 |
+
+#### `AgentControl` — 干预运行中的 agent
+
+| 参数 | 含义 |
+|---|---|
+| `steer` | 向运行中的 agent 注入重定向消息（当前 turn 结束后送达）。 |
+| `stop` | 优雅终止（stdin EOF → 优雅退出）。不投递完成通知。 |
+
+LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使用指南：何时委派、prompt 必须自包含、绝不轮询。
 
 ## 进阶
 
@@ -78,7 +131,9 @@ Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失�
 用 claude-sonnet 起一个子 agent 分析数据库设计
 ```
 
-不指定模型 → 继承当前会话模型。指定但注册表中找不到 → 报错，不静默降级。`thinking` 同理：省略时继承当前推理强度，传 `"off"`…`"max"` 可覆盖。
+不指定模型 → 继承当前会话模型。`thinking` 同理：省略时继承当前推理强度，传 `"off"`…`"max"` 可覆盖。
+
+模型**指定但注册表中找不到** → 报错，不静默降级。
 
 ### 限制工具
 
@@ -95,20 +150,20 @@ Pi 调用 `AgentControl` 的 `steer` 重定向运行中的 agent。要停掉失�
 - **前台** — `Agent` 等待子进程 settled，取最终输出，然后关闭 stdin（优雅退出）。
 - **后台** — `Agent` 立即返回；`agent_settled` 时扩展投递 `subagent-notification`（JSON 内容给 LLM、渲染卡片给用户），子进程优雅退出。
 - **Steer/stop** — `AgentControl.steer` 向子进程 stdin 写 `steer` 命令（在当前 turn settled 后投递）；`stop` 关闭 stdin 优雅退出。
-- **Attach / 复盘** — sub-agent 会话存储在 `<agent 目录>/subagent-sessions/`（默认 `~/.pi/agent/subagent-sessions/`；可用 `PI_SUBAGENT_SESSION_DIR` 覆盖，agent 目录同样尊重 `PI_CODING_AGENT_DIR`，与 pi 一致），刻意放在 pi 标准会话树**之外**，让 `pi -r` 保持干净。**永不删除**。要 resume/复盘：在主会话里找到 session 路径（Agent 调用结果或完成通知卡片），执行 `pi --session <path>`——通知里也带 path，直接问 LLM 也行。
-- **Graceful turn limits（默认不限，opt-in）** — 不对子 agent 施加隐藏 deadline；可选 `timeoutMs` 参数（Codex 的 `timeout_ms` 风格）。不做 token 限制——用量仅通知卡统计。
+- **Attach / 复盘** — sub-agent 会话存储在 `<agent 目录>/subagent-sessions/`（见[配置](#配置)）。在主会话里找到 session 路径（Agent 调用结果或完成通知卡片），执行 `pi --session <path>`——通知里也带 path，直接问 LLM 也行。
+- **Graceful turn limits（默认不限，opt-in）** — 不设隐藏 deadline：子 agent 一直跑到完成或被停，除非你传 `timeoutMs`。不做 token 限制——用量仅通知卡统计。
 
 ## 嵌套 sub-agent
 
-Sub-agent 是完整 pi 实例，若你全局安装了本扩展，它天然能再 spawn sub-agent——嵌套开箱即用，不做深度控制。每一层都是独立进程、独立上下文，嵌套深度会倍增启动时间和 token 成本。是否值得嵌套由你（或模型）判断。
+子 agent 是完整 pi 实例——全局安装本扩展后，它天然能再 spawn 子 agent。每一层都是独立进程、独立上下文；深度倍增启动时间与 token 成本。是否值得，由你（或模型）判断。
 
 ## 成本与注意
 
-- **Headless（`pi -p`）下后台 agent 随主进程退出。** 主 agent 响应结束即进程退出，后台子 agent 通过 stdin EOF 被清理（不会泄漏为孤儿进程）。后台工作流（等通知、steer、stop）是为常驻的 TUI 会话设计的。
-- **一 agent 一进程。** 前台和后台都是常驻 rpc 子进程。后台开多了 = 进程开多了——请节制。
-- **通知一次性投递。** 后台结果只投递一次；若投递前主会话崩溃，结果只存在于 session 文件（用 `pi --session <path>` attach 恢复）。
-- **Steer 需要活的 agent。** `AgentControl` 只在 agent 运行中（完成通知之前）有效。
+- **Headless 下子 agent 随宿主退出**（`pi -p`）。主进程在响应结束时退出，后台子 agent 经 stdin EOF 被清理——从不留孤儿。后台流程（等通知、steer、stop）面向常驻的 TUI 会话。
+- **一子 agent 一进程。** 前台后台同是常驻 rpc 子进程。开多了 = 进程多了——请节制。
+- **结果一次性投递。** 后台结果只投一次；若主会话先崩，结果还在 session 文件里（`pi --session <path>`）。
+- **Steer 需要活着的子 agent。** `AgentControl` 只在子 agent 运行中（完成通知前）有效。
 
 ## 清理
 
-pi 退出时，运行中的 sub-agent 收到优雅的 stdin-EOF 关闭。session 保留在磁盘供 attach/复盘；不 kill、不删除。
+pi 退出时，运行中的子 agent 收到优雅的 stdin-EOF 关闭。session 留在磁盘供 attach/复盘——不杀进程、不删文件。
