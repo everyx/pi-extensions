@@ -1,18 +1,24 @@
 /**
  * pi-web-tools — real-browser channel (BrowserSkill / bsk CLI).
  *
- * Drives the user's real, logged-in Chromium browser (SPEC: 真实浏览器通道):
- *   - detects the bsk CLI + a connected browser
- *   - auto-launches a Chromium-family browser when none is connected
- *   - starts a session, navigates to the engine search URL, extracts results
- *     by evaluating a small script in the page.
+ * Drives the user's real, logged-in Chromium browser (SPEC: 真实浏览器通道).
+ * To behave like a human (anti-bot friendly), searches go through the real
+ * input path: open the engine home page, type the query into the search box,
+ * press Enter, wait for navigation, extract results. Structured filters that
+ * map to engine URL params (recency) use the direct search-URL path instead;
+ * if the search box is not found, we fall back to the search-URL path.
  *
- * bsk errors are surfaced as-is (SPEC: bsk 运行报错透传到 TUI；安装归 bsk 自己).
+ * Per-engine serial queues share one bsk session across a burst of queued
+ * searches (SPEC: 批量搜索一次打开浏览器，存结果，继续下一个，再返回结束).
+ * bsk errors surface as-is (SPEC: bsk 运行报错透传到 TUI；安装归 bsk 自己).
+ *
+ * Follows BrowserSkill's mandatory lifecycle: session start → commands with
+ * --session → session stop (always, even on error paths).
  */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createMutex, type Mutex } from "../rate-limit.js";
+import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
 import type {
 	ChannelSearchContext,
 	ChannelSearchResult,
@@ -26,21 +32,40 @@ const execFileAsync = promisify(execFile);
 
 const BSK = "bsk";
 
-// One browser engine at a time: concurrent navigations of the same engine
-// would fight over the same tab (SPEC: bsk 真实浏览器通道).
-const engineMutexes: Record<EngineId, Mutex> = {
-	google: createMutex(),
-	bing: createMutex(),
-	baidu: createMutex(),
-	yandex: createMutex(),
+/** Engine home pages (human path: navigate → type → search). */
+const ENGINE_HOME: Record<EngineId, string> = {
+	google: "https://www.google.com",
+	bing: "https://www.bing.com",
+	baidu: "https://www.baidu.com",
+	yandex: "https://yandex.com",
 };
 
-export function isBskInstalled(): boolean {
-	return true; // availability is checked at runtime via `bsk status` (daemon may be missing)
+/** Search-box CSS selectors per engine (home pages). */
+const SEARCH_BOX_SELECTOR: Record<EngineId, string> = {
+	google: 'textarea[name="q"], input[name="q"]',
+	bing: 'input[name="q"], textarea[name="q"]',
+	baidu: 'input[name="wd"], input#kw',
+	yandex: 'input[name="text"], input#text',
+};
+
+// One serial queue per engine: a burst of queued searches shares a single
+// bsk session (open lazily, close when the queue drains).
+const engineQueues: Record<EngineId, SerialQueue<string>> = {
+	google: createSerialQueue(openSession, closeSession),
+	bing: createSerialQueue(openSession, closeSession),
+	baidu: createSerialQueue(openSession, closeSession),
+	yandex: createSerialQueue(openSession, closeSession),
+};
+
+// ── bsk CLI plumbing ─────────────────────────────────────────────
+
+interface BskResult {
+	ok: boolean;
+	stdout: string;
+	stderr: string;
 }
 
-/** Result of a bsk CLI invocation: stdout trimmed (or null when the command failed). */
-async function runBsk(args: string[], timeoutMs = 15_000): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+async function runBsk(args: string[], timeoutMs = 30_000): Promise<BskResult> {
 	try {
 		const { stdout, stderr } = await execFileAsync(BSK, args, {
 			timeout: timeoutMs,
@@ -57,15 +82,16 @@ async function runBsk(args: string[], timeoutMs = 15_000): Promise<{ ok: boolean
 	}
 }
 
+// ── browser connection + session lifecycle ───────────────────────
+
 interface BskBrowsersEntry {
-	id: string;
-	label?: string;
+	id?: string;
 	browser?: string;
 	name?: string;
 }
 
 async function connectedBrowsers(): Promise<BskBrowsersEntry[]> {
-	const { ok, stdout } = await runBsk(["browsers", "--json"]);
+	const { ok, stdout } = await runBsk(["browsers", "--json"], 10_000);
 	if (!ok || !stdout) return [];
 	try {
 		const parsed = JSON.parse(stdout) as BskBrowsersEntry[] | { browsers?: BskBrowsersEntry[] };
@@ -88,22 +114,18 @@ function launchCandidates(): { name: string; args: string[] }[] {
 		];
 	}
 	if (process.platform === "win32") {
-		const names = ["chrome", "msedge", "brave", "chromium", "arc"];
-		return names.map((n) => ({ name: n, args: [] }));
+		return ["chrome", "msedge", "brave", "chromium", "arc"].map((n) => ({ name: n, args: [] }));
 	}
-	// linux
-	const names = [
+	return [
 		"chromium",
 		"chromium-browser",
 		"google-chrome",
 		"google-chrome-stable",
 		"microsoft-edge",
 		"brave-browser",
-	];
-	return names.map((n) => ({ name: n, args: [] }));
+	].map((n) => ({ name: n, args: [] }));
 }
 
-/** Try to launch a browser; returns true if any candidate started. */
 async function launchBrowser(): Promise<boolean> {
 	for (const candidate of launchCandidates()) {
 		try {
@@ -116,11 +138,8 @@ async function launchBrowser(): Promise<boolean> {
 	return false;
 }
 
-/**
- * Ensure a browser is connected: poll `bsk browsers`, auto-launch once when
- * nothing is connected, then keep polling until timeout.
- */
-export async function ensureBrowserConnected(timeoutMs = 15_000): Promise<{ ok: boolean; detail: string }> {
+/** Ensure a browser is connected: poll, auto-launch once, keep polling. */
+async function ensureBrowserConnected(timeoutMs = 15_000): Promise<{ ok: boolean; detail: string }> {
 	if ((await connectedBrowsers()).length > 0) return { ok: true, detail: "browser connected" };
 
 	const launched = await launchBrowser();
@@ -142,33 +161,38 @@ export async function ensureBrowserConnected(timeoutMs = 15_000): Promise<{ ok: 
 	};
 }
 
-async function startSession(): Promise<{ ok: boolean; sessionId?: string; detail: string }> {
+async function openSession(): Promise<string> {
+	const conn = await ensureBrowserConnected();
+	if (!conn.ok) {
+		throw new Error(`real-browser channel unavailable: ${conn.detail}`);
+	}
 	const { ok, stdout } = await runBsk(["session", "start", "--json"]);
-	if (!ok) return { ok: false, detail: "bsk session start failed" };
+	if (!ok) throw new Error(`bsk session start failed`);
 	try {
 		const parsed = JSON.parse(stdout) as { sessionId?: string; session_id?: string; id?: string };
 		const sessionId = parsed.sessionId ?? parsed.session_id ?? parsed.id;
-		if (sessionId) return { ok: true, sessionId, detail: "session started" };
+		if (sessionId) return sessionId;
 	} catch {
-		// fall through
+		// fall through to raw stdout
 	}
-	// Accept the raw stdout as the session id when not JSON.
-	return stdout
-		? { ok: true, sessionId: stdout, detail: "session started" }
-		: { ok: false, detail: "bsk session start returned no id" };
+	if (stdout) return stdout;
+	throw new Error("bsk session start returned no id");
 }
 
+async function closeSession(sessionId: string): Promise<void> {
+	await runBsk(["session", "stop", sessionId]); // positional arg (SKILL)
+}
+
+// ── search execution ─────────────────────────────────────────────
+
 /** Evaluate a JS expression in the session, returning trimmed stdout. */
-async function evaluate(sessionId: string, expression: string, ctx: ChannelSearchContext): Promise<string> {
-	const { ok, stdout, stderr } = await runBsk(
-		["evaluate", "--session", sessionId, expression],
-		ctx.timeoutMs ?? 30_000,
-	);
+async function evaluate(sessionId: string, expression: string, timeoutMs: number): Promise<string> {
+	const { ok, stdout, stderr } = await runBsk(["evaluate", "--session", sessionId, expression], timeoutMs);
 	if (!ok) throw new Error(`bsk evaluate failed: ${stderr || stdout || "unknown error"}`);
 	return stdout;
 }
 
-/** Extract search results from the page (engine-agnostic: h3-wrapped titles). */
+/** Extract search results from the page (engine-agnostic: h2/h3-wrapped titles). */
 const EXTRACT_SCRIPT = String.raw`
 (() => {
 	const out = [];
@@ -195,53 +219,83 @@ const EXTRACT_SCRIPT = String.raw`
 })()
 `;
 
+function parseResults(raw: string): SearchResultItem[] {
+	try {
+		const parsed = JSON.parse(raw) as SearchResultItem[];
+		return parsed.filter((r) => r.url && r.title);
+	} catch {
+		throw new Error("real-browser channel: could not parse search results from page");
+	}
+}
+
+/** Build a direct engine search URL (fallback / structured-filter path). */
+function buildSearchUrl(params: WebSearchParams, engine: EngineId, recencyParam?: string): string {
+	const { url, localeParams } = engineSearchUrl(engine, params.locale, recencyParam);
+	const searchParams = new URLSearchParams();
+	for (const [k, v] of Object.entries(localeParams ?? {})) searchParams.set(k, v);
+	return url.replace("{q}", encodeURIComponent(params.query)) + (searchParams.size ? `&${searchParams}` : "");
+}
+
+/** Human path: home page → type into search box → Enter → wait → extract. */
+async function searchHumanPath(
+	sessionId: string,
+	params: WebSearchParams,
+	engine: EngineId,
+	timeoutMs: number,
+): Promise<SearchResultItem[]> {
+	const home = ENGINE_HOME[engine];
+	const nav = await runBsk(["navigate", "--session", sessionId, home, "--wait-until", "load"], timeoutMs);
+	if (!nav.ok) throw new Error(`real-browser channel: navigate ${home} failed: ${nav.stderr || "unknown error"}`);
+
+	const selector = SEARCH_BOX_SELECTOR[engine];
+	const fill = await runBsk(
+		["fill", "--session", sessionId, "--selector", selector, "--value", params.query],
+		timeoutMs,
+	);
+	if (!fill.ok) {
+		// Search box not found (engine DOM changed) — fall back to the
+		// direct search-URL path rather than failing the search.
+		const target = buildSearchUrl(params, engine);
+		const nav2 = await runBsk(["navigate", "--session", sessionId, target], timeoutMs);
+		if (!nav2.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav2.stderr}`);
+	} else {
+		const press = await runBsk(["press", "--session", sessionId, "Enter"], timeoutMs);
+		if (!press.ok) throw new Error(`real-browser channel: press Enter failed: ${press.stderr}`);
+		await runBsk(["wait-for-navigation", "--session", sessionId], timeoutMs);
+	}
+
+	const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
+	return parseResults(raw);
+}
+
 export async function searchWithBsk(
 	params: WebSearchParams,
 	engine: EngineId,
 	ctx: ChannelSearchContext,
 ): Promise<ChannelSearchResult> {
-	return engineMutexes[engine].run(() => searchWithBskInner(params, engine, ctx));
-}
+	const timeoutMs = ctx.timeoutMs ?? 30_000;
+	// Structured recency filters map to engine URL params (tbs/mkt); the
+	// human path can't express them, so those go through the search-URL path.
+	const recencyParam = params.recency
+		? engine === "google"
+			? `qdr:${params.recency[0]}`
+			: engine === "bing"
+				? params.recency
+				: undefined
+		: undefined;
 
-async function searchWithBskInner(
-	params: WebSearchParams,
-	engine: EngineId,
-	ctx: ChannelSearchContext,
-): Promise<ChannelSearchResult> {
-	// 1. browser connection
-	const conn = await ensureBrowserConnected();
-	if (!conn.ok) {
-		throw new Error(`real-browser channel unavailable: ${conn.detail}`);
-	}
-
-	// 2. session
-	const session = await startSession();
-	if (!session.ok || !session.sessionId) {
-		throw new Error(`real-browser channel: ${session.detail}`);
-	}
-
-	// 3. navigate to the engine search URL
-	const { url, localeParams } = engineSearchUrl(engine, params.locale);
-	const searchParams = new URLSearchParams();
-	for (const [k, v] of Object.entries(localeParams ?? {})) searchParams.set(k, v);
-	const target = url.replace("{q}", encodeURIComponent(params.query)) + (searchParams.size ? `&${searchParams}` : "");
-	const nav = await runBsk(["navigate", "--session", session.sessionId, target], ctx.timeoutMs ?? 30_000);
-	if (!nav.ok) {
-		throw new Error(`real-browser channel: navigate failed: ${nav.stderr || "unknown error"}`);
-	}
-
-	// 4. extract results
-	const raw = await evaluate(session.sessionId, EXTRACT_SCRIPT, ctx);
-	let results: SearchResultItem[] = [];
-	try {
-		results = JSON.parse(raw) as SearchResultItem[];
-	} catch {
-		throw new Error(`real-browser channel: could not parse search results from page`);
-	}
-	results = results.filter((r) => r.url && r.title);
-
-	// 5. cleanup session
-	await runBsk(["session", "stop", "--session", session.sessionId]);
+	const results = await engineQueues[engine].run(async (sessionId) => {
+		if (recencyParam) {
+			const nav = await runBsk(
+				["navigate", "--session", sessionId, buildSearchUrl(params, engine, recencyParam)],
+				timeoutMs,
+			);
+			if (!nav.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav.stderr}`);
+			const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
+			return parseResults(raw);
+		}
+		return searchHumanPath(sessionId, params, engine, timeoutMs);
+	});
 
 	return { results, total: results.length };
 }

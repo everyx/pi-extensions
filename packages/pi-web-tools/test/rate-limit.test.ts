@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createMutex, createRateLimiter } from "../rate-limit.js";
+import { createRateLimiter, createSerialQueue } from "../rate-limit.js";
 
 describe("createRateLimiter", () => {
 	it("no qps = unlimited pass-through (no serialization)", async () => {
@@ -50,39 +50,73 @@ describe("createRateLimiter", () => {
 	});
 });
 
-describe("createMutex", () => {
-	it("runs one call at a time, no extra interval between calls", async () => {
-		const mutex = createMutex();
-		const active: number[] = [];
-		let maxConcurrent = 0;
-		const timestamps: number[] = [];
+describe("createSerialQueue", () => {
+	it("runs tasks one at a time, sharing one context", async () => {
+		let opens = 0;
+		let closes = 0;
+		const queue = createSerialQueue<string>(
+			async () => {
+				opens++;
+				return "session";
+			},
+			async () => {
+				closes++;
+			},
+		);
 
-		await Promise.all(
-			[1, 2, 3].map(() =>
-				mutex.run(async () => {
-					active.push(1);
-					maxConcurrent = Math.max(maxConcurrent, active.length);
-					timestamps.push(Date.now());
-					await new Promise((r) => setTimeout(r, 20));
-					active.pop();
+		let maxConcurrent = 0;
+		let active = 0;
+		const results = await Promise.all(
+			[1, 2, 3].map((i) =>
+				queue.run(async (ctx) => {
+					assert.equal(ctx, "session", "all tasks share the same context");
+					active++;
+					maxConcurrent = Math.max(maxConcurrent, active);
+					await new Promise((r) => setTimeout(r, 10));
+					active--;
+					return i * 2;
 				}),
 			),
 		);
 
-		assert.equal(maxConcurrent, 1, "mutex must never run calls concurrently");
-		assert.equal(timestamps.length, 3);
+		assert.deepEqual(results, [2, 4, 6]);
+		assert.equal(maxConcurrent, 1, "tasks must never run concurrently");
+		assert.equal(opens, 1, "context opened once for the whole burst");
+		assert.equal(closes, 1, "context closed once when the queue drained");
 	});
 
-	it("a failing call does not wedge the queue", async () => {
-		const mutex = createMutex();
-		let calls = 0;
+	it("rejects queued tasks when open fails, then recovers", async () => {
+		let opens = 0;
+		const queue = createSerialQueue<string>(
+			async () => {
+				opens++;
+				if (opens === 1) throw new Error("no browser");
+				return "session";
+			},
+			async () => {},
+		);
+
 		await assert.rejects(
-			mutex.run(async () => {
+			queue.run(async () => 1),
+			/no browser/,
+		);
+		const ok = await queue.run(async () => 2);
+		assert.equal(ok, 2);
+		assert.equal(opens, 2);
+	});
+
+	it("a failing task does not wedge the queue", async () => {
+		const queue = createSerialQueue<string>(
+			async () => "s",
+			async () => {},
+		);
+		await assert.rejects(
+			queue.run(async () => {
 				throw new Error("boom");
 			}),
 			/boom/,
 		);
-		const next = await mutex.run(async () => ++calls);
-		assert.equal(next, 1);
+		const next = await queue.run(async () => 42);
+		assert.equal(next, 42);
 	});
 });
