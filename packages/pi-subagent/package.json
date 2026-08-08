@@ -6,25 +6,17 @@
 		"pi-package"
 	],
 	"license": "MIT",
-	"packageManager": "pnpm@11.3.0",
 	"publishConfig": {
 		"access": "public"
 	},
 	"type": "module",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/everyx/pi-subagent"
+		"url": "https://github.com/everyx/pi-extensions"
 	},
 	"scripts": {
-		"check": "biome check .",
-		"fix": "biome check --write .",
-		"typecheck": "tsc --noEmit",
 		"test": "tsx --test test/*.test.ts",
-		"preview": "tsx preview.ts",
-		"prepare": "husky"
-	},
-	"lint-staged": {
-		"*.ts": "biome check --write --no-errors-on-unmatched"
+		"preview": "tsx preview.ts"
 	},
 	"files": [
 		"*.ts",
@@ -37,21 +29,9 @@
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-ai": "*",
-		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-tui": "*",
-		"typebox": "*"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.5.5",
-		"@earendil-works/pi-ai": "^0.84.0",
-		"@earendil-works/pi-coding-agent": "^0.84.0",
-		"@earendil-works/pi-tui": "^0.84.0",
-		"@types/node": "^26.1.1",
-		"husky": "^9.1.7",
-		"lint-staged": "^17.2.0",
-		"tsx": "^4.23.1",
-		"typebox": "^1.3.6",
-		"typescript": "^7.0.2"
+		"@earendil-works/pi-ai": "catalog:",
+		"@earendil-works/pi-coding-agent": "catalog:",
+		"@earendil-works/pi-tui": "catalog:",
+		"typebox": "catalog:"
 	}
 }
