@@ -258,7 +258,12 @@ function buildSearchUrl(params: WebSearchParams, engine: EngineId, recencyParam?
 	const { url, localeParams } = engineSearchUrl(engine, params.locale, recencyParam);
 	const searchParams = new URLSearchParams();
 	for (const [k, v] of Object.entries(localeParams ?? {})) searchParams.set(k, v);
-	return url.replace("{q}", encodeURIComponent(params.query)) + (searchParams.size ? `&${searchParams}` : "");
+	// Translate the structured domain filters into engine operator syntax
+	// (SPEC: bsk → site: / -site:).
+	let query = params.query;
+	for (const d of params.allowed_domains ?? []) query += ` site:${d}`;
+	for (const d of params.blocked_domains ?? []) query += ` -site:${d}`;
+	return url.replace("{q}", encodeURIComponent(query)) + (searchParams.size ? `&${searchParams}` : "");
 }
 
 export async function searchWithBsk(
