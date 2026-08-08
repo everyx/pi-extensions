@@ -1,0 +1,33 @@
+{
+	"name": "@everyx/pi-web-tools",
+	"version": "0.0.0-development",
+	"description": "Web primitives for pi – webSearch + fetch (URL → Markdown). Minimal web capability for Pi.",
+	"keywords": [
+		"pi-package"
+	],
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
+	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/everyx/pi-extensions"
+	},
+	"files": [
+		"*.ts",
+		"README.md",
+		"README.zh.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "catalog:",
+		"@earendil-works/pi-coding-agent": "catalog:",
+		"@earendil-works/pi-tui": "catalog:"
+	}
+}

@@ -7,6 +7,7 @@
 | 包 | 是什么 | npm |
 |---|---|---|
 | [`subagent`](./packages/pi-subagent/README.zh.md) | Pi 的极简子代理——双原语、无噪音、无限制。 | `@everyx/pi-subagent` |
+| [`web-tools`](./packages/pi-web-tools/SPEC.md) | Web 原语——`webSearch` + `fetch`（URL → Markdown）。 | `@everyx/pi-web-tools` |
 
 ## 布局
 

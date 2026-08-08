@@ -7,6 +7,7 @@ A pnpm workspace monorepo of [pi](https://github.com/earendil-works/pi) extensio
 | Package | What it is | npm |
 |---|---|---|
 | [`subagent`](./packages/pi-subagent/README.md) | Minimal sub‑agents for your Pi — two primitives, no noise, no limits. | `@everyx/pi-subagent` |
+| [`web-tools`](./packages/pi-web-tools/SPEC.md) | Web primitives — `webSearch` + `fetch` (URL → Markdown). | `@everyx/pi-web-tools` |
 
 ## Layout
 

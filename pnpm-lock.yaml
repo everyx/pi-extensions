@@ -69,6 +69,18 @@ importers:
         specifier: 'catalog:'
         version: 1.3.8
 
+  packages/pi-web-tools:
+    dependencies:
+      '@earendil-works/pi-ai':
+        specifier: 'catalog:'
+        version: 0.84.0(ws@8.21.1)(zod@4.4.3)
+      '@earendil-works/pi-coding-agent':
+        specifier: 'catalog:'
+        version: 0.84.0(ws@8.21.1)(zod@4.4.3)
+      '@earendil-works/pi-tui':
+        specifier: 'catalog:'
+        version: 0.84.0
+
 packages:
 
   '@anthropic-ai/sdk@0.91.1':
