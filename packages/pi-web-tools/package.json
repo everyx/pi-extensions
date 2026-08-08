@@ -10,6 +10,9 @@
 		"access": "public"
 	},
 	"type": "module",
+	"scripts": {
+		"test": "tsx --test test/*.test.ts"
+	},
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/everyx/pi-extensions"
@@ -28,6 +31,21 @@
 	"peerDependencies": {
 		"@earendil-works/pi-ai": "catalog:",
 		"@earendil-works/pi-coding-agent": "catalog:",
-		"@earendil-works/pi-tui": "catalog:"
+		"@earendil-works/pi-tui": "catalog:",
+		"typebox": "catalog:"
+	},
+	"dependencies": {
+		"@anthropic-ai/sdk": "^0.115.0",
+		"@google/genai": "^2.16.0",
+		"@mozilla/readability": "^0.6.0",
+		"@tavily/core": "^0.7.7",
+		"exa-js": "^2.16.3",
+		"linkedom": "^0.18.13",
+		"openai": "^7.4.0",
+		"parallel-web": "^1.1.0",
+		"turndown": "^7.2.4"
+	},
+	"devDependencies": {
+		"@types/turndown": "^5.0.6"
 	}
 }

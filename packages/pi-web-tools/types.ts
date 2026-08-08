@@ -1,0 +1,77 @@
+/**
+ * pi-web-tools — shared types.
+ *
+ * The LLM-visible surface is exactly two primitives (web_search / web_fetch).
+ * Everything else (channels, engines, routing) is internal — see SPEC.md.
+ */
+
+export interface SearchResultItem {
+	title: string;
+	url: string;
+	snippet: string;
+}
+
+/** Result of web_search: a flat list + honest total (may exceed returned count). */
+export interface WebSearchResult {
+	results: SearchResultItem[];
+	total: number;
+}
+
+/** Channels. "bsk" is the real-browser channel (BrowserSkill CLI). */
+export type ChannelId = "exa" | "tavily" | "parallel" | "bsk" | "grounding";
+
+/** Real-browser search engines (bsk channel). */
+export type EngineId = "google" | "bing" | "baidu" | "yandex";
+
+/** Capabilities a channel may or may not support (SPEC: 通道能力矩阵). */
+export interface ChannelCapabilities {
+	/** structured domain filtering (allowed/blocked_domains params) */
+	domains: boolean;
+	/** structured recency filter */
+	recency: boolean;
+	/** BCP-47 locale param support */
+	locale: boolean;
+	/** native search-operator syntax in query (site:/filetype:/…) */
+	operators: boolean;
+}
+
+/** Capabilities a web_search call actually requests. */
+export interface RequestedCapabilities {
+	domains: boolean;
+	recency: boolean;
+	locale: boolean;
+	/** true when the user passed a non-auto engine (operators gated behind it) */
+	operators: boolean;
+}
+
+export interface WebSearchParams {
+	query: string;
+	recency?: "day" | "week" | "month" | "year";
+	allowed_domains?: string[];
+	blocked_domains?: string[];
+	locale?: string;
+	engine?: "auto" | EngineId;
+}
+
+/** Result of a single channel search (internal — normalized). */
+export interface ChannelSearchResult {
+	results: SearchResultItem[];
+	/** channel-reported total when available, else results.length */
+	total: number;
+	/** channel-reported description when available (used as fallback snippet) */
+	answer?: string;
+}
+
+export interface ChannelSearchContext {
+	/** AbortSignal from the tool call. */
+	signal?: AbortSignal;
+	/** Timeout budget for the whole channel attempt (ms). */
+	timeoutMs?: number;
+}
+
+/** web_fetch result (SPEC: { title, markdown }; error carries HTTP status). */
+export interface WebFetchResult {
+	title: string;
+	markdown: string;
+	error?: string;
+}
