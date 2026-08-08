@@ -1,10 +1,12 @@
 # pi-extensions
 
+[English](README.md) | [中文](README.zh.md)
+
 [pi](https://github.com/earendil-works/pi) 扩展的 pnpm workspace monorepo。每个包都是一个可独立发布的 pi 扩展。
 
 | 包 | 是什么 | npm |
 |---|---|---|
-| [`packages/pi-subagent`](./packages/pi-subagent/README.zh.md) | Pi 的极简子代理——双原语、无噪音、无限制。 | `@everyx/pi-subagent` |
+| [`subagent`](./packages/pi-subagent/README.zh.md) | Pi 的极简子代理——双原语、无噪音、无限制。 | `@everyx/pi-subagent` |
 
 ## 布局
 

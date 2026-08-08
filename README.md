@@ -1,10 +1,12 @@
 # pi-extensions
 
+[English](README.md) | [中文](README.zh.md)
+
 A pnpm workspace monorepo of [pi](https://github.com/earendil-works/pi) extensions. Each package is a plain, independently publishable pi extension.
 
 | Package | What it is | npm |
 |---|---|---|
-| [`packages/pi-subagent`](./packages/pi-subagent/README.md) | Minimal sub‑agents for your Pi — two primitives, no noise, no limits. | `@everyx/pi-subagent` |
+| [`subagent`](./packages/pi-subagent/README.md) | Minimal sub‑agents for your Pi — two primitives, no noise, no limits. | `@everyx/pi-subagent` |
 
 ## Layout
 
