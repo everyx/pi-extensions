@@ -52,7 +52,7 @@ export function engineSearchUrl(engine: EngineId, locale?: string, recency?: str
 		case "bing": {
 			const params: Record<string, string> = {};
 			if (locale) params.mkt = normalizedLocale(locale); // Bing eats BCP-47 directly
-			if (recency) params.filters = recency;
+			if (recency) params.filters = recencyToBingFilters(recency);
 			return { url: "https://www.bing.com/search?q={q}", localeParams: params };
 		}
 		case "baidu":
@@ -64,6 +64,15 @@ export function engineSearchUrl(engine: EngineId, locale?: string, recency?: str
 			return { url: "https://yandex.com/search/?text={q}", localeParams: params };
 		}
 	}
+}
+
+/**
+ * Bing web UI freshness filter: filters=ex1:"ez1"…"ez4"
+ * (ez1=24h, ez2=week, ez3=month, ez4=year — scraper convention).
+ */
+function recencyToBingFilters(recency: string): string {
+	const code = { day: "ez1", week: "ez2", month: "ez3", year: "ez4" }[recency] ?? "ez4";
+	return `ex1:"${code}"`;
 }
 
 /** Normalize a BCP-47 tag to the form engines expect ("zh-cn" → "zh-CN"). */

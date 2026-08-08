@@ -2,19 +2,17 @@
  * pi-web-tools — real-browser channel (BrowserSkill / bsk CLI).
  *
  * Drives the user's real, logged-in Chromium browser (SPEC: 真实浏览器通道).
- * To behave like a human (anti-bot friendly), searches go through the real
- * input path: open the engine home page, type the query into the search box,
- * submit the search form, wait for navigation, extract results. Submission
- * uses the form's submit() (reliable, independent of window focus). Structured filters that
- * map to engine URL params (recency) use the direct search-URL path instead;
- * if the search box is not found, we fall back to the search-URL path.
+ * Searches navigate directly to the engine's search URL — query, locale and
+ * recency as URL params (precise, no DOM dependence). Anti-bot friction
+ * (captcha) is handled when it shows up, not pre-empted with input
+ * simulation.
  *
  * Per-engine serial queues share one bsk session across a burst of queued
- * searches (SPEC: 批量搜索一次打开浏览器，存结果，继续下一个，再返回结束).
- * bsk errors surface as-is (SPEC: bsk 运行报错透传到 TUI；安装归 bsk 自己).
+ * searches (SPEC: 批量搜索一次打开浏览器). bsk errors surface as-is
+ * (SPEC: bsk 运行报错透传到 TUI；安装归 bsk 自己).
  *
- * Follows BrowserSkill's mandatory lifecycle: session start → commands with
- * --session → session stop (always, even on error paths).
+ * Follows BrowserSkill's lifecycle: session start → commands with --session
+ * → session stop (always, even on error paths).
  */
 
 import { execFile, spawn } from "node:child_process";
@@ -32,26 +30,6 @@ import { engineSearchUrl } from "./locale.js";
 const execFileAsync = promisify(execFile);
 
 const BSK = "bsk";
-
-/** Engine home pages (human path: navigate → type → search). */
-const ENGINE_HOME: Record<EngineId, string> = {
-	google: "https://www.google.com",
-	bing: "https://www.bing.com",
-	baidu: "https://www.baidu.com",
-	yandex: "https://yandex.com",
-};
-
-/** Search-box CSS selectors per engine (home pages).
- *
- * Single selector each: bsk fill's --selector does not accept comma lists
- * (the first alternative wins in a way that breaks the subsequent Enter).
- */
-const SEARCH_BOX_SELECTOR: Record<EngineId, string> = {
-	google: 'textarea[name="q"]',
-	bing: 'input[name="q"]',
-	baidu: 'input[name="wd"]',
-	yandex: 'input[name="text"]',
-};
 
 // One serial queue per engine: a burst of queued searches shares a single
 // bsk session (open lazily, close when the queue drains).
@@ -180,7 +158,7 @@ async function openSession(): Promise<string> {
 		throw new Error(`real-browser channel unavailable: ${conn.detail}`);
 	}
 	const { ok, stdout } = await runBsk(["session", "start", "--json"]);
-	if (!ok) throw new Error(`bsk session start failed`);
+	if (!ok) throw new Error("bsk session start failed");
 	try {
 		const parsed = JSON.parse(stdout) as { sessionId?: string; session_id?: string; id?: string };
 		const sessionId = parsed.sessionId ?? parsed.session_id ?? parsed.id;
@@ -226,7 +204,18 @@ const EXTRACT_SCRIPT = String.raw`
 	const push = (titleEl) => {
 		const a = titleEl.closest('a') || titleEl.querySelector('a');
 		if (!a) return;
-		const href = a.href || '';
+		let href = a.href || '';
+		// Bing wraps results in /ck/a?u=<base64url> redirects — recover the real URL.
+		if (/bing\.com\/ck\//.test(href)) {
+			const m = href.match(/[?&]u=([^&]+)/);
+			if (m) {
+				try {
+					const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+					const decoded = decodeURIComponent(atob(b64));
+					if (decoded.startsWith('http')) href = decoded;
+				} catch { /* keep the redirect URL */ }
+			}
+		}
 		const title = (titleEl.textContent || '').trim();
 		if (!title || !href.startsWith('http') || seen.has(href) || isAd(titleEl, a)) return;
 		// Skip the engine's own pages (local packs / "more results").
@@ -247,17 +236,6 @@ const EXTRACT_SCRIPT = String.raw`
 })()
 `;
 
-/** Submit the search form programmatically (fallback when Enter doesn't navigate). */
-const SUBMIT_SCRIPT = String.raw`
-(() => {
-	const q = document.querySelector('textarea[name="q"], input[name="q"], input[name="wd"], input[name="text"]');
-	const form = q ? q.closest('form') : null;
-	if (!form) return 'NO_FORM';
-	form.submit();
-	return 'SUBMITTED';
-})()
-`;
-
 function parseResults(raw: string): SearchResultItem[] {
 	try {
 		const parsed = JSON.parse(raw) as SearchResultItem[];
@@ -267,53 +245,12 @@ function parseResults(raw: string): SearchResultItem[] {
 	}
 }
 
-/** Build a direct engine search URL (fallback / structured-filter path). */
+/** Build a direct engine search URL (query + locale + recency as params). */
 function buildSearchUrl(params: WebSearchParams, engine: EngineId, recencyParam?: string): string {
 	const { url, localeParams } = engineSearchUrl(engine, params.locale, recencyParam);
 	const searchParams = new URLSearchParams();
 	for (const [k, v] of Object.entries(localeParams ?? {})) searchParams.set(k, v);
 	return url.replace("{q}", encodeURIComponent(params.query)) + (searchParams.size ? `&${searchParams}` : "");
-}
-
-/** Human path: home page → type into search box → Enter → wait → extract. */
-async function searchHumanPath(
-	sessionId: string,
-	params: WebSearchParams,
-	engine: EngineId,
-	timeoutMs: number,
-): Promise<SearchResultItem[]> {
-	const home = ENGINE_HOME[engine];
-	const nav = await runBsk(["navigate", "--session", sessionId, home, "--wait-until", "load"], timeoutMs);
-	if (!nav.ok) throw new Error(`real-browser channel: navigate ${home} failed: ${nav.stderr || "unknown error"}`);
-
-	const selector = SEARCH_BOX_SELECTOR[engine];
-	// The home page may still be settling after `load` — retry the fill once
-	// before falling back to the direct search-URL path.
-	let fill = await runBsk(["fill", "--session", sessionId, "--selector", selector, "--value", params.query], timeoutMs);
-	if (!fill.ok) {
-		await new Promise((r) => setTimeout(r, 800));
-		fill = await runBsk(["fill", "--session", sessionId, "--selector", selector, "--value", params.query], timeoutMs);
-	}
-	if (!fill.ok) {
-		// Search box not found (engine DOM changed) — fall back to the
-		// direct search-URL path rather than failing the search.
-		const target = buildSearchUrl(params, engine);
-		const nav2 = await runBsk(["navigate", "--session", sessionId, target], timeoutMs);
-		if (!nav2.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav2.stderr}`);
-	} else {
-		// Submit via the search form: reliable, and independent of window
-		// focus (pressing Enter needs a foreground window and fails in
-		// background/headless setups). fill() already did the human part —
-		// typing the query — form.submit() is the engine's own submission.
-		const submitted = await evaluate(sessionId, SUBMIT_SCRIPT, timeoutMs);
-		if (!submitted.includes("SUBMITTED")) {
-			throw new Error(`real-browser channel: search form not found on ${engine} home page`);
-		}
-		await runBsk(["wait-for-navigation", "--session", sessionId], timeoutMs);
-	}
-
-	const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
-	return parseResults(raw);
 }
 
 export async function searchWithBsk(
@@ -322,8 +259,8 @@ export async function searchWithBsk(
 	ctx: ChannelSearchContext,
 ): Promise<ChannelSearchResult> {
 	const timeoutMs = ctx.timeoutMs ?? 30_000;
-	// Structured recency filters map to engine URL params (tbs/mkt); the
-	// human path can't express them, so those go through the search-URL path.
+	// Direct navigation to the engine search URL: query + locale + recency
+	// as URL params (precise, no DOM dependence).
 	const recencyParam = params.recency
 		? engine === "google"
 			? `qdr:${params.recency[0]}`
@@ -333,16 +270,13 @@ export async function searchWithBsk(
 		: undefined;
 
 	const results = await engineQueues[engine].run(async (sessionId) => {
-		if (recencyParam) {
-			const nav = await runBsk(
-				["navigate", "--session", sessionId, buildSearchUrl(params, engine, recencyParam)],
-				timeoutMs,
-			);
-			if (!nav.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav.stderr}`);
-			const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
-			return parseResults(raw);
-		}
-		return searchHumanPath(sessionId, params, engine, timeoutMs);
+		const nav = await runBsk(
+			["navigate", "--session", sessionId, buildSearchUrl(params, engine, recencyParam)],
+			timeoutMs,
+		);
+		if (!nav.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav.stderr}`);
+		const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
+		return parseResults(raw);
 	});
 
 	return { results, total: results.length };
