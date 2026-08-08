@@ -4,7 +4,8 @@
  * Drives the user's real, logged-in Chromium browser (SPEC: 真实浏览器通道).
  * To behave like a human (anti-bot friendly), searches go through the real
  * input path: open the engine home page, type the query into the search box,
- * press Enter, wait for navigation, extract results. Structured filters that
+ * submit the search form, wait for navigation, extract results. Submission
+ * uses the form's submit() (reliable, independent of window focus). Structured filters that
  * map to engine URL params (recency) use the direct search-URL path instead;
  * if the search box is not found, we fall back to the search-URL path.
  *
@@ -16,7 +17,7 @@
  * --session → session stop (always, even on error paths).
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
 import type {
@@ -40,12 +41,16 @@ const ENGINE_HOME: Record<EngineId, string> = {
 	yandex: "https://yandex.com",
 };
 
-/** Search-box CSS selectors per engine (home pages). */
+/** Search-box CSS selectors per engine (home pages).
+ *
+ * Single selector each: bsk fill's --selector does not accept comma lists
+ * (the first alternative wins in a way that breaks the subsequent Enter).
+ */
 const SEARCH_BOX_SELECTOR: Record<EngineId, string> = {
-	google: 'textarea[name="q"], input[name="q"]',
-	bing: 'input[name="q"], textarea[name="q"]',
-	baidu: 'input[name="wd"], input#kw',
-	yandex: 'input[name="text"], input#text',
+	google: 'textarea[name="q"]',
+	bing: 'input[name="q"]',
+	baidu: 'input[name="wd"]',
+	yandex: 'input[name="text"]',
 };
 
 // One serial queue per engine: a burst of queued searches shares a single
@@ -67,7 +72,9 @@ interface BskResult {
 
 async function runBsk(args: string[], timeoutMs = 30_000): Promise<BskResult> {
 	try {
-		const { stdout, stderr } = await execFileAsync(BSK, args, {
+		// --quiet suppresses informational stderr (e.g. the "new bsk version
+		// available" notice) so failures surface real errors.
+		const { stdout, stderr } = await execFileAsync(BSK, ["--quiet", ...args], {
 			timeout: timeoutMs,
 			env: { ...process.env, NO_COLOR: "1" },
 		});
@@ -85,6 +92,9 @@ async function runBsk(args: string[], timeoutMs = 30_000): Promise<BskResult> {
 // ── browser connection + session lifecycle ───────────────────────
 
 interface BskBrowsersEntry {
+	/** bsk 0.1.x reports instance_id / browser_name. */
+	instance_id?: string;
+	browser_name?: string;
 	id?: string;
 	browser?: string;
 	name?: string;
@@ -96,7 +106,7 @@ async function connectedBrowsers(): Promise<BskBrowsersEntry[]> {
 	try {
 		const parsed = JSON.parse(stdout) as BskBrowsersEntry[] | { browsers?: BskBrowsersEntry[] };
 		const list = Array.isArray(parsed) ? parsed : (parsed.browsers ?? []);
-		return list.filter((b) => b?.id || b?.browser || b?.name);
+		return list.filter((b) => b?.instance_id || b?.browser_name || b?.id || b?.browser || b?.name);
 	} catch {
 		return [];
 	}
@@ -129,7 +139,10 @@ function launchCandidates(): { name: string; args: string[] }[] {
 async function launchBrowser(): Promise<boolean> {
 	for (const candidate of launchCandidates()) {
 		try {
-			await execFileAsync(candidate.name, candidate.args, { timeout: 5_000 });
+			// Detached spawn: browsers are long-running; execFile would wait
+			// for exit and its timeout would kill the process after ~5s.
+			const child = spawn(candidate.name, candidate.args, { detached: true, stdio: "ignore" });
+			child.unref();
 			return true;
 		} catch {
 			// try next candidate
@@ -192,17 +205,32 @@ async function evaluate(sessionId: string, expression: string, timeoutMs: number
 	return stdout;
 }
 
-/** Extract search results from the page (engine-agnostic: h2/h3-wrapped titles). */
+/** Extract search results from the page (engine-agnostic: h2/h3-wrapped titles).
+ *
+ * Ad results are excluded: Google marks them with data-text-ad / adurl,
+ * Bing puts them in .b_ad / li[class*='ad'].
+ */
 const EXTRACT_SCRIPT = String.raw`
 (() => {
 	const out = [];
 	const seen = new Set();
+	const isAd = (titleEl, a) => {
+		if (a && /adurl|aclk/.test(a.href)) return true;
+		for (let n = titleEl.parentElement; n && n !== document.body; n = n.parentElement) {
+			const cls = (typeof n.className === 'string' ? n.className : '') + ' ' + (n.getAttribute('data-text-ad') || '') + ' ' + (n.getAttribute('data-ad-text') || '');
+			const role = n.getAttribute('role') || '';
+			if (/\b(ad|ads|advertisement|sponsored|b_ad)\b/i.test(cls + role)) return true;
+		}
+		return false;
+	};
 	const push = (titleEl) => {
 		const a = titleEl.closest('a') || titleEl.querySelector('a');
 		if (!a) return;
 		const href = a.href || '';
 		const title = (titleEl.textContent || '').trim();
-		if (!title || !href.startsWith('http') || seen.has(href)) return;
+		if (!title || !href.startsWith('http') || seen.has(href) || isAd(titleEl, a)) return;
+		// Skip the engine's own pages (local packs / "more results").
+		if (/google\.com\/search|bing\.com\/search|baidu\.com\/s|yandex\.com\/search/.test(href)) return;
 		seen.add(href);
 		let snippet = '';
 		let n = titleEl;
@@ -216,6 +244,17 @@ const EXTRACT_SCRIPT = String.raw`
 	};
 	document.querySelectorAll('h3, h2').forEach(push);
 	return JSON.stringify(out);
+})()
+`;
+
+/** Submit the search form programmatically (fallback when Enter doesn't navigate). */
+const SUBMIT_SCRIPT = String.raw`
+(() => {
+	const q = document.querySelector('textarea[name="q"], input[name="q"], input[name="wd"], input[name="text"]');
+	const form = q ? q.closest('form') : null;
+	if (!form) return 'NO_FORM';
+	form.submit();
+	return 'SUBMITTED';
 })()
 `;
 
@@ -248,10 +287,13 @@ async function searchHumanPath(
 	if (!nav.ok) throw new Error(`real-browser channel: navigate ${home} failed: ${nav.stderr || "unknown error"}`);
 
 	const selector = SEARCH_BOX_SELECTOR[engine];
-	const fill = await runBsk(
-		["fill", "--session", sessionId, "--selector", selector, "--value", params.query],
-		timeoutMs,
-	);
+	// The home page may still be settling after `load` — retry the fill once
+	// before falling back to the direct search-URL path.
+	let fill = await runBsk(["fill", "--session", sessionId, "--selector", selector, "--value", params.query], timeoutMs);
+	if (!fill.ok) {
+		await new Promise((r) => setTimeout(r, 800));
+		fill = await runBsk(["fill", "--session", sessionId, "--selector", selector, "--value", params.query], timeoutMs);
+	}
 	if (!fill.ok) {
 		// Search box not found (engine DOM changed) — fall back to the
 		// direct search-URL path rather than failing the search.
@@ -259,8 +301,14 @@ async function searchHumanPath(
 		const nav2 = await runBsk(["navigate", "--session", sessionId, target], timeoutMs);
 		if (!nav2.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav2.stderr}`);
 	} else {
-		const press = await runBsk(["press", "--session", sessionId, "Enter"], timeoutMs);
-		if (!press.ok) throw new Error(`real-browser channel: press Enter failed: ${press.stderr}`);
+		// Submit via the search form: reliable, and independent of window
+		// focus (pressing Enter needs a foreground window and fails in
+		// background/headless setups). fill() already did the human part —
+		// typing the query — form.submit() is the engine's own submission.
+		const submitted = await evaluate(sessionId, SUBMIT_SCRIPT, timeoutMs);
+		if (!submitted.includes("SUBMITTED")) {
+			throw new Error(`real-browser channel: search form not found on ${engine} home page`);
+		}
 		await runBsk(["wait-for-navigation", "--session", sessionId], timeoutMs);
 	}
 

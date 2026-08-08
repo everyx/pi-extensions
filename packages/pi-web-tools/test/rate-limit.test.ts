@@ -119,4 +119,25 @@ describe("createSerialQueue", () => {
 		const next = await queue.run(async () => 42);
 		assert.equal(next, 42);
 	});
+
+	it("tasks enqueued during a slow close still run (no swallowed drain)", async () => {
+		let releaseClose: () => void = () => {};
+		const closeGate = new Promise<void>((r) => {
+			releaseClose = r;
+		});
+		const queue = createSerialQueue<string>(
+			async () => "s",
+			async () => {
+				await closeGate; // simulate a slow session stop
+			},
+		);
+
+		const first = await queue.run(async () => 1);
+		assert.equal(first, 1);
+
+		// Enqueue while the previous batch's close is still pending.
+		const second = queue.run(async () => 2);
+		setTimeout(releaseClose, 10);
+		assert.equal(await second, 2);
+	});
 });

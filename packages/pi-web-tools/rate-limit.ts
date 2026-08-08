@@ -119,6 +119,10 @@ export function createSerialQueue<TContext>(
 				ctx = null;
 			}
 			processing = false;
+			// Tasks enqueued while we were draining (e.g. during the async
+			// close) were swallowed by the `if (processing) return` guard —
+			// pick them up now, or they would wait forever.
+			if (queue.length > 0) void drain();
 		}
 	}
 }
