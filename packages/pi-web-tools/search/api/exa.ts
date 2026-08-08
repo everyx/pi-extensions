@@ -10,11 +10,15 @@
 
 import Exa from "exa-js";
 import { fetchWithTimeout } from "../../http.ts";
+import { createRateLimiter } from "../../rate-limit.ts";
 import type { ChannelSearchContext, ChannelSearchResult, SearchResultItem, WebSearchParams } from "../../types.ts";
 import { recencyToExa } from "../recency.ts";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
 const DEFAULT_RESULTS = 5;
+
+// Exa MCP (keyless) is rate-limited to 3 qps / 150 calls per day (researched).
+const mcpLimiter = createRateLimiter(3);
 
 export function exaApiKey(): string | null {
 	const key = process.env.EXA_API_KEY?.trim();
@@ -74,6 +78,10 @@ function domainArgs(params: WebSearchParams): Record<string, unknown> {
 }
 
 async function searchExaMcp(params: WebSearchParams, ctx: ChannelSearchContext): Promise<ChannelSearchResult> {
+	return mcpLimiter.run(() => searchExaMcpInner(params, ctx));
+}
+
+async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchContext): Promise<ChannelSearchResult> {
 	const response = await fetchWithTimeout(
 		EXA_MCP_URL,
 		{

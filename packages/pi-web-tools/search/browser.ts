@@ -12,6 +12,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createMutex, type Mutex } from "../rate-limit.js";
 import type {
 	ChannelSearchContext,
 	ChannelSearchResult,
@@ -24,6 +25,15 @@ import { engineSearchUrl } from "./locale.js";
 const execFileAsync = promisify(execFile);
 
 const BSK = "bsk";
+
+// One browser engine at a time: concurrent navigations of the same engine
+// would fight over the same tab (SPEC: bsk 真实浏览器通道).
+const engineMutexes: Record<EngineId, Mutex> = {
+	google: createMutex(),
+	bing: createMutex(),
+	baidu: createMutex(),
+	yandex: createMutex(),
+};
 
 export function isBskInstalled(): boolean {
 	return true; // availability is checked at runtime via `bsk status` (daemon may be missing)
@@ -186,6 +196,14 @@ const EXTRACT_SCRIPT = String.raw`
 `;
 
 export async function searchWithBsk(
+	params: WebSearchParams,
+	engine: EngineId,
+	ctx: ChannelSearchContext,
+): Promise<ChannelSearchResult> {
+	return engineMutexes[engine].run(() => searchWithBskInner(params, engine, ctx));
+}
+
+async function searchWithBskInner(
 	params: WebSearchParams,
 	engine: EngineId,
 	ctx: ChannelSearchContext,

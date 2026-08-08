@@ -6,10 +6,14 @@
  */
 
 import { tavily } from "@tavily/core";
+import { createRateLimiter } from "../../rate-limit.ts";
 import type { ChannelSearchContext, ChannelSearchResult, SearchResultItem, WebSearchParams } from "../../types.ts";
 import { countryFromLocale } from "../locale.ts";
 
 const DEFAULT_RESULTS = 5;
+
+// Tavily free tier: 1 req/s, account-level (researched).
+const limiter = createRateLimiter(1);
 
 export function isTavilyAvailable(): boolean {
 	const key = process.env.TAVILY_API_KEY?.trim();
@@ -27,14 +31,16 @@ export async function searchWithTavily(
 	ctx: ChannelSearchContext,
 ): Promise<ChannelSearchResult> {
 	const client = tavily({ apiKey: requireKey() });
-	const response = await client.search(params.query, {
-		maxResults: DEFAULT_RESULTS,
-		includeAnswer: "basic",
-		...(params.allowed_domains?.length ? { includeDomains: params.allowed_domains } : {}),
-		...(params.blocked_domains?.length ? { excludeDomains: params.blocked_domains } : {}),
-		...(params.recency ? { timeRange: params.recency } : {}),
-		...(countryFromLocale(params.locale) ? { country: countryFromLocale(params.locale) } : {}),
-	});
+	const response = await limiter.run(() =>
+		client.search(params.query, {
+			maxResults: DEFAULT_RESULTS,
+			includeAnswer: "basic",
+			...(params.allowed_domains?.length ? { includeDomains: params.allowed_domains } : {}),
+			...(params.blocked_domains?.length ? { excludeDomains: params.blocked_domains } : {}),
+			...(params.recency ? { timeRange: params.recency } : {}),
+			...(countryFromLocale(params.locale) ? { country: countryFromLocale(params.locale) } : {}),
+		}),
+	);
 
 	// SDK has no per-request signal; it uses its own fetch underneath.
 	void ctx;
