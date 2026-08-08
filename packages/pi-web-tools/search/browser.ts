@@ -205,15 +205,23 @@ const EXTRACT_SCRIPT = String.raw`
 		const a = titleEl.closest('a') || titleEl.querySelector('a');
 		if (!a) return;
 		let href = a.href || '';
-		// Bing wraps results in /ck/a?u=<base64url> redirects — recover the real URL.
+		// Bing wraps results in /ck/a?u=<base64url> redirects — recover the real
+		// URL. u is "a1" + base64url(URL); try plain first, then without the a1.
 		if (/bing\.com\/ck\//.test(href)) {
 			const m = href.match(/[?&]u=([^&]+)/);
 			if (m) {
-				try {
-					const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
-					const decoded = decodeURIComponent(atob(b64));
-					if (decoded.startsWith('http')) href = decoded;
-				} catch { /* keep the redirect URL */ }
+				for (const candidate of [m[1], m[1].replace(/^a1/, "")]) {
+					try {
+						const b64 = candidate.replace(/-/g, "+").replace(/_/g, "/");
+						const decoded = decodeURIComponent(atob(b64));
+						if (decoded.startsWith("http")) {
+							href = decoded;
+							break;
+						}
+					} catch {
+						// try next candidate
+					}
+				}
 			}
 		}
 		const title = (titleEl.textContent || '').trim();
