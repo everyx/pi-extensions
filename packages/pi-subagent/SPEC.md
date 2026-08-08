@@ -1,5 +1,7 @@
 # pi-subagent 规格说明
 
+> 通用设计原则（Pi Native / LLM+Token Friendly / 提供能力 / 极简克制）与统一视觉语法见项目级 [`SPEC.md`](../../SPEC.md)；本文件只记录 sub-agent 专属设计。
+
 ## 问题陈述
 
 Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结果、日志、测试输出）污染主会话上下文，或需要并行运行独立任务而不阻塞主对话时，需要一种委托机制：
@@ -20,26 +22,6 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 每个子 agent 是一个常驻 `pi --mode rpc` 子进程，拥有独立上下文与持久化会话。
 
-## 设计原则
-
-### Pi Native
-
-- **一致的调用方式**：参数 schema、命名风格与 pi 内置工具（`bash`、`read` 等）保持一致；`promptSnippet` / `promptGuidelines` 注入系统提示。
-- **一致的输出质感**：渲染复用 pi 原生组件，排版、颜色、折叠展开遵循内置工具（bash 工具卡片）的惯例；widget 与内置 working 指示器同一视觉语言（accent spinner 80ms + muted 文本）。
-- **一致的视觉家族**：工具卡 `Agent <title>`、通知卡 `Agent ✓ <title>`、总览 `Agents`——不出现 "subagent" 字样、无装饰 emoji（通知卡状态 icon 除外）。
-- **依赖原生能力**：会话存储/attach 走 pi 原生机制（`--session <path>`），不自造会话管理。
-
-### LLM + Token Friendly
-
-- **Token Economy**：通知的 `content`（LLM 可见）只含最小结构化信息；装饰性元素（title、usage、session 路径）放 `details`——`details` 永不进入 LLM 上下文。
-- **纯函数隔热层**：协议序列化/解析、模型解析是无副作用的纯函数，可独立单测。
-- **不轮询**：后台结果由完成通知一次投递，无查询工具。
-
-### 提供能力而非方案
-
-提供原语，让用户组合。组合逻辑在调用者的 prompt 里，不在工具层。
-不封装工作流模板、不自动重试、不做结果后处理、不做预定义 agent 类型系统。
-
 ## 用户故事
 
 1. 委托子 agent 研究问题，不污染主会话上下文窗口，输出纯文本直接可用。
@@ -52,17 +34,6 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 8. 扩展零运行时 npm 依赖（仅 peerDependencies：pi-ai / pi-coding-agent / pi-tui / typebox）。
 
 ## UI 设计
-
-### 统一视觉语法
-
-- **icon 前置**：所有状态标记（spinner / ✓ / ✗ / ■）在行首——与 pi 内置 Loader 一致。
-- **全阶段 Box 壳**：工具任何阶段不出无壳 spinner，pending → success/error 底色全程覆盖。
-- **`·` 只做 meta 分隔**：不分割动词短语；时间归 header meta、footer 仅 session。
-- **内容行从卡片左边缘起**：body/footer 不对齐 header 文字，空行即分隔（pi bash 卡惯例）。
-- **统一折叠**：所有卡内容超 5 视觉行折叠为尾部预览 + `... (N earlier lines, <key> to expand)`（对齐 bash 工具卡的 BASH_PREVIEW_LINES 和 hint 格式）；展开全显。
-- **LLM context 截断保护**：进 LLM 的 content 经 truncateTail（尾部 2000 行 / 50KB）；UI 渲染源（events）不截断——用户展开看全部，只有 LLM 看到截断版。
-- **title 视觉约定**：卡片中任务名以引号包裹、bashMode 色出现——与工具名 `Agent`（toolTitle bold）区分；widget 里 `Agents` 用 toolTitle bold、title 用 bashMode（无引号）。
-- **占位/兜底（仅 TUI 渲染层）**：卡内容缺失时以 dim 色 + 括号占位（对齐 pi bash 卡的 `(no output)`，如通知卡 `(no details)`）。
 
 ### Agent 工具卡片
 
@@ -204,11 +175,6 @@ queued → running ──→ completed（通知）
 - **现象**：扩展工具 `execute()` 返回 `{ isError: true }` 时，TUI 卡片仍显示成功背景。
 - **根因**：pi-agent-core 的 `executePreparedToolCall` 在工具正常返回时硬编码 `isError: false`——只有 throw 异常才能拿到 `isError: true`。该行为自 2025-09-09 引入，上游 issue **#5209** 被维护者拒绝，预期不会修复。
 - **workaround**：所有错误路径的 `details` 带 `error` 字段；注册 `pi.on("tool_result")` hook 检测 `details.error` → 返回 `{ isError: true }`。该 hook 走 `afterToolCall` 的官方覆盖通道，既修正 isError 又保留 details；官方推荐的 throw 方式会清空 details，故不采用。
-
-## 开发约束
-
-- 不引入第三方 UI 库。
-- 参数枚举用 `StringEnum`（Gemini 兼容）。
 
 ## 测试决策
 
