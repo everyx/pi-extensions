@@ -59,7 +59,7 @@ pi install git:github.com/everyx/pi-subagent
 Or symlink for development:
 
 ```bash
-ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
+ln -sf /path/to/pi-extensions/packages/pi-subagent ~/.pi/agent/extensions/subagent
 ```
 
 Restart pi, then tell it "ask a sub‑agent to…".

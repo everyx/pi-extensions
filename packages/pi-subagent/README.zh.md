@@ -59,7 +59,7 @@ pi install git:github.com/everyx/pi-subagent
 开发期软链接：
 
 ```bash
-ln -sf /path/to/pi-subagent ~/.pi/agent/extensions/subagent
+ln -sf /path/to/pi-extensions/packages/pi-subagent ~/.pi/agent/extensions/subagent
 ```
 
 重启 pi 后直接说"让子 agent 去…"。
