@@ -12,13 +12,13 @@ import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { webFetch } from "./fetch/fetch.js";
 import { WebFetchParamsSchema, WebSearchParamsSchema } from "./schema.js";
-import { isExaAvailable, searchWithExa } from "./search/api/exa.js";
+import { exaApiKey, isExaAvailable, searchWithExa } from "./search/api/exa.js";
 import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.js";
 import { isTavilyAvailable, searchWithTavily } from "./search/api/tavily.js";
 import { searchWithBsk } from "./search/browser.js";
 import { DEFAULT_CHANNEL_ORDER, parseChannelOrder, route } from "./search/channels.js";
 import { type GroundingEndpoint, groundingEndpointFor, searchWithGrounding } from "./search/grounding.js";
-import type { ChannelId, ChannelSearchResult, WebSearchParams } from "./types.js";
+import type { ChannelCapabilities, ChannelId, ChannelSearchResult, WebSearchParams } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,15 +45,25 @@ async function isGroundingAvailable(
 	return { available: true, endpoint, apiKey };
 }
 
-async function detectAvailableChannels(ctx: ExtensionContext): Promise<ChannelId[]> {
+async function detectAvailableChannels(
+	ctx: ExtensionContext,
+): Promise<{ available: ChannelId[]; capabilities: Partial<Record<ChannelId, ChannelCapabilities>> }> {
 	const channels: ChannelId[] = [];
-	if (isExaAvailable()) channels.push("exa");
+	const capabilities: Partial<Record<ChannelId, ChannelCapabilities>> = {};
+	if (isExaAvailable()) {
+		channels.push("exa");
+		// Keyless Exa goes through MCP, which exposes only query + numResults
+		// (researched) — no domains/recency/locale. With a key (REST) it's full.
+		if (!exaApiKey()) {
+			capabilities.exa = { domains: false, recency: false, locale: false, operators: false };
+		}
+	}
 	if (isTavilyAvailable()) channels.push("tavily");
 	if (isParallelAvailable()) channels.push("parallel");
 	if (await isBskAvailable()) channels.push("bsk");
 	const grounding = await isGroundingAvailable(ctx);
 	if (grounding.available) channels.push("grounding");
-	return channels;
+	return { available: channels, capabilities };
 }
 
 // ── Result formatting (LLM-facing, token friendly) ───────────────
@@ -87,9 +97,9 @@ async function executeSearch(
 		};
 	}
 
-	const available = await detectAvailableChannels(ctx);
+	const { available, capabilities } = await detectAvailableChannels(ctx);
 	const order = parseChannelOrder(process.env.PI_WEB_TOOLS_CHANNELS) ?? DEFAULT_CHANNEL_ORDER;
-	const routed = route(params, available, order);
+	const routed = route(params, available, order, capabilities);
 
 	if ("error" in routed) {
 		return {

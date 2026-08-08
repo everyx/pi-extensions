@@ -9,6 +9,7 @@
  */
 
 import type { ChannelCapabilities, ChannelId, EngineId, RequestedCapabilities, WebSearchParams } from "../types.js";
+import { enginePriorityForLocale } from "./locale.js";
 
 /** SPEC 通道能力矩阵 (code-ified). "operators" = native query-operator syntax. */
 export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapabilities> = {
@@ -39,6 +40,20 @@ export function parseChannelOrder(raw?: string): ChannelId[] | undefined {
 
 export function channelCapabilities(channel: ChannelId): ChannelCapabilities {
 	return CHANNEL_CAPABILITIES[channel];
+}
+
+/**
+ * Effective capabilities for a channel at runtime.
+ *
+ * Static matrix by default; a caller may supply overrides for channels whose
+ * capabilities depend on the active mode (e.g. Exa keyless MCP only exposes
+ * query + numResults — no domains/recency/locale).
+ */
+export function effectiveCapabilities(
+	channel: ChannelId,
+	overrides?: Partial<Record<ChannelId, ChannelCapabilities>>,
+): ChannelCapabilities {
+	return overrides?.[channel] ?? CHANNEL_CAPABILITIES[channel];
 }
 
 /** Extract the capabilities a web_search call actually requests. */
@@ -77,6 +92,7 @@ export function route(
 	params: WebSearchParams,
 	available: ChannelId[],
 	order: ChannelId[] = DEFAULT_CHANNEL_ORDER,
+	capabilities?: Partial<Record<ChannelId, ChannelCapabilities>>,
 ): RouteResult | RouteFailure {
 	const requested = requestedCapabilities(params);
 
@@ -92,7 +108,12 @@ export function route(
 
 	for (const channel of order) {
 		if (!available.includes(channel)) continue;
-		if (capabilitiesCover(channel, requested)) {
+		if (capabilitiesCover(channel, requested, capabilities)) {
+			// bsk needs an engine even on the capability path — use the
+			// locale's top-priority engine (SPEC: 引擎优先级按语言分组).
+			if (channel === "bsk") {
+				return { channel, engine: enginePriorityForLocale(params.locale)[0] };
+			}
 			return { channel };
 		}
 	}
@@ -106,8 +127,12 @@ export function route(
 	};
 }
 
-function capabilitiesCover(channel: ChannelId, requested: RequestedCapabilities): boolean {
-	const caps = CHANNEL_CAPABILITIES[channel];
+function capabilitiesCover(
+	channel: ChannelId,
+	requested: RequestedCapabilities,
+	overrides?: Partial<Record<ChannelId, ChannelCapabilities>>,
+): boolean {
+	const caps = effectiveCapabilities(channel, overrides);
 	return (
 		(!requested.domains || caps.domains) &&
 		(!requested.recency || caps.recency) &&
@@ -117,6 +142,10 @@ function capabilitiesCover(channel: ChannelId, requested: RequestedCapabilities)
 }
 
 /** True when the channel can handle every requested capability (no silent drop). */
-export function satisfies(channel: ChannelId, requested: RequestedCapabilities): boolean {
-	return capabilitiesCover(channel, requested);
+export function satisfies(
+	channel: ChannelId,
+	requested: RequestedCapabilities,
+	overrides?: Partial<Record<ChannelId, ChannelCapabilities>>,
+): boolean {
+	return capabilitiesCover(channel, requested, overrides);
 }

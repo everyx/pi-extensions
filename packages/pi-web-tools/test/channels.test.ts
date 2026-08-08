@@ -70,7 +70,7 @@ describe("route", () => {
 
 	it("respects the configured channel order", () => {
 		assert.deepEqual(route({ query: "q" }, [...all], ["tavily", "exa"]), { channel: "tavily" });
-		assert.deepEqual(route({ query: "q" }, [...all], ["bsk", "exa"]), { channel: "bsk" });
+		assert.deepEqual(route({ query: "q" }, [...all], ["bsk", "exa"]), { channel: "bsk", engine: "google" });
 	});
 
 	it("skips unavailable channels", () => {
@@ -98,7 +98,10 @@ describe("route", () => {
 	it("locale routes past channels that lack locale support", () => {
 		// exa/parallel lack locale; tavily and bsk have it.
 		assert.deepEqual(route({ query: "q", locale: "zh-CN" }, ["exa", "parallel", "tavily"]), { channel: "tavily" });
-		assert.deepEqual(route({ query: "q", locale: "zh-CN" }, ["exa", "parallel", "bsk"]), { channel: "bsk" });
+		assert.deepEqual(route({ query: "q", locale: "zh-CN" }, ["exa", "parallel", "bsk"]), {
+			channel: "bsk",
+			engine: "bing",
+		});
 	});
 
 	it("grounding-only with structured capability → explicit error", () => {
@@ -151,5 +154,32 @@ describe("route + params shapes", () => {
 		const result = route(params, ["exa", "tavily", "bsk"]);
 		assert.ok("channel" in result);
 		assert.equal(result.channel, "tavily"); // exa lacks locale
+	});
+
+	it("capability route to bsk carries the locale's default engine", () => {
+		// exa MCP degraded (no domains) → bsk wins, with zh-CN → bing first.
+		const mcpExa = { domains: false, recency: false, locale: false, operators: false };
+		const zh = route({ query: "q", blocked_domains: ["x.com"], locale: "zh-CN" }, ["exa", "bsk"], undefined, {
+			exa: mcpExa,
+		});
+		assert.deepEqual(zh, { channel: "bsk", engine: "bing" });
+		const en = route({ query: "q", blocked_domains: ["x.com"] }, ["exa", "bsk"], undefined, { exa: mcpExa });
+		assert.deepEqual(en, { channel: "bsk", engine: "google" });
+	});
+
+	it("runtime capability overrides apply (keyless Exa MCP has no domains)", () => {
+		const mcpExa = { domains: false, recency: false, locale: false, operators: false };
+		// With plain exa (static caps: domains ✓), the domains request routes to exa.
+		const staticResult = route({ query: "q", blocked_domains: ["x.com"] }, ["exa", "bsk"]);
+		assert.ok("channel" in staticResult);
+		assert.equal(staticResult.channel, "exa");
+		// With the MCP override, exa no longer covers domains → bsk wins.
+		const mcpResult = route({ query: "q", blocked_domains: ["x.com"] }, ["exa", "bsk"], undefined, { exa: mcpExa });
+		assert.ok("channel" in mcpResult);
+		assert.equal(mcpResult.channel, "bsk");
+		// Exa MCP only + domains request → explicit error (no silent drop).
+		const onlyMcp = route({ query: "q", blocked_domains: ["x.com"] }, ["exa"], undefined, { exa: mcpExa });
+		assert.ok("error" in onlyMcp);
+		assert.deepEqual(onlyMcp.unsatisfied, ["domains"]);
 	});
 });

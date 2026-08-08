@@ -67,16 +67,6 @@ async function searchExaSdk(params: WebSearchParams, apiKey: string): Promise<Ch
 
 // ── keyless mode: MCP (SSE) — no official SDK for this path ─────
 
-/** Normalize domains for Exa (includeDomains / excludeDomains). */
-function domainArgs(params: WebSearchParams): Record<string, unknown> {
-	const include = params.allowed_domains ?? [];
-	const exclude = params.blocked_domains ?? [];
-	return {
-		...(include.length ? { includeDomains: include } : {}),
-		...(exclude.length ? { excludeDomains: exclude } : {}),
-	};
-}
-
 async function searchExaMcp(params: WebSearchParams, ctx: ChannelSearchContext): Promise<ChannelSearchResult> {
 	return mcpLimiter.run(() => searchExaMcpInner(params, ctx));
 }
@@ -97,11 +87,9 @@ async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchCont
 				params: {
 					name: "web_search_exa",
 					arguments: {
+						// MCP web_search_exa exposes only query + numResults (researched).
 						query: params.query,
 						numResults: DEFAULT_RESULTS,
-						type: "auto",
-						...domainArgs(params),
-						...(params.recency ? { startPublishedDate: recencyToExa(params.recency) } : {}),
 					},
 				},
 			}),
