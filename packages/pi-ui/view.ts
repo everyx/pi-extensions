@@ -181,6 +181,7 @@ export function createToolView<Args, Data>(
 				tail: tailText ?? undefined,
 				meta: view.meta?.(ctx),
 				body,
+				error: result?.error,
 				expanded,
 			},
 			theme,
