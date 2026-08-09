@@ -8,14 +8,7 @@
  */
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import {
-	type CardIcon,
-	type Component,
-	renderCard,
-	renderIcon,
-	renderNameTitle,
-	textLine,
-} from "@everyx/pi-ui/card.js";
+import { type CardIcon, type Component, dataCard, renderIcon, renderNameTitle, textLine } from "@everyx/pi-ui/card.js";
 import { Spinner } from "@everyx/pi-ui/spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -74,16 +67,18 @@ export function renderSearchResult(
 	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean) as string[];
 	const query = ((context as { args?: { query?: string } }).args?.query ?? "").slice(0, 60);
 	const body = contentText(result);
-	// Structured header: name + quoted query + meta (query always visible,
-	// like subagent's `Agent "title"`); body folds via renderCard.
-	return renderCard(
+	// Pass data only — dataCard assembles the header and folds the body.
+	return dataCard(
 		{
-			header: { icon: icon(context), name: "web_search", title: query, meta },
-			body: body ? { message: body } : undefined,
+			icon: icon(context),
+			name: "web_search",
+			title: query,
+			meta,
+			body: body || undefined,
 			expanded: options.expanded,
 		},
 		theme,
-	) as unknown as Component;
+	);
 }
 
 // ── web_fetch ────────────────────────────────────────────────────
@@ -107,17 +102,15 @@ export function renderFetchResult(
 	const pageTitle = typeof details.title === "string" ? details.title.slice(0, 60) : "";
 	const url = ((context as { args?: { url?: string } }).args?.url ?? "").slice(0, 80);
 	const body = contentText(result);
-	return renderCard(
+	return dataCard(
 		{
-			header: {
-				icon: icon(context),
-				name: "web_fetch",
-				title: url,
-				meta: pageTitle ? [pageTitle] : undefined,
-			},
-			body: body ? { message: body } : undefined,
+			icon: icon(context),
+			name: "web_fetch",
+			title: url,
+			meta: pageTitle ? [pageTitle] : undefined,
+			body: body || undefined,
 			expanded: options.expanded,
 		},
 		theme,
-	) as unknown as Component;
+	);
 }

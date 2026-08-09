@@ -229,3 +229,38 @@ export function cardShell(
 	for (const child of children) cmp.addChild(child);
 	return cmp;
 }
+
+// ── Data-driven card (consumers pass data, component handles everything) ─
+
+/** Data-only card config: pass text, the card assembles header + folded body. */
+export interface DataCardConfig {
+	icon: CardIcon;
+	/** Bold tool/task name (`web_search`, `Agent`). */
+	name: string;
+	/** Quoted title (query, url, task) — always visible. */
+	title?: string;
+	/** Muted parenthesized meta (channel echo, counts). */
+	meta?: string[];
+	/** Body text — folded automatically (tail preview + expand hint). */
+	body?: string;
+	/** Error text — dim folded block below the body. */
+	error?: string;
+	expanded: boolean;
+}
+
+/**
+ * One data-driven card: consumers pass text fields; the component assembles
+ * the header (icon + name + quoted title + meta) and folds the body (long
+ * content gets a tail preview + expand hint, full when expanded). No manual
+ * CardConfig assembly needed.
+ */
+export function dataCard(config: DataCardConfig, theme: Theme): Component {
+	return renderCard(
+		{
+			header: { icon: config.icon, name: config.name, title: config.title, meta: config.meta },
+			body: config.body || config.error ? { message: config.body, error: config.error } : undefined,
+			expanded: config.expanded,
+		},
+		theme,
+	);
+}

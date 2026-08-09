@@ -269,6 +269,51 @@ const fetchSuccess = (t: number, w: number) => {
 	);
 };
 
+const fetchFolded = (t: number, w: number) => {
+	void t;
+	return toolShell(
+		"toolSuccessBg",
+		[
+			renderFetchCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
+			renderFetchResult(
+				ctx(
+					false,
+					false,
+					{
+						url: "https://rocket.rs/",
+						title: "Rocket - Simple, Fast, Type-Safe",
+						markdownLength: 523,
+						_body: fetchMarkdown,
+					},
+					{},
+					{ url: "https://rocket.rs/" },
+				).result,
+				{ expanded: false, isPartial: false },
+				theme,
+				ctx(false, false, {}, {}, { url: "https://rocket.rs/" }).context,
+			),
+		],
+		w,
+	);
+};
+
+const searchFolded = (t: number, w: number) => {
+	void t;
+	return toolShell(
+		"toolSuccessBg",
+		[
+			renderSearchCall({ query: "rust web framework" }, theme, ctx(false).context),
+			renderSearchResult(
+				ctx(false, false, { channel: "exa", count: 5, _body: searchBody }, {}, { query: "rust web framework" }).result,
+				{ expanded: false, isPartial: false },
+				theme,
+				ctx(false, false, {}, {}, { query: "rust web framework" }).context,
+			),
+		],
+		w,
+	);
+};
+
 const fetchError = (t: number, w: number) => {
 	void t;
 	return toolShell(
@@ -393,12 +438,14 @@ const staticMode = process.argv.includes("static");
 
 const sections: LiveSection[] = [
 	{ title: "web_search · running (animated)", render: runningSearch, height: 0 },
-	{ title: "web_search · success (search API)", render: searchSuccess, height: 0 },
+	{ title: "web_search · success (expanded)", render: searchSuccess, height: 0 },
+	{ title: "web_search · success (folded + expand hint)", render: searchFolded, height: 0 },
 	{ title: "web_search · success (browser engine)", render: searchBsk, height: 0 },
 	{ title: "web_search · empty", render: searchEmpty, height: 0 },
 	{ title: "web_search · channel error", render: searchError, height: 0 },
 	{ title: "web_fetch · running (animated)", render: runningFetch, height: 0 },
-	{ title: "web_fetch · success", render: fetchSuccess, height: 0 },
+	{ title: "web_fetch · success (expanded)", render: fetchSuccess, height: 0 },
+	{ title: "web_fetch · success (folded + expand hint)", render: fetchFolded, height: 0 },
 	{ title: "web_fetch · 404 error", render: fetchError, height: 0 },
 ];
 
