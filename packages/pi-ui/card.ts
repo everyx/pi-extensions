@@ -99,6 +99,13 @@ export function renderHeader(header: CardHeader, theme: Theme): string {
 /** Number of visual lines shown before the fold hint. */
 export const PREVIEW_LINES = 5;
 
+/** One content line with zero padding — pi's Text defaults to padding (1,1),
+ * which adds stray blank rows around card content. All card surfaces must
+ * use this (or contentRow) instead of bare `new Text(...)`. */
+export function textLine(text: string): Text {
+	return new Text(text, 0, 0);
+}
+
 export type BodyComponent = Text | Container | { invalidate: () => void; render: (w: number) => string[] };
 
 /**

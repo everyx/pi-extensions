@@ -16,8 +16,8 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { type Container, Text } from "@earendil-works/pi-tui";
-import { type CardIcon, renderHeader } from "@everyx/pi-ui/card.js";
+import type { Container, Text } from "@earendil-works/pi-tui";
+import { type CardIcon, renderHeader, textLine } from "@everyx/pi-ui/card.js";
 import type { CardBody, CardConfig } from "./card.js";
 import { renderCard, renderNoDetailsCard, renderNotificationCard } from "./card.js";
 import { formatDuration, Spinner } from "./format.js";
@@ -84,7 +84,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 
 	// Background spawn: no header — a single status line renders from
 	// renderResult (Text("") renders zero lines); the title lives on the line.
-	if (args.run_in_background) return new Text("", 0, 0);
+	if (args.run_in_background) return textLine("");
 
 	// Status icon, fronted like every other surface: the accent spinner while
 	// running (same width as ✓/✗, so the `Agent` column never shifts), then
@@ -113,7 +113,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 	const metaModel = state.resolvedModel ?? args.model;
 	const metaThinking = state.resolvedThinking ?? args.thinking;
 
-	return new Text(
+	return textLine(
 		renderHeader(
 			{
 				icon,
@@ -123,23 +123,21 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 			},
 			theme,
 		),
-		0,
-		0,
 	);
 }
 
 export function renderAgentControlCall(_args: AgentControlParams, _theme: Theme, _context: RenderContext): Text {
 	// Steer/stop render as single working-indicator status lines from
 	// renderResult — no header (Text("") renders zero lines).
-	return new Text("", 0, 0);
+	return textLine("");
 }
 
 // ── Render result (output body) ────────────────────────────────
 
 /** Dim one-liner for background-start/control acks and bare errors. */
 function dimOneLiner(text: string | undefined, theme: Theme): Text {
-	if (!text) return new Text("", 0, 0);
-	return new Text(theme.fg("dim", text), 0, 0);
+	if (!text) return textLine("");
+	return textLine(theme.fg("dim", text));
 }
 
 /**

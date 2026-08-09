@@ -8,8 +8,8 @@
  */
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { type CardIcon, renderCard, renderIcon, renderNameTitle } from "@everyx/pi-ui/card.js";
+import type { Text } from "@earendil-works/pi-tui";
+import { type CardIcon, renderCard, renderIcon, renderNameTitle, textLine } from "@everyx/pi-ui/card.js";
 import { Spinner } from "@everyx/pi-ui/spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -49,10 +49,10 @@ function contentText(result: AgentToolResult<Record<string, unknown>>): string {
 export function renderSearchCall(args: { query?: string }, theme: Theme, context: RenderContext): Text {
 	// Running: spinner + query line. Completed: empty — the result header
 	// owns the completed surface (✓ web_search (via …)), same as pi-subagent.
-	if (!context.isPartial) return new Text("", 0, 0);
+	if (!context.isPartial) return textLine("");
 	const query = (args.query ?? "").slice(0, 60);
 	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_search")} ${theme.fg("dim", `"${query}"`)}`;
-	return new Text(head, 0, 0);
+	return textLine(head);
 }
 
 export function renderSearchResult(
@@ -62,7 +62,7 @@ export function renderSearchResult(
 	context: RenderContext,
 ): Text {
 	// Running state is owned by the call renderer (spinner + query line).
-	if (context.isPartial) return new Text("", 0, 0);
+	if (context.isPartial) return textLine("");
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const echo = viaEcho(details);
 	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean) as string[];
@@ -84,9 +84,9 @@ export function renderSearchResult(
 
 export function renderFetchCall(args: { url?: string }, theme: Theme, context: RenderContext): Text {
 	// Running only; completed surfaces come from the result renderer.
-	if (!context.isPartial) return new Text("", 0, 0);
+	if (!context.isPartial) return textLine("");
 	const url = (args.url ?? "").slice(0, 80);
-	return new Text(`${renderIcon(icon(context), theme)} ${renderNameTitle("web_fetch", url, theme)}`, 0, 0);
+	return textLine(`${renderIcon(icon(context), theme)} ${renderNameTitle("web_fetch", url, theme)}`);
 }
 
 export function renderFetchResult(
@@ -96,7 +96,7 @@ export function renderFetchResult(
 	context: RenderContext,
 ): Text {
 	// Running state is owned by the call renderer (spinner + url line).
-	if (context.isPartial) return new Text("", 0, 0);
+	if (context.isPartial) return textLine("");
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const pageTitle = typeof details.title === "string" ? details.title.slice(0, 60) : "";
 	const url = ((context as { args?: { url?: string } }).args?.url ?? "").slice(0, 80);
