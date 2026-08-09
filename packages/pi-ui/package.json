@@ -1,7 +1,7 @@
 {
-	"name": "@everyx/pi-subagent",
+	"name": "@everyx/pi-ui",
 	"version": "0.0.0-development",
-	"description": "Sub-agent tool for pi – delegate tasks to isolated pi instances (resident rpc children)",
+	"description": "Shared TUI building blocks for pi extensions — spinner, card header, status widget, theme resolution.",
 	"keywords": [
 		"pi-package"
 	],
@@ -10,31 +10,21 @@
 		"access": "public"
 	},
 	"type": "module",
+	"scripts": {
+		"test": "tsx --test test/*.test.ts"
+	},
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/everyx/pi-extensions"
-	},
-	"scripts": {
-		"test": "tsx --test test/*.test.ts",
-		"preview": "tsx preview.ts"
 	},
 	"files": [
 		"*.ts",
 		"README.md",
 		"LICENSE"
 	],
-	"pi": {
-		"extensions": [
-			"./index.ts"
-		]
-	},
 	"peerDependencies": {
 		"@earendil-works/pi-ai": "catalog:",
 		"@earendil-works/pi-coding-agent": "catalog:",
-		"@earendil-works/pi-tui": "catalog:",
-		"typebox": "catalog:"
-	},
-	"dependencies": {
-		"@everyx/pi-ui": "workspace:*"
+		"@earendil-works/pi-tui": "catalog:"
 	}
 }

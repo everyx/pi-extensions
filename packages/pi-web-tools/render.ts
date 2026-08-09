@@ -9,8 +9,9 @@
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { type CardIcon, renderIcon } from "@everyx/pi-ui/card.js";
+import { Spinner } from "@everyx/pi-ui/spinner.js";
 
-/** Renderer state shared across call/result renders for one tool row. */
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
 interface RenderContext {
 	state: { startedAt?: number; spinner?: Spinner };
@@ -19,34 +20,13 @@ interface RenderContext {
 	invalidate: () => void;
 }
 
-/** Spinner frames (Pi's native cadence: one frame per 80ms). */
-const SPINNER_FRAMES = [
-	"\u280b",
-	"\u2819",
-	"\u2839",
-	"\u2838",
-	"\u283c",
-	"\u2834",
-	"\u2826",
-	"\u2827",
-	"\u2807",
-	"\u280f",
-];
-
-class Spinner {
-	private readonly startedAt = Date.now();
-	current(): string {
-		return SPINNER_FRAMES[Math.floor((Date.now() - this.startedAt) / 80) % SPINNER_FRAMES.length];
-	}
-}
-
 /** Header icon: spinner while running, ✓/✗ on completion. */
-function icon(context: RenderContext, theme: Theme): string {
+function icon(context: RenderContext): CardIcon {
 	if (context.isPartial) {
 		context.state.spinner = context.state.spinner ?? new Spinner();
-		return theme.fg("accent", context.state.spinner.current());
+		return { type: "spinner", spinner: context.state.spinner };
 	}
-	return context.isError ? theme.fg("error", "\u2717") : theme.fg("success", "\u2713");
+	return context.isError ? { type: "error" } : { type: "success" };
 }
 
 /** "via <channel>" / "via <engine> (engine)" echo — UI-only. */
@@ -68,7 +48,7 @@ function contentText(result: AgentToolResult<Record<string, unknown>>): string {
 
 export function renderSearchCall(args: { query?: string }, theme: Theme, context: RenderContext): Text {
 	const query = (args.query ?? "").slice(0, 60);
-	const head = `${icon(context, theme)} ${theme.fg("accent", "web_search")} ${theme.fg("dim", `"${query}"`)}`;
+	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_search")} ${theme.fg("dim", `"${query}"`)}`;
 	return new Text(head);
 }
 
@@ -81,7 +61,7 @@ export function renderSearchResult(
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const echo = viaEcho(details);
 	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean).join(" \u00b7 ");
-	const head = `${icon(context, theme)} ${theme.fg("accent", "web_search")}${meta ? theme.fg("muted", ` (${meta})`) : ""}`;
+	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_search")}${meta ? theme.fg("muted", ` (${meta})`) : ""}`;
 	const body = contentText(result);
 	return new Text(body ? `${head}\n\n${body}` : head);
 }
@@ -90,7 +70,7 @@ export function renderSearchResult(
 
 export function renderFetchCall(args: { url?: string }, theme: Theme, context: RenderContext): Text {
 	const url = (args.url ?? "").slice(0, 80);
-	return new Text(`${icon(context, theme)} ${theme.fg("accent", "web_fetch")} ${theme.fg("dim", url)}`);
+	return new Text(`${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")} ${theme.fg("dim", url)}`);
 }
 
 export function renderFetchResult(
@@ -101,7 +81,7 @@ export function renderFetchResult(
 ): Text {
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const title = typeof details.title === "string" ? details.title : "";
-	const head = `${icon(context, theme)} ${theme.fg("accent", "web_fetch")}${title ? theme.fg("muted", ` (${title.slice(0, 60)})`) : ""}`;
+	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")}${title ? theme.fg("muted", ` (${title.slice(0, 60)})`) : ""}`;
 	const body = contentText(result);
 	// Body is the full markdown; show a bounded preview in the card.
 	const preview = body.length > 1200 ? `${body.slice(0, 1200)}\n…` : body;

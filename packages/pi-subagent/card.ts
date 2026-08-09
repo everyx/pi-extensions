@@ -21,27 +21,10 @@ import { sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
-import { type Spinner, safeTitle } from "./format.js";
+import { type CardHeader, renderHeader } from "@everyx/pi-ui/card.js";
 import type { RenderEvent } from "./types.js";
 
 // ─── Card config types ─────────────────────────────────────
-
-export type CardIcon =
-	| { type: "spinner"; spinner: Spinner }
-	| { type: "success" }
-	| { type: "error" }
-	| { type: "stopped" };
-
-export interface CardHeader {
-	icon: CardIcon;
-	title?: string;
-	/** Verb-state line: "<verb> <phase>" — "starting…" / "started" / "start failed". */
-	state?: { verb: "start" | "steer" | "stop" | "control"; phase: "running" | "done" | "failed" };
-	/** Plain colored status word (notifications): "failed" (error) / "stopped" (warning). */
-	status?: { word: string; color: "error" | "warning" };
-	/** Muted parenthesized meta segments, joined with `·` (bash `(timeout 10s)` parity). */
-	meta?: string[];
-}
 
 export interface CardBody {
 	/** Prompt + activity stream (foreground tool card). */
@@ -122,47 +105,6 @@ function cardContent(theme: Theme, sections: { header?: string; body?: BodyCompo
 }
 
 /** Shared `Agent "title"` segment — toolTitle bold name + bashMode quoted title. */
-function agentTitle(title: string | undefined, theme: Theme): string {
-	return `${theme.fg("toolTitle", theme.bold("Agent"))}${title ? ` ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : ""}`;
-}
-
-function renderIcon(icon: CardIcon, theme: Theme): string {
-	switch (icon.type) {
-		case "spinner":
-			return theme.fg("accent", icon.spinner.current());
-		case "success":
-			return theme.fg("success", "\u2713");
-		case "error":
-			return theme.fg("error", "\u2717");
-		case "stopped":
-			return theme.fg("warning", "\u25a0");
-	}
-}
-
-function stateWord(verb: "start" | "steer" | "stop" | "control", phase: "running" | "done" | "failed"): string {
-	switch (phase) {
-		case "running":
-			// Only start/stop animate while running (steer/control results are
-			// terminal-only) — the fallthrough would mislabel them.
-			return verb === "start" ? "starting…" : "stopping…";
-		case "failed":
-			return `${verb} failed`;
-		default: {
-			// done — only start/stop/steer reach here (control never renders a
-			// success surface, only the failed word).
-			switch (verb) {
-				case "start":
-					return "started";
-				case "stop":
-					return "stopped";
-				case "steer":
-					return "steered";
-				case "control":
-					return "finished"; // unreachable — control never renders done
-			}
-		}
-	}
-}
 
 /**
  * One header row: `[marker] Agent "title" <state word / status> (<meta>)`.
@@ -172,23 +114,7 @@ function stateWord(verb: "start" | "steer" | "stop" | "control", phase: "running
  * state reads at a glance; the quoted title uses bashMode like the bash
  * card's `$ cmd`, the `Agent` name keeps toolTitle bold.
  */
-export function renderHeader(header: CardHeader, theme: Theme): string {
-	const marker = renderIcon(header.icon, theme);
-	const title = agentTitle(header.title, theme);
-	let tail = "";
-	if (header.state) {
-		// The verb phrase is the single source of truth (stateWord); only the
-		// color varies — error red for the failure word, muted for the rest.
-		const { verb, phase } = header.state;
-		tail = ` ${theme.fg(phase === "failed" ? "error" : "muted", stateWord(verb, phase))}`;
-	} else if (header.status) {
-		tail = ` ${theme.fg(header.status.color, header.status.word)}`;
-	}
-	const meta = header.meta?.length ? theme.fg("muted", ` (${header.meta.join(" \u00b7 ")})`) : "";
-	return `${marker} ${title}${tail}${meta}`;
-}
-
-/** Card content block with uniform folding: short content renders in full
+export /** Card content block with uniform folding: short content renders in full
  * (blank line + content); content past PREVIEW_LINES folds to a tail preview
  * with the expand hint (Ctrl+O to expand reveals everything — folding never
  * loses content, it only caps how much fills the screen). Shared by every

@@ -17,8 +17,9 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Container, Text } from "@earendil-works/pi-tui";
-import type { CardBody, CardConfig, CardIcon } from "./card.js";
-import { renderCard, renderHeader, renderNoDetailsCard, renderNotificationCard } from "./card.js";
+import { type CardIcon, renderHeader } from "@everyx/pi-ui/card.js";
+import type { CardBody, CardConfig } from "./card.js";
+import { renderCard, renderNoDetailsCard, renderNotificationCard } from "./card.js";
 import { formatDuration, Spinner } from "./format.js";
 import type { NotificationDetails, SubagentDetails } from "./types.js";
 
@@ -116,6 +117,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 		renderHeader(
 			{
 				icon,
+				name: "Agent",
 				title: args.title.trim(),
 				meta: [metaModel, metaThinking, timePart].filter((p): p is string => p !== undefined),
 			},
@@ -150,7 +152,11 @@ function errorCard(
 	error: string,
 	expanded: boolean,
 ): CardConfig {
-	return { header: { icon: { type: "error" }, title, state: { verb, phase: "failed" } }, body: { error }, expanded };
+	return {
+		header: { icon: { type: "error" }, name: "Agent", title, state: { verb, phase: "failed" } },
+		body: { error },
+		expanded,
+	};
 }
 
 /**
@@ -163,7 +169,10 @@ function doneCard(
 	expanded: boolean,
 	body?: CardBody,
 ): CardConfig {
-	const config: CardConfig = { header: { icon: { type: "success" }, title, state: { verb, phase: "done" } }, expanded };
+	const config: CardConfig = {
+		header: { icon: { type: "success" }, name: "Agent", title, state: { verb, phase: "done" } },
+		expanded,
+	};
 	if (body) config.body = body;
 	return config;
 }
@@ -339,6 +348,7 @@ export function renderAgentControlResult(
 				{
 					header: {
 						icon: { type: "spinner", spinner: startSpinner(state, () => context.invalidate()) },
+						name: "Agent",
 						title: d.title,
 						state: { verb: "stop", phase: "running" },
 					},
@@ -418,7 +428,7 @@ export function renderNotification(
 	// header/body/footer layout shared with every tool card.
 	return renderNotificationCard(
 		{
-			header: { icon, title: d.title, status, meta: metaParts },
+			header: { icon, name: "Agent", title: d.title, status, meta: metaParts },
 			body,
 			footer: d.sessionPath,
 			expanded,

@@ -13,36 +13,12 @@
  *   THEME=ayu-dark pnpm preview
  */
 
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
-import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
 import type { Text } from "@earendil-works/pi-tui";
+import { initPreviewTheme } from "@everyx/pi-ui/theme.js";
 import { renderFetchCall, renderFetchResult, renderSearchCall, renderSearchResult } from "./render.js";
 
-const themeName = process.env.THEME || "light";
-initTheme(themeName);
-
-// The live theme object lives in an internal module that the package entry
-// doesn't re-export and whose subpath is blocked by its "exports" map. Walk
-// node_modules physically and import the file by absolute URL, bypassing the
-// exports map entirely (same approach as pi-subagent's preview).
-function findPkgDir(name: string): string | null {
-	let dir = import.meta.dirname;
-	for (;;) {
-		const candidate = path.join(dir, "node_modules", name);
-		if (existsSync(path.join(candidate, "package.json"))) return candidate;
-		const parent = path.dirname(dir);
-		if (parent === dir) return null;
-		dir = parent;
-	}
-}
-const pkgDir = findPkgDir("@earendil-works/pi-coding-agent");
-if (!pkgDir) throw new Error("pi-coding-agent not found under node_modules");
-const themeModulePath = path.join(pkgDir, "dist", "modes", "interactive", "theme", "theme.js");
-const { theme: globalTheme } = (await import(pathToFileURL(themeModulePath).href)) as { theme: Theme };
-const theme = globalTheme as Theme;
+const theme: Theme = await initPreviewTheme();
 
 // ── helpers ──────────────────────────────────────────────────────
 

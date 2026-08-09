@@ -3,58 +3,17 @@
  *
  * Pure string-formatting and display helpers used by the TUI rendering
  * layer (render.ts), the status widget (widget.ts), and the tool glue
- * (index.ts). Separated from render.ts so non-rendering modules don't
- * need to depend on the rendering module for string utilities.
+ * (index.ts). Spinner/duration/clip/title helpers come from the shared
+ * pi-ui package; activityRow is subagent-specific (AgentActivity shape).
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { clipTail as _clipTail } from "@everyx/pi-ui/spinner.js";
 import type { AgentActivity } from "./event-interpret.js";
 
-/** Spinner frame interval (80ms — matches Pi's native loader cadence). */
-const SPINNER_TICK_MS = 80;
+export { clipTail, formatDuration, SPINNER, Spinner, safeTitle } from "@everyx/pi-ui/spinner.js";
 
-/** Spinner frames (one Braille frame per tick). */
-export const SPINNER = [
-	"\u280b",
-	"\u2819",
-	"\u2839",
-	"\u2838",
-	"\u283c",
-	"\u2834",
-	"\u2826",
-	"\u2827",
-	"\u2807",
-	"\u280f",
-];
-
-/**
- * Spinner animation driven by wall-clock time: `current()` derives the frame
- * from time elapsed since construction, so the cadence stays a steady 80ms no
- * matter how often the UI re-renders. A fast body/event stream must not speed
- * the animation up (render-call-count-driven tick was the bug). The widget
- * and the Agents card share this one implementation.
- */
-export class Spinner {
-	private readonly startedAt = Date.now();
-	current(): string {
-		return SPINNER[Math.floor((Date.now() - this.startedAt) / SPINNER_TICK_MS) % SPINNER.length];
-	}
-}
-
-/** Seconds with one decimal — shared by cards and the Agents widget. */
-export function formatDuration(ms: number): string {
-	return `${(ms / 1000).toFixed(1)}s`;
-}
-
-/** Activity excerpt length cap; long tails get a leading ellipsis. */
-const ACTIVITY_EXCERPT_MAX = 60;
-
-/** Collapse whitespace, trim, and cut long tails to `max` chars (ellipsis prefix). */
-export function clipTail(s: string, max: number = ACTIVITY_EXCERPT_MAX): string {
-	const clean = s.replace(/\s+/g, " ").trim();
-	if (clean.length <= max) return clean;
-	return `\u2026${clean.slice(clean.length - max + 1)}`;
-}
+const clipTail = _clipTail;
 
 /**
  * One activity row: "Thinking..." (pi hidden-thinking style), a tool call
@@ -74,19 +33,4 @@ export function activityRow(activity: AgentActivity, theme: Theme, max?: number)
 			: theme.fg("toolTitle", activity.name);
 	}
 	return theme.fg("muted", max === undefined ? activity.text : clipTail(activity.text, max));
-}
-
-/**
- * Task title, rendered safe for a single quoted line: tabs/newlines are
- * flattened and embedded double quotes neutralized (so the bashMode quotes
- * around the title can't be broken), then capped with a trailing ellipsis.
- * Shared by status lines, headers, the notification card and the widget.
- */
-export function safeTitle(title: string | undefined, max = 40): string {
-	const flat = (title ?? "(untitled)")
-		.replace(/[\r\n\t]+/g, " ")
-		.replace(/"/g, "'")
-		.trim();
-	if (flat.length <= max) return flat;
-	return `${flat.slice(0, max - 1)}\u2026`;
 }
