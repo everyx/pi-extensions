@@ -16,7 +16,13 @@ import { exaApiKey, isExaAvailable, searchWithExa } from "./search/api/exa.js";
 import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.js";
 import { isTavilyAvailable, searchWithTavily } from "./search/api/tavily.js";
 import { searchWithBsk } from "./search/browser.js";
-import { DEFAULT_CHANNEL_ORDER, parseChannelOrder, route } from "./search/channels.js";
+import {
+	DEFAULT_CHANNEL_ORDER,
+	orderedCandidates,
+	parseChannelOrder,
+	requestedCapabilities,
+	route,
+} from "./search/channels.js";
 import { type GroundingEndpoint, groundingEndpointFor, searchWithGrounding } from "./search/grounding.js";
 import type { ChannelCapabilities, ChannelId, ChannelSearchResult, WebSearchParams } from "./types.js";
 
@@ -99,42 +105,84 @@ async function executeSearch(
 
 	const { available, capabilities } = await detectAvailableChannels(ctx);
 	const order = parseChannelOrder(process.env.PI_WEB_TOOLS_CHANNELS) ?? DEFAULT_CHANNEL_ORDER;
-	const routed = route(params, available, order, capabilities);
 
-	if ("error" in routed) {
+	// Explicit engine: honor the intent — no auto-fallback on failure.
+	if (params.engine && params.engine !== "auto") {
+		const routed = route(params, available, order, capabilities);
+		if ("error" in routed) {
+			return {
+				content: [{ type: "text", text: routed.error }],
+				details: { error: routed.error, unsatisfied: routed.unsatisfied, available },
+				isError: true,
+			};
+		}
+		try {
+			const result = await runChannel(routed.channel, params, routed.engine, ctx, signal);
+			return {
+				content: [{ type: "text", text: formatResults(result) }],
+				details: {
+					channel: routed.channel,
+					...(routed.engine ? { engine: routed.engine } : {}),
+					total: result.total,
+					count: result.results.length,
+				},
+				isError: false,
+			};
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return {
+				content: [{ type: "text", text: message }],
+				details: { error: message, channel: routed.channel, engine: routed.engine, query: params.query },
+				isError: true,
+			};
+		}
+	}
+
+	// engine auto: try candidates in order; on failure fall through to the
+	// next usable channel (SPEC: 静默降级). All failures → terse error.
+	const candidates = orderedCandidates(params, available, order, capabilities);
+	if (candidates.length === 0) {
+		const requested = requestedCapabilities(params);
+		const unsatisfied = Object.entries(requested)
+			.filter(([, v]) => v)
+			.map(([k]) => k);
+		const error = `No available channel supports the requested capabilities: ${unsatisfied.join(", ")}.`;
 		return {
-			content: [{ type: "text", text: routed.error }],
-			details: { error: routed.error, unsatisfied: routed.unsatisfied, available },
+			content: [{ type: "text", text: error }],
+			details: { error, unsatisfied, available },
 			isError: true,
 		};
 	}
 
-	try {
-		const result = await runChannel(routed.channel, params, routed.engine, ctx, signal);
-		return {
-			content: [{ type: "text", text: formatResults(result) }],
-			details: {
-				channel: routed.channel,
-				...(routed.engine ? { engine: routed.engine } : {}),
-				total: result.total,
-				count: result.results.length,
-			},
-			isError: false,
-		};
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		// Terse error to the LLM; full diagnostics in details (UI-visible).
-		return {
-			content: [{ type: "text", text: message }],
-			details: {
-				error: message,
-				channel: routed.channel,
-				engine: routed.engine,
-				query: params.query,
-			},
-			isError: true,
-		};
+	const failures: { channel: string; error: string }[] = [];
+	for (const candidate of candidates) {
+		try {
+			const result = await runChannel(candidate.channel, params, candidate.engine, ctx, signal);
+			return {
+				content: [{ type: "text", text: formatResults(result) }],
+				details: {
+					channel: candidate.channel,
+					...(candidate.engine ? { engine: candidate.engine } : {}),
+					total: result.total,
+					count: result.results.length,
+				},
+				isError: false,
+			};
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			failures.push({ channel: candidate.channel, error: message });
+		}
 	}
+
+	const last = failures[failures.length - 1];
+	const message = last
+		? `All search channels failed: ${failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`
+		: "Search failed.";
+	return {
+		content: [{ type: "text", text: last ? last.error : message }],
+		details: { error: message, failures, available, query: params.query },
+		isError: true,
+	};
 }
 
 async function runChannel(

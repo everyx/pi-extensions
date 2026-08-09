@@ -149,3 +149,20 @@ export function satisfies(
 ): boolean {
 	return capabilitiesCover(channel, requested, overrides);
 }
+
+/**
+ * Ordered list of usable channels for a request: every available channel in
+ * `order` whose capabilities cover the request. bsk entries carry the
+ * locale-group default engine (SPEC: 引擎优先级按语言分组).
+ */
+export function orderedCandidates(
+	params: WebSearchParams,
+	available: ChannelId[],
+	order: ChannelId[] = DEFAULT_CHANNEL_ORDER,
+	capabilities?: Partial<Record<ChannelId, ChannelCapabilities>>,
+): Array<{ channel: ChannelId; engine?: EngineId }> {
+	const requested = requestedCapabilities(params);
+	return order
+		.filter((c) => available.includes(c) && satisfies(c, requested, capabilities))
+		.map((c) => (c === "bsk" ? { channel: c, engine: enginePriorityForLocale(params.locale)[0] } : { channel: c }));
+}

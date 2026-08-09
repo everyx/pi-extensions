@@ -9,6 +9,7 @@ import { describe, it } from "node:test";
 import {
 	channelCapabilities,
 	DEFAULT_CHANNEL_ORDER,
+	orderedCandidates,
 	parseChannelOrder,
 	requestedCapabilities,
 	route,
@@ -181,5 +182,44 @@ describe("route + params shapes", () => {
 		const onlyMcp = route({ query: "q", blocked_domains: ["x.com"] }, ["exa"], undefined, { exa: mcpExa });
 		assert.ok("error" in onlyMcp);
 		assert.deepEqual(onlyMcp.unsatisfied, ["domains"]);
+	});
+});
+
+describe("orderedCandidates", () => {
+	const all = ["exa", "tavily", "parallel", "bsk", "grounding"] as const;
+
+	it("returns every usable channel in order", () => {
+		assert.deepEqual(orderedCandidates({ query: "q" }, [...all]), [
+			{ channel: "exa" },
+			{ channel: "tavily" },
+			{ channel: "parallel" },
+			{ channel: "bsk", engine: "google" },
+			{ channel: "grounding" },
+		]);
+	});
+
+	it("respects availability (only usable channels)", () => {
+		assert.deepEqual(orderedCandidates({ query: "q" }, ["tavily", "bsk"]), [
+			{ channel: "tavily" },
+			{ channel: "bsk", engine: "google" },
+		]);
+	});
+
+	it("drops channels that lack requested capabilities", () => {
+		const mcpExa = { domains: false, recency: false, locale: false, operators: false };
+		const r = orderedCandidates({ query: "q", blocked_domains: ["x.com"] }, ["exa", "tavily", "bsk"], undefined, {
+			exa: mcpExa,
+		});
+		assert.deepEqual(r, [{ channel: "tavily" }, { channel: "bsk", engine: "google" }]);
+	});
+
+	it("bsk carries the locale-group default engine", () => {
+		const r = orderedCandidates({ query: "q", locale: "zh-CN" }, ["bsk"]);
+		assert.deepEqual(r, [{ channel: "bsk", engine: "bing" }]);
+	});
+
+	it("respects the configured order", () => {
+		const r = orderedCandidates({ query: "q" }, [...all], ["bsk", "exa"]);
+		assert.deepEqual(r, [{ channel: "bsk", engine: "google" }, { channel: "exa" }]);
 	});
 });
