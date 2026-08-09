@@ -10,8 +10,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createToolView } from "@everyx/pi-ui/view.js";
 import { webFetch } from "./fetch/fetch.js";
-import { renderFetchCall, renderFetchResult, renderSearchCall, renderSearchResult } from "./render.js";
 import { WebFetchParamsSchema, WebSearchParamsSchema } from "./schema.js";
 import { exaApiKey, isExaAvailable, searchWithExa } from "./search/api/exa.js";
 import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.js";
@@ -93,9 +93,12 @@ function finalizeResult(
 	return {
 		content: [{ type: "text", text: formatResults(result) }],
 		details: {
-			channel: candidate.channel,
-			...(candidate.engine ? { engine: candidate.engine } : {}),
-			count: result.length,
+			data: {
+				results: result,
+				channel: candidate.channel,
+				...(candidate.engine ? { engine: candidate.engine } : {}),
+				count: result.length,
+			},
 		},
 		isError: false,
 	};
@@ -232,7 +235,7 @@ async function executeFetch(
 	const text = result.title ? `${result.title}\n\n${result.markdown}` : result.markdown;
 	return {
 		content: [{ type: "text", text }],
-		details: { url, title: result.title, markdownLength: result.markdown.length },
+		details: { data: { title: result.title, markdown: result.markdown } },
 		isError: false,
 	};
 }
@@ -266,8 +269,24 @@ export default function (pi: ExtensionAPI) {
 			"Use engine with operator syntax when you need site:, filetype:, intitle: filters; otherwise let auto pick the cheapest channel.",
 		],
 		parameters: WebSearchParamsSchema,
-		renderCall: renderSearchCall,
-		renderResult: renderSearchResult,
+		...createToolView<Record<string, unknown>, unknown>({
+			name: "web_search",
+			title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? "").slice(0, 60),
+			tail: (ctx) => (ctx.status === "error" ? "search failed" : undefined),
+			meta: (ctx) => {
+				const d = (ctx.result?.data ?? {}) as { channel?: string; engine?: string; count?: number };
+				return [
+					d.channel ? `via ${d.channel}${d.engine ? ` (${d.engine})` : ""}` : undefined,
+					d.count != null ? `${d.count} results` : undefined,
+				].filter(Boolean) as string[];
+			},
+			body: {
+				list: {
+					of: (ctx) => ((ctx.result?.data as { results?: unknown[] } | undefined)?.results ?? []) as unknown[],
+					fields: ["title", "url", "snippet"],
+				},
+			},
+		}),
 		async execute(_toolCallId, raw, signal, _onUpdate, ctx) {
 			return executeSearch(raw as WebSearchParams, ctx, signal);
 		},
@@ -287,8 +306,15 @@ export default function (pi: ExtensionAPI) {
 			"Use bash curl when you need auth cookies, POST bodies, or binary output.",
 		],
 		parameters: WebFetchParamsSchema,
-		renderCall: renderFetchCall,
-		renderResult: renderFetchResult,
+		...createToolView<Record<string, unknown>, unknown>({
+			name: "web_fetch",
+			title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? "").slice(0, 80),
+			meta: (ctx) => {
+				const t = (ctx.result?.data as { title?: string } | undefined)?.title;
+				return t ? [t.slice(0, 60)] : undefined;
+			},
+			body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
+		}),
 		async execute(_toolCallId, raw, signal) {
 			const url = (raw as { url: string }).url;
 			return executeFetch(url, signal);

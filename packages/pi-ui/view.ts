@@ -17,12 +17,20 @@ import { type CardIcon, type Component, dataCard, renderIcon, renderNameTitle, t
 import { Spinner } from "./spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
+/** Structural match of pi's ToolRenderContext (not exported at the entry). */
 interface RenderContext {
 	args: unknown;
 	state?: { spinner?: unknown };
-	isPartial?: boolean;
-	isError?: boolean;
-	expanded?: boolean;
+	toolCallId: string;
+	invalidate: () => void;
+	lastComponent: unknown;
+	cwd: string;
+	executionStarted: boolean;
+	argsComplete: boolean;
+	isPartial: boolean;
+	expanded: boolean;
+	showImages: boolean;
+	isError: boolean;
 }
 
 export type CardStatus = "processing" | "success" | "error" | "stop";
@@ -44,12 +52,15 @@ export interface ViewResultData {
 /** Body template: text, a list of result rows, or a styled activity stream. */
 export type ViewBody<Args, Data> =
 	| { text: (ctx: ViewContext<Args, Data>) => string }
-	| { list: { fields: string[] } }
+	| { list: { of: (ctx: ViewContext<Args, Data>) => unknown[]; fields: string[] } }
 	| {
-			rows: Array<{
-				style: "thinking" | "tool" | "text" | "muted";
-				content: (ctx: ViewContext<Args, Data>, item: unknown) => string;
-			}>;
+			rows: {
+				of: (ctx: ViewContext<Args, Data>) => unknown[];
+				rows: Array<{
+					style: "thinking" | "tool" | "text" | "muted";
+					content: (ctx: ViewContext<Args, Data>, item: unknown) => string;
+				}>;
+			};
 	  };
 
 export interface ToolView<Args, Data> {
@@ -60,7 +71,7 @@ export interface ToolView<Args, Data> {
 	/** Header status slot — free text (starting…, start failed…), color by status. */
 	tail?: (ctx: ViewContext<Args, Data>) => string | undefined;
 	/** Header meta slot (muted parens, · separated). */
-	meta?: (ctx: ViewContext<Args, Data>) => string[];
+	meta?: (ctx: ViewContext<Args, Data>) => string[] | undefined;
 	/** Body: text / result list / activity rows (folded automatically). */
 	body?: ViewBody<Args, Data>;
 }
@@ -100,13 +111,15 @@ function bodyText<Args, Data>(view: ToolView<Args, Data>, ctx: ViewContext<Args,
 	if (!b) return undefined;
 	if ("text" in b) return b.text(ctx);
 	if ("list" in b) {
-		const rows = Array.isArray(ctx.result?.data) ? (ctx.result.data as Record<string, unknown>[]) : [];
-		return rows.map((item) => b.list.fields.map((f) => String(item[f] ?? "")).join("\n")).join("\n\n");
+		return b.list
+			.of(ctx)
+			.map((item) => b.list.fields.map((f) => String((item as Record<string, unknown>)[f] ?? "")).join("\n"))
+			.join("\n\n");
 	}
 	if ("rows" in b) {
-		const items = Array.isArray(ctx.result?.data) ? (ctx.result.data as unknown[]) : [ctx.result?.data];
-		return items
-			.map((item) => b.rows.map((row) => row.content(ctx, item)).join("\n"))
+		return b.rows
+			.of(ctx)
+			.map((item) => b.rows.rows.map((row) => row.content(ctx, item)).join("\n"))
 			.filter(Boolean)
 			.join("\n");
 	}
@@ -123,12 +136,12 @@ function bodyText<Args, Data>(view: ToolView<Args, Data>, ctx: ViewContext<Args,
 export function createToolView<Args, Data>(
 	view: ToolView<Args, Data>,
 ): {
-	renderCall: (args: Args, theme: Theme, context: RenderContext) => Component;
+	renderCall: (args: Args, theme: Theme, context: unknown) => Component;
 	renderResult: (
 		result: AgentToolResult<Record<string, unknown>>,
 		options: ToolRenderResultOptions,
 		theme: Theme,
-		context: RenderContext,
+		context: unknown,
 	) => Component;
 } {
 	const makeCtx = (
@@ -169,25 +182,27 @@ export function createToolView<Args, Data>(
 
 	return {
 		renderCall(args, theme, context) {
-			const status = statusForCall(context);
+			const rc = context as RenderContext;
+			const status = statusForCall(rc);
 			if (status === "processing") {
 				return textLine(
-					`${renderIcon(iconForStatus(status, context.state?.spinner as Spinner | undefined), theme)} ${renderNameTitle(view.name, view.title?.(makeCtx(args, status)), theme)}`,
+					`${renderIcon(iconForStatus(status, rc.state?.spinner as Spinner | undefined), theme)} ${renderNameTitle(view.name, view.title?.(makeCtx(args, status)), theme)}`,
 				);
 			}
 			// Completed: the result renderer owns the surface.
 			return textLine("");
 		},
 		renderResult(result: AgentToolResult<Record<string, unknown>>, options, theme, context) {
-			const status = statusForResult(result, context);
+			const rc = context as RenderContext;
+			const status = statusForResult(result, rc);
 			const details = (result.details ?? {}) as Partial<ViewResultData>;
 			const data = details.data as Data | undefined;
 			return renderCardFrom(
 				status,
-				context.args as Args,
+				rc.args as Args,
 				data === undefined ? undefined : { data, error: details.error },
 				options.expanded,
-				context.state?.spinner as Spinner | undefined,
+				rc.state?.spinner as Spinner | undefined,
 				theme,
 			);
 		},
