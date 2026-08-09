@@ -240,6 +240,19 @@ const EXTRACT_SCRIPT = String.raw`
 		const a = titleEl.closest('a') || titleEl.querySelector('a');
 		if (!a) return;
 		let href = a.href || '';
+		// Google may wrap result links in /url?q=<real-url> (cookie-less/flagged
+		// traffic); normal logged-in traffic gets direct links — handle both.
+		if (/google\.com\/url\?/.test(href)) {
+			const m = href.match(/[?&](?:q|url)=([^&]+)/);
+			if (m) {
+				try {
+					const decoded = decodeURIComponent(m[1]);
+					if (decoded.startsWith("http")) href = decoded;
+				} catch {
+					// keep the redirect URL
+				}
+			}
+		}
 		// Bing wraps results in /ck/a?u=<base64url> redirects — recover the real
 		// URL. u is "a1" + base64url(URL); try plain first, then without the a1.
 		if (/bing\.com\/ck\//.test(href)) {
