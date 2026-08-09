@@ -23,20 +23,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
+import { createToolView } from "@everyx/pi-ui/view.js";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
-import {
-	type AgentControlParams,
-	type AgentParams,
-	renderAgentCall,
-	renderAgentControlCall,
-	renderAgentControlResult,
-	renderAgentResult,
-	renderNotification,
-} from "./render.js";
+import { type AgentControlParams, type AgentParams, renderNotification } from "./render.js";
 import type { NotificationDetails } from "./types.js";
 import { AgentWidget } from "./widget.js";
 
@@ -485,8 +478,40 @@ export default function (pi: ExtensionAPI) {
 			}
 		},
 
-		renderCall: renderAgentCall,
-		renderResult: renderAgentResult,
+		...createToolView<Record<string, unknown>, Record<string, unknown>>({
+			name: "Agent",
+			title: (ctx) => {
+				const d = ctx.result?.data as { title?: string; task?: string } | undefined;
+				return (d?.title ?? d?.task ?? "").slice(0, 60);
+			},
+			tail: (ctx) =>
+				ctx.status === "error" ? "start failed" : ctx.status === "processing" ? "starting\u2026" : "started",
+			meta: (ctx) => {
+				const d = ctx.result?.data as
+					| { model?: string; thinking?: string; startedAt?: number; endedAt?: number }
+					| undefined;
+				const parts: string[] = [];
+				if (d?.model) parts.push(d.model);
+				if (d?.thinking) parts.push(d.thinking);
+				if (d?.startedAt != null) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+				return parts;
+			},
+			body: {
+				rows: {
+					of: (ctx) => ((ctx.result?.data as { events?: unknown[] } | undefined)?.events ?? []) as unknown[],
+					rows: [
+						{
+							content: (_ctx, ev) => {
+								const e = ev as { kind: string; name?: string; args?: string; text?: string };
+								if (e.kind === "thinking") return { style: "thinking", content: "Thinking..." };
+								if (e.kind === "tool") return { style: "tool", content: `${e.name ?? ""}: ${e.args ?? ""}` };
+								return { style: "text", content: e.text ?? "" };
+							},
+						},
+					],
+				},
+			},
+		}),
 	});
 
 	// ── AgentControl ────────────────────────────────────
@@ -639,8 +664,19 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 
-		renderCall: renderAgentControlCall,
-		renderResult: renderAgentControlResult,
+		...createToolView<Record<string, unknown>, Record<string, unknown>>({
+			name: "AgentControl",
+			title: (ctx) => String((ctx.result?.data as { title?: string } | undefined)?.title ?? "").slice(0, 60),
+			tail: (ctx) => {
+				const action = (ctx.result?.data as { action?: string } | undefined)?.action;
+				const verb = action === "steer" ? "steer" : action === "stop" ? "stop" : "control";
+				if (ctx.status === "error") return `${verb} failed`;
+				if (ctx.status === "processing") return verb === "stop" ? "stopping\u2026" : `${verb}ing\u2026`;
+				if (ctx.status === "stop") return "stopped";
+				return `${verb}ed`;
+			},
+			body: { text: (ctx) => (ctx.result?.data as { message?: string } | undefined)?.message ?? "" },
+		}),
 	});
 
 	// ── Notification card (user side) ───────────────────

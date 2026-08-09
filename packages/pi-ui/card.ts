@@ -197,6 +197,28 @@ export function cardShell(
 	return cmp;
 }
 
+export type RowStyle = "thinking" | "tool" | "text" | "muted";
+
+/** One styled content row (activity lines, widget rows). */
+export interface StyledRow {
+	style: RowStyle;
+	content: string;
+}
+
+/** Render one styled row (thinking italic gray, tool toolTitle, text plain, muted dim). */
+export function styleRow(row: StyledRow, theme: Theme): string {
+	switch (row.style) {
+		case "thinking":
+			return theme.italic(theme.fg("thinkingText", row.content));
+		case "tool":
+			return theme.fg("toolTitle", row.content);
+		case "muted":
+			return theme.fg("muted", row.content);
+		default:
+			return row.content;
+	}
+}
+
 // ── Data-driven card (consumers pass data, component handles everything) ─
 
 /** Data-only card config: pass text, the card assembles header + folded body. */
@@ -213,8 +235,8 @@ export interface DataCardConfig {
 	tail?: string;
 	/** Muted parenthesized meta (channel echo, counts). */
 	meta?: string[];
-	/** Body text — folded automatically (tail preview + expand hint). */
-	body?: string;
+	/** Body — plain text or styled rows; folded automatically. */
+	body?: string | StyledRow[];
 	/** Error block below the body — dim folded. */
 	error?: string;
 	expanded: boolean;
@@ -249,7 +271,22 @@ export function dataCard(config: DataCardConfig, theme: Theme, spinner?: Spinner
 				tail: config.tail ? { text: config.tail, color: config.status === "error" ? "error" : "muted" } : undefined,
 				meta: config.meta,
 			},
-			body: config.body || config.error ? { message: config.body, error: config.error } : undefined,
+			body:
+				config.body || config.error
+					? typeof config.body === "string"
+						? { message: config.body, error: config.error }
+						: {
+								extra: (config.body as StyledRow[]).length
+									? [
+											foldedBlock(
+												(config.body as StyledRow[]).map((r) => styleRow(r, theme)),
+												theme,
+											),
+										]
+									: undefined,
+								error: config.error,
+							}
+					: undefined,
 			expanded: config.expanded,
 		},
 		theme,

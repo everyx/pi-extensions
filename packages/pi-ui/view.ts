@@ -13,7 +13,15 @@
  */
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { type CardIcon, type Component, dataCard, renderIcon, renderNameTitle, textLine } from "./card.js";
+import {
+	type CardIcon,
+	type Component,
+	dataCard,
+	renderIcon,
+	renderNameTitle,
+	type StyledRow,
+	textLine,
+} from "./card.js";
 import { Spinner } from "./spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -57,8 +65,11 @@ export type ViewBody<Args, Data> =
 			rows: {
 				of: (ctx: ViewContext<Args, Data>) => unknown[];
 				rows: Array<{
-					style: "thinking" | "tool" | "text" | "muted";
-					content: (ctx: ViewContext<Args, Data>, item: unknown) => string;
+					style?: "thinking" | "tool" | "text" | "muted";
+					content: (
+						ctx: ViewContext<Args, Data>,
+						item: unknown,
+					) => string | { style: "thinking" | "tool" | "text" | "muted"; content: string };
 				}>;
 			};
 	  };
@@ -106,7 +117,10 @@ function iconForStatus(status: CardStatus, spinner: Spinner | undefined): CardIc
 
 // ── body rendering (templates → text; folding is the card's job) ─
 
-function bodyText<Args, Data>(view: ToolView<Args, Data>, ctx: ViewContext<Args, Data>): string | undefined {
+function bodyRows<Args, Data>(
+	view: ToolView<Args, Data>,
+	ctx: ViewContext<Args, Data>,
+): string | StyledRow[] | undefined {
 	const b = view.body;
 	if (!b) return undefined;
 	if ("text" in b) return b.text(ctx);
@@ -117,15 +131,17 @@ function bodyText<Args, Data>(view: ToolView<Args, Data>, ctx: ViewContext<Args,
 			.join("\n\n");
 	}
 	if ("rows" in b) {
-		return b.rows
-			.of(ctx)
-			.map((item) => b.rows.rows.map((row) => row.content(ctx, item)).join("\n"))
-			.filter(Boolean)
-			.join("\n");
+		return b.rows.of(ctx).flatMap((item) =>
+			b.rows.rows.map((row) => {
+				const out = row.content(ctx, item);
+				return typeof out === "string"
+					? { style: row.style ?? "text", content: out }
+					: { style: out.style, content: out.content };
+			}),
+		);
 	}
 	return undefined;
 }
-
 // ── the factory ─────────────────────────────────────────────────
 
 /**
@@ -164,7 +180,7 @@ export function createToolView<Args, Data>(
 	): Component => {
 		const ctx = makeCtx(args, status, result);
 		const tailText = view.tail?.(ctx);
-		const body = bodyText(view, ctx);
+		const body = bodyRows(view, ctx);
 		return dataCard(
 			{
 				status,
@@ -196,11 +212,13 @@ export function createToolView<Args, Data>(
 			const rc = context as RenderContext;
 			const status = statusForResult(result, rc);
 			const details = (result.details ?? {}) as Partial<ViewResultData>;
-			const data = details.data as Data | undefined;
+			// data rides `details.data` (structured) or the details themselves
+			// (flat layouts like subagent's SubagentDetails).
+			const data = (details.data as Data | undefined) ?? (details as Data);
 			return renderCardFrom(
 				status,
 				rc.args as Args,
-				data === undefined ? undefined : { data, error: details.error },
+				{ data, error: details.error },
 				options.expanded,
 				rc.state?.spinner as Spinner | undefined,
 				theme,
