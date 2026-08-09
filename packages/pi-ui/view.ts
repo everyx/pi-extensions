@@ -13,15 +13,7 @@
  */
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import {
-	type CardIcon,
-	type Component,
-	dataCard,
-	renderIcon,
-	renderNameTitle,
-	type StyledRow,
-	textLine,
-} from "./card.js";
+import { type CardIcon, type Component, dataCard, renderHeader, type StyledRow, textLine } from "./card.js";
 import { Spinner } from "./spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -201,8 +193,21 @@ export function createToolView<Args, Data>(
 			const rc = context as RenderContext;
 			const status = statusForCall(rc);
 			if (status === "processing") {
+				// The call owns the header line while running (the result is a
+				// bare body) — full header: icon + name + title + tail + meta.
+				const ctx = makeCtx(args, status);
+				const tail = view.tail?.(ctx);
 				return textLine(
-					`${renderIcon(iconForStatus(status, rc.state?.spinner as Spinner | undefined), theme)} ${renderNameTitle(view.name, view.title?.(makeCtx(args, status)), theme)}`,
+					renderHeader(
+						{
+							icon: iconForStatus(status, rc.state?.spinner as Spinner | undefined),
+							name: view.name,
+							title: view.title?.(ctx),
+							tail: tail ? { text: tail, color: "muted" } : undefined,
+							meta: view.meta?.(ctx),
+						},
+						theme,
+					),
 				);
 			}
 			// Completed: the result renderer owns the surface.
@@ -215,6 +220,23 @@ export function createToolView<Args, Data>(
 			// data rides `details.data` (structured) or the details themselves
 			// (flat layouts like subagent's SubagentDetails).
 			const data = (details.data as Data | undefined) ?? (details as Data);
+			// While running, pi renders the call and the result in the same
+			// shell: the call owns the header line, so the streaming result is
+			// a bare card (body only) — the header must not repeat.
+			if (status === "processing") {
+				const ctx = makeCtx(rc.args as Args, status, { data, error: details.error });
+				return dataCard(
+					{
+						status,
+						name: view.name,
+						body: bodyRows(view, ctx),
+						expanded: options.expanded,
+						bare: true,
+					},
+					theme,
+					rc.state?.spinner as Spinner | undefined,
+				);
+			}
 			return renderCardFrom(
 				status,
 				rc.args as Args,

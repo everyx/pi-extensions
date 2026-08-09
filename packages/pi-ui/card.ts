@@ -240,6 +240,12 @@ export interface DataCardConfig {
 	/** Error block below the body — dim folded. */
 	error?: string;
 	expanded: boolean;
+	/**
+	 * Bare card (no header row): body only. The framework renders the call's
+	 * header line and the result side by side while a tool streams, so a
+	 * streaming result must not repeat the header.
+	 */
+	bare?: boolean;
 }
 
 /** Map status → card icon (library decision; consumers pass status only). */
@@ -264,13 +270,15 @@ function iconForStatus(status: CardStatus, spinner?: Spinner): CardIcon {
 export function dataCard(config: DataCardConfig, theme: Theme, spinner?: Spinner): Component {
 	return renderCard(
 		{
-			header: {
-				icon: iconForStatus(config.status, spinner),
-				name: config.name,
-				title: config.title,
-				tail: config.tail ? { text: config.tail, color: config.status === "error" ? "error" : "muted" } : undefined,
-				meta: config.meta,
-			},
+			header: config.bare
+				? undefined
+				: {
+						icon: iconForStatus(config.status, spinner),
+						name: config.name,
+						title: config.title,
+						tail: config.tail ? { text: config.tail, color: config.status === "error" ? "error" : "muted" } : undefined,
+						meta: config.meta,
+					},
 			body:
 				config.body || config.error
 					? typeof config.body === "string"
