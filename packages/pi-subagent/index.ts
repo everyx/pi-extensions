@@ -692,7 +692,7 @@ export default function (pi: ExtensionAPI) {
 				if (ctx.status === "error") return `${verb} failed`;
 				if (ctx.status === "processing") return verb === "stop" ? "stopping\u2026" : `${verb}ing\u2026`;
 				if (ctx.status === "stop") return "stopped";
-				return `${verb}ed`;
+				return verb === "stop" ? "stopped" : verb === "steer" ? "steered" : "controlled";
 			},
 			body: { text: (ctx) => (ctx.result?.data as { message?: string } | undefined)?.message ?? "" },
 		}),

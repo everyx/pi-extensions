@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { safeTitle } from "../format.js";
 import { renderNotification } from "../render.js";
-import type { SubagentDetails } from "../types.js";
 
 // Fold hints render through keyHint, which reads the real global theme.
 initTheme("dark");
@@ -28,13 +27,6 @@ const theme = new Proxy(
 							: String(key),
 	},
 ) as never;
-
-const context = {
-	state: {},
-	invalidate: () => {},
-	executionStarted: true,
-	isError: false,
-} as never;
 
 function render(component: unknown, width: number): string[] {
 	return (component as { render(w: number): string[] }).render(width);
