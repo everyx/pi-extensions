@@ -11,6 +11,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { webFetch } from "./fetch/fetch.js";
+import { renderFetchCall, renderFetchResult, renderSearchCall, renderSearchResult } from "./render.js";
 import { WebFetchParamsSchema, WebSearchParamsSchema } from "./schema.js";
 import { exaApiKey, isExaAvailable, searchWithExa } from "./search/api/exa.js";
 import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.js";
@@ -265,6 +266,8 @@ export default function (pi: ExtensionAPI) {
 			"Use engine with operator syntax when you need site:, filetype:, intitle: filters; otherwise let auto pick the cheapest channel.",
 		],
 		parameters: WebSearchParamsSchema,
+		renderCall: renderSearchCall,
+		renderResult: renderSearchResult,
 		async execute(_toolCallId, raw, signal, _onUpdate, ctx) {
 			return executeSearch(raw as WebSearchParams, ctx, signal);
 		},
@@ -284,6 +287,8 @@ export default function (pi: ExtensionAPI) {
 			"Use bash curl when you need auth cookies, POST bodies, or binary output.",
 		],
 		parameters: WebFetchParamsSchema,
+		renderCall: renderFetchCall,
+		renderResult: renderFetchResult,
 		async execute(_toolCallId, raw, signal) {
 			const url = (raw as { url: string }).url;
 			return executeFetch(url, signal);
