@@ -17,7 +17,7 @@
 import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
 import { initPreviewTheme } from "@everyx/pi-ui/theme.js";
-import { renderFetchCall, renderFetchResult, renderSearchCall, renderSearchResult } from "./render.js";
+import { createToolView } from "@everyx/pi-ui/view.js";
 
 const theme: Theme = await initPreviewTheme();
 
@@ -83,37 +83,79 @@ function ctx(
 
 // ── Story data ───────────────────────────────────────────────────
 
-const searchBody = [
-	"1. Rocket - Simple, Fast, Type-Safe (about 2 years ago · Sergio Benitez)",
-	"   https://rocket.rs/",
-	"   Rocket is a web framework for Rust that makes it simple to write fast, secure web applications.",
-	"2. Actix Web",
-	"   https://actix.rs/",
-	"   Actix Web is a powerful, pragmatic, and extremely fast web framework for Rust.",
-	"3. Axum - Modular web framework",
-	"   https://github.com/tokio-rs/axum",
-	"   Axum is a modular web framework built on tokio, tower, and hyper.",
-	"4. Warp - A super-easy, composable web server",
-	"   https://github.com/seanmonstar/warp",
-	"   Warp is a super-easy, composable web server framework for warp speeds.",
-	"5. Poem - A full-featured and easy-to-use web framework",
-	"   https://github.com/poem-web/poem",
-	"   Poem is a full-featured and easy-to-use web framework with FastAPI-style ergonomics.",
-].join("\n");
+const searchResults = [
+	{
+		title: "Rocket - Simple, Fast, Type-Safe",
+		url: "https://rocket.rs/",
+		snippet: "Rocket is a web framework for Rust that makes it simple to write fast, secure web applications.",
+	},
+	{
+		title: "Actix Web",
+		url: "https://actix.rs/",
+		snippet: "Actix Web is a powerful, pragmatic, and extremely fast web framework for Rust.",
+	},
+	{
+		title: "Axum - Modular web framework",
+		url: "https://github.com/tokio-rs/axum",
+		snippet: "Axum is a modular web framework built on tokio, tower, and hyper.",
+	},
+	{
+		title: "Warp - A super-easy, composable web server",
+		url: "https://github.com/seanmonstar/warp",
+		snippet: "Warp is a super-easy, composable web server framework for warp speeds.",
+	},
+	{
+		title: "Poem - A full-featured and easy-to-use web framework",
+		url: "https://github.com/poem-web/poem",
+		snippet: "Poem is a full-featured and easy-to-use web framework with FastAPI-style ergonomics.",
+	},
+];
 
-const fetchMarkdown = [
-	"Rocket - Simple, Fast, Type-Safe Web Framework for Rust",
-	"",
-	"Rocket is a web framework for Rust (nightly) that makes it simple to write fast, secure web applications without sacrificing flexibility, usability, or safety.",
-	"",
-	"## Highlights",
-	"- Routing, preprocessing, and validation of request parameters",
-	"- Security and privacy best practices enforced by default",
-	"- Type-safe templating and automatic escaping",
-	"- Built-in support for JSON, cookies, streams, and more",
-	"",
-	"[Learn more](https://rocket.rs/)",
-].join("\n");
+const fetchData = {
+	title: "Rocket - Simple, Fast, Type-Safe Web Framework for Rust",
+	markdown: [
+		"Rocket is a web framework for Rust (nightly) that makes it simple to write fast, secure web applications without sacrificing flexibility, usability, or safety.",
+		"",
+		"## Highlights",
+		"- Routing, preprocessing, and validation of request parameters",
+		"- Security and privacy best practices enforced by default",
+		"- Type-safe templating and automatic escaping",
+		"- Built-in support for JSON, cookies, streams, and more",
+		"",
+		"[Learn more](https://rocket.rs/)",
+	].join("\n"),
+};
+
+// ── Views (same templates as index.ts) ───────────────────────────
+
+const searchView = createToolView<Record<string, unknown>, unknown>({
+	name: "web_search",
+	title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? "").slice(0, 60),
+	tail: (ctx) => (ctx.status === "error" ? "search failed" : undefined),
+	meta: (ctx) => {
+		const d = (ctx.result?.data ?? {}) as { channel?: string; engine?: string; count?: number };
+		return [
+			d.channel ? `via ${d.channel}${d.engine ? ` (${d.engine})` : ""}` : undefined,
+			d.count != null ? `${d.count} results` : undefined,
+		].filter(Boolean) as string[];
+	},
+	body: {
+		list: {
+			of: (ctx) => ((ctx.result?.data as { results?: unknown[] } | undefined)?.results ?? []) as unknown[],
+			fields: ["title", "url", "snippet"],
+		},
+	},
+});
+
+const fetchView = createToolView<Record<string, unknown>, unknown>({
+	name: "web_fetch",
+	title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? "").slice(0, 80),
+	meta: (ctx) => {
+		const t = (ctx.result?.data as { title?: string } | undefined)?.title;
+		return t ? [t.slice(0, 60)] : undefined;
+	},
+	body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
+});
 
 // ── Live sections ────────────────────────────────────────────────
 
@@ -130,7 +172,7 @@ const runningSearch = (t: number, w: number) => {
 	return toolShell(
 		"toolPendingBg",
 		[
-			renderSearchCall(
+			searchView.renderCall(
 				{ query: "rust web framework" },
 				theme,
 				ctx(true, false, {}, liveState, { query: "rust web framework" }).context,
@@ -145,9 +187,15 @@ const searchSuccess = (t: number, w: number) => {
 	return toolShell(
 		"toolSuccessBg",
 		[
-			renderSearchCall({ query: "rust web framework" }, theme, ctx(false).context),
-			renderSearchResult(
-				ctx(false, false, { channel: "exa", count: 5, _body: searchBody }, {}, { query: "rust web framework" }).result,
+			searchView.renderCall({ query: "rust web framework" }, theme, ctx(false).context),
+			searchView.renderResult(
+				ctx(
+					false,
+					false,
+					{ data: { results: searchResults, channel: "exa", count: 5 } },
+					{},
+					{ query: "rust web framework" },
+				).result,
 				{ expanded: true, isPartial: false },
 				theme,
 				ctx(false, false, {}, {}, { query: "rust web framework" }).context,
@@ -162,12 +210,12 @@ const searchBsk = (t: number, w: number) => {
 	return toolShell(
 		"toolSuccessBg",
 		[
-			renderSearchCall({ query: "rust web framework", engine: "google" } as never, theme, ctx(false).context),
-			renderSearchResult(
+			searchView.renderCall({ query: "rust web framework", engine: "google" } as never, theme, ctx(false).context),
+			searchView.renderResult(
 				ctx(
 					false,
 					false,
-					{ channel: "bsk", engine: "google", count: 10, _body: searchBody },
+					{ data: { results: searchResults, channel: "bsk", engine: "google", count: 10 } },
 					{},
 					{ query: "rust web framework", engine: "google" },
 				).result,
@@ -185,9 +233,9 @@ const searchEmpty = (t: number, w: number) => {
 	return toolShell(
 		"toolSuccessBg",
 		[
-			renderSearchCall({ query: "nonexistent query" }, theme, ctx(false).context),
-			renderSearchResult(
-				ctx(false, false, { channel: "exa", count: 0, _body: "No results." }, {}, { query: "nonexistent query" })
+			searchView.renderCall({ query: "nonexistent query" }, theme, ctx(false).context),
+			searchView.renderResult(
+				ctx(false, false, { data: { results: [], channel: "exa", count: 0 } }, {}, { query: "nonexistent query" })
 					.result,
 				{ expanded: true, isPartial: false },
 				theme,
@@ -203,8 +251,8 @@ const searchError = (t: number, w: number) => {
 	return toolShell(
 		"toolErrorBg",
 		[
-			renderSearchCall({ query: "rust", engine: "yandex" } as never, theme, ctx(false, true).context),
-			renderSearchResult(
+			searchView.renderCall({ query: "rust", engine: "yandex" } as never, theme, ctx(false, true).context),
+			searchView.renderResult(
 				ctx(
 					false,
 					true,
@@ -231,7 +279,7 @@ const runningFetch = (t: number, w: number) => {
 	return toolShell(
 		"toolPendingBg",
 		[
-			renderFetchCall(
+			fetchView.renderCall(
 				{ url: "https://rocket.rs/" },
 				theme,
 				ctx(true, false, {}, liveState, { query: "rust web framework" }).context,
@@ -246,17 +294,12 @@ const fetchSuccess = (t: number, w: number) => {
 	return toolShell(
 		"toolSuccessBg",
 		[
-			renderFetchCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
-			renderFetchResult(
+			fetchView.renderCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
+			fetchView.renderResult(
 				ctx(
 					false,
 					false,
-					{
-						url: "https://rocket.rs/",
-						title: "Rocket - Simple, Fast, Type-Safe",
-						markdownLength: 523,
-						_body: fetchMarkdown,
-					},
+					{ data: { ...fetchData, title: "Rocket - Simple, Fast, Type-Safe" } },
 					{},
 					{ url: "https://rocket.rs/" },
 				).result,
@@ -274,17 +317,12 @@ const fetchFolded = (t: number, w: number) => {
 	return toolShell(
 		"toolSuccessBg",
 		[
-			renderFetchCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
-			renderFetchResult(
+			fetchView.renderCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
+			fetchView.renderResult(
 				ctx(
 					false,
 					false,
-					{
-						url: "https://rocket.rs/",
-						title: "Rocket - Simple, Fast, Type-Safe",
-						markdownLength: 523,
-						_body: fetchMarkdown,
-					},
+					{ data: { ...fetchData, title: "Rocket - Simple, Fast, Type-Safe" } },
 					{},
 					{ url: "https://rocket.rs/" },
 				).result,
@@ -302,9 +340,15 @@ const searchFolded = (t: number, w: number) => {
 	return toolShell(
 		"toolSuccessBg",
 		[
-			renderSearchCall({ query: "rust web framework" }, theme, ctx(false).context),
-			renderSearchResult(
-				ctx(false, false, { channel: "exa", count: 5, _body: searchBody }, {}, { query: "rust web framework" }).result,
+			searchView.renderCall({ query: "rust web framework" }, theme, ctx(false).context),
+			searchView.renderResult(
+				ctx(
+					false,
+					false,
+					{ data: { results: searchResults, channel: "exa", count: 5 } },
+					{},
+					{ query: "rust web framework" },
+				).result,
 				{ expanded: false, isPartial: false },
 				theme,
 				ctx(false, false, {}, {}, { query: "rust web framework" }).context,
@@ -319,19 +363,10 @@ const fetchError = (t: number, w: number) => {
 	return toolShell(
 		"toolErrorBg",
 		[
-			renderFetchCall({ url: "https://example.com/definitely-not-here" }, theme, ctx(false, true).context),
-			renderFetchResult(
-				ctx(
-					false,
-					true,
-					{
-						url: "https://example.com/definitely-not-here",
-						error: "HTTP 404: Not Found",
-						_body: "HTTP 404: Not Found",
-					},
-					{},
-					{ url: "https://example.com/definitely-not-here" },
-				).result,
+			fetchView.renderCall({ url: "https://example.com/definitely-not-here" }, theme, ctx(false, true).context),
+			fetchView.renderResult(
+				ctx(false, true, { error: "HTTP 404: Not Found" }, {}, { url: "https://example.com/definitely-not-here" })
+					.result,
 				{ expanded: true, isPartial: false },
 				theme,
 				ctx(false, true, {}, {}, { url: "https://example.com/definitely-not-here" }).context,
