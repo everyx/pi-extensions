@@ -49,7 +49,7 @@ function contentText(result: AgentToolResult<Record<string, unknown>>): string {
 export function renderSearchCall(args: { query?: string }, theme: Theme, context: RenderContext): Text {
 	const query = (args.query ?? "").slice(0, 60);
 	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_search")} ${theme.fg("dim", `"${query}"`)}`;
-	return new Text(head);
+	return new Text(head, 0, 0);
 }
 
 export function renderSearchResult(
@@ -63,14 +63,18 @@ export function renderSearchResult(
 	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean).join(" \u00b7 ");
 	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_search")}${meta ? theme.fg("muted", ` (${meta})`) : ""}`;
 	const body = contentText(result);
-	return new Text(body ? `${head}\n\n${body}` : head);
+	return new Text(body ? `${head}\n\n${body}` : head, 0, 0);
 }
 
 // ── web_fetch ────────────────────────────────────────────────────
 
 export function renderFetchCall(args: { url?: string }, theme: Theme, context: RenderContext): Text {
 	const url = (args.url ?? "").slice(0, 80);
-	return new Text(`${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")} ${theme.fg("dim", url)}`);
+	return new Text(
+		`${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")} ${theme.fg("dim", url)}`,
+		0,
+		0,
+	);
 }
 
 export function renderFetchResult(
@@ -85,5 +89,5 @@ export function renderFetchResult(
 	const body = contentText(result);
 	// Body is the full markdown; show a bounded preview in the card.
 	const preview = body.length > 1200 ? `${body.slice(0, 1200)}\n…` : body;
-	return new Text(preview ? `${head}\n\n${preview}` : head);
+	return new Text(preview ? `${head}\n\n${preview}` : head, 0, 0);
 }

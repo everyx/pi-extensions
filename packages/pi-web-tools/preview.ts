@@ -41,13 +41,19 @@ function toolShell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", childr
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Shared state for the animated sections — the spinner is cached here so
+ * frames advance with wall-clock time across re-renders (per-render state
+ * would restart the spinner every tick and never animate). */
+const liveState = { startedAt: Date.now() - 27500, spinner: undefined as unknown };
+
 function ctx(
 	isPartial: boolean,
 	isError = false,
 	details: Record<string, unknown> = {},
+	state: Record<string, unknown> = {},
 ): {
 	result: AgentToolResult<Record<string, unknown>>;
-	context: { state: { startedAt?: number }; isPartial?: boolean; isError: boolean; invalidate: () => void };
+	context: { state: Record<string, unknown>; isPartial?: boolean; isError: boolean; invalidate: () => void };
 } {
 	return {
 		result: {
@@ -59,7 +65,7 @@ function ctx(
 			isError,
 		} as unknown as AgentToolResult<Record<string, unknown>>,
 		context: {
-			state: { startedAt: Date.now() - 27500 },
+			state,
 			isPartial,
 			isError,
 			invalidate: () => {},
@@ -113,7 +119,11 @@ interface LiveSection {
 
 const runningSearch = (t: number, w: number) => {
 	void t;
-	return toolShell("toolPendingBg", [renderSearchCall({ query: "rust web framework" }, theme, ctx(true).context)], w);
+	return toolShell(
+		"toolPendingBg",
+		[renderSearchCall({ query: "rust web framework" }, theme, ctx(true, false, {}, liveState).context)],
+		w,
+	);
 };
 
 const searchSuccess = (t: number, w: number) => {
@@ -191,7 +201,11 @@ const searchError = (t: number, w: number) => {
 
 const runningFetch = (t: number, w: number) => {
 	void t;
-	return toolShell("toolPendingBg", [renderFetchCall({ url: "https://rocket.rs/" }, theme, ctx(true).context)], w);
+	return toolShell(
+		"toolPendingBg",
+		[renderFetchCall({ url: "https://rocket.rs/" }, theme, ctx(true, false, {}, liveState).context)],
+		w,
+	);
 };
 
 const fetchSuccess = (t: number, w: number) => {
@@ -333,15 +347,22 @@ function show(label: string, lines: string[]): void {
 const staticMode = process.argv.includes("static");
 
 const sections: LiveSection[] = [
-	{ title: "web_search · running (animated)", render: runningSearch, height: 3 },
-	{ title: "web_search · success (search API)", render: searchSuccess, height: 18 },
-	{ title: "web_search · success (browser engine)", render: searchBsk, height: 18 },
-	{ title: "web_search · empty", render: searchEmpty, height: 3 },
-	{ title: "web_search · channel error", render: searchError, height: 4 },
-	{ title: "web_fetch · running (animated)", render: runningFetch, height: 3 },
-	{ title: "web_fetch · success", render: fetchSuccess, height: 12 },
-	{ title: "web_fetch · 404 error", render: fetchError, height: 4 },
+	{ title: "web_search · running (animated)", render: runningSearch, height: 0 },
+	{ title: "web_search · success (search API)", render: searchSuccess, height: 0 },
+	{ title: "web_search · success (browser engine)", render: searchBsk, height: 0 },
+	{ title: "web_search · empty", render: searchEmpty, height: 0 },
+	{ title: "web_search · channel error", render: searchError, height: 0 },
+	{ title: "web_fetch · running (animated)", render: runningFetch, height: 0 },
+	{ title: "web_fetch · success", render: fetchSuccess, height: 0 },
+	{ title: "web_fetch · 404 error", render: fetchError, height: 0 },
 ];
+
+// Measure fixed canvas heights over a full cycle, then run live.
+for (const s of sections) {
+	let maxH = 0;
+	for (let t = 0; t < 200; t++) maxH = Math.max(maxH, s.render(t, 100).length);
+	s.height = maxH;
+}
 
 if (staticMode) {
 	console.log(`\x1b[1m\x1b[4mStatic grid\x1b[0m`);
