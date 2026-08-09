@@ -40,6 +40,14 @@ const engineQueues: Record<EngineId, SerialQueue<string>> = {
 	yandex: createSerialQueue(openSession, closeSession),
 };
 
+// Browser lifecycle: when WE launched the Chromium instance (no browser was
+// connected), close it a short while after the queues drain — never touch a
+// browser the user opened themselves.
+const BROWSER_CLOSE_DELAY_MS = 5_000;
+let browserLaunchedByUs = false;
+let browserPid: number | undefined;
+let browserCloseTimer: ReturnType<typeof setTimeout> | undefined;
+
 // ── bsk CLI plumbing ─────────────────────────────────────────────
 
 interface BskResult {
@@ -121,12 +129,37 @@ async function launchBrowser(): Promise<boolean> {
 			// for exit and its timeout would kill the process after ~5s.
 			const child = spawn(candidate.name, candidate.args, { detached: true, stdio: "ignore" });
 			child.unref();
+			browserLaunchedByUs = true;
+			browserPid = child.pid;
 			return true;
 		} catch {
 			// try next candidate
 		}
 	}
 	return false;
+}
+
+/**
+ * Schedule closing the browser we launched, a short while after the last
+ * session stopped. If a new search arrives before the timer fires, the timer
+ * is reset; if sessions are still active, we don't close at all.
+ */
+function scheduleBrowserClose(): void {
+	if (!browserLaunchedByUs || browserPid === undefined) return;
+	if (browserCloseTimer) clearTimeout(browserCloseTimer);
+	browserCloseTimer = setTimeout(async () => {
+		browserCloseTimer = undefined;
+		// Don't kill the browser if another engine still has an active session.
+		const { ok, stdout } = await runBsk(["session", "list", "--json"], 10_000);
+		if (ok && stdout && stdout !== "[]") return;
+		try {
+			process.kill(browserPid as number, "SIGTERM");
+		} catch {
+			// already gone
+		}
+		browserLaunchedByUs = false;
+		browserPid = undefined;
+	}, BROWSER_CLOSE_DELAY_MS);
 }
 
 /** Ensure a browser is connected: poll, auto-launch once, keep polling. */
@@ -172,6 +205,8 @@ async function openSession(): Promise<string> {
 
 async function closeSession(sessionId: string): Promise<void> {
 	await runBsk(["session", "stop", sessionId]); // positional arg (SKILL)
+	// If we launched the browser, schedule closing it after the queues drain.
+	scheduleBrowserClose();
 }
 
 // ── search execution ─────────────────────────────────────────────
