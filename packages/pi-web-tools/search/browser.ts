@@ -289,7 +289,26 @@ export async function searchWithBsk(
 		);
 		if (!nav.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav.stderr}`);
 		const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
-		return parseResults(raw);
+		const results = parseResults(raw);
+		if (results.length === 0) {
+			// Empty extraction may mean a captcha/anti-bot wall rather than
+			// genuinely no results — surface it instead of silently returning 0.
+			const probe = await evaluate(
+				sessionId,
+				`JSON.stringify({ url: location.href, text: document.body ? document.body.innerText.slice(0, 200) : "" })`,
+				timeoutMs,
+			);
+			let state: { url: string; text: string } = { url: "", text: "" };
+			try {
+				state = JSON.parse(probe) as { url: string; text: string };
+			} catch {
+				// keep defaults
+			}
+			if (/captcha|not a robot|automated requests/i.test(`${state.url} ${state.text}`)) {
+				throw new Error(`real-browser channel: ${engine} blocked with a captcha challenge`);
+			}
+		}
+		return results;
 	});
 
 	return { results, total: results.length };
