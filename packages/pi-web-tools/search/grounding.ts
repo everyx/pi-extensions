@@ -58,10 +58,20 @@ export function modelSupportsGrounding(kind: GroundingKind, model: string): bool
 /** Map a pi Model (provider + baseUrl) to a grounding endpoint kind, or null. */
 export function groundingEndpointFor(provider: string, baseUrl: string, model: string): GroundingEndpoint | null {
 	const p = provider.toLowerCase();
-	const b = baseUrl.toLowerCase();
+	let b = baseUrl.toLowerCase();
 	let kind: GroundingKind | null = null;
 	if (p.includes("deepseek") || b.includes("deepseek.com")) {
 		kind = "deepseek";
+		// pi drives DeepSeek via its OpenAI-compatible endpoint
+		// (api.deepseek.com, api "openai-completions") which has NO
+		// server-side web search. That lives only on the Anthropic-compatible
+		// endpoint — redirect the grounding call there.
+		try {
+			const host = new URL(b).host;
+			b = `https://${host}/anthropic`;
+		} catch {
+			b = "https://api.deepseek.com/anthropic";
+		}
 	} else if (p.includes("openrouter") || b.includes("openrouter.ai")) {
 		kind = "openrouter";
 	} else if (p.includes("gemini") || p.includes("google") || b.includes("googleapis")) {

@@ -73,6 +73,15 @@ describe("groundingEndpointFor", () => {
 		assert.equal(groundingEndpointFor("vllm", "http://localhost:8000/v1", "qwen3"), null);
 	});
 
+	it("deepseek redirects to the Anthropic-compatible endpoint (pi uses OpenAI format)", () => {
+		// pi drives DeepSeek via openai-completions at api.deepseek.com — the
+		// server-side web search only exists on the /anthropic endpoint.
+		const ep = groundingEndpointFor("deepseek", "https://api.deepseek.com", "deepseek-v4-flash");
+		assert.ok(ep);
+		assert.equal(ep.kind, "deepseek");
+		assert.equal(ep.baseUrl, "https://api.deepseek.com/anthropic");
+	});
+
 	it("provider name match works even with generic baseUrl", () => {
 		assert.equal(
 			groundingEndpointFor("deepseek", "https://custom-proxy.example.com", "deepseek-v4-pro")?.kind,
