@@ -29,7 +29,7 @@ import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
-import { type AgentControlParams, type AgentParams, renderNotification } from "./render.js";
+import { renderNotification } from "./render.js";
 import type { NotificationDetails } from "./types.js";
 import { AgentWidget } from "./widget.js";
 
@@ -79,6 +79,25 @@ function widgetSurface(): WidgetSurface | null {
 }
 
 // ─── Tool parameter schemas ──────────────────────────────────
+
+/** Agent tool params (schema static shape). */
+interface AgentParams {
+	prompt: string;
+	title: string;
+	model?: string;
+	thinking?: string;
+	tools?: string[];
+	run_in_background?: boolean;
+	timeoutMs?: number;
+}
+
+/** AgentControl tool params (schema static shape). */
+interface AgentControlParams {
+	action: string;
+	agent_id: string;
+	title?: string;
+	message?: string;
+}
 
 const AgentParamsSchema = Type.Object({
 	prompt: Type.String({

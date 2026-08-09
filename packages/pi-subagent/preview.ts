@@ -16,19 +16,95 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
+import type { Component } from "@everyx/pi-ui/card.js";
+import { createToolView } from "@everyx/pi-ui/view.js";
 import type { AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
-import {
-	type AgentParams,
-	type RenderEvent,
-	renderAgentCall,
-	renderAgentControlCall,
-	renderAgentControlResult,
-	renderAgentResult,
-	renderNotification,
-	type SubagentDetails,
-} from "./render.js";
+import { renderNotification } from "./render.js";
 import { AgentWidget } from "./widget.js";
+
+/** Minimal Agent params shape for preview stories. */
+interface AgentParams {
+	prompt: string;
+	title: string;
+	model?: string;
+	thinking?: string;
+	run_in_background?: boolean;
+}
+
+interface RenderEvent {
+	kind: "thinking" | "tool" | "text";
+	name?: string;
+	args?: string;
+	text?: string;
+}
+
+interface SubagentDetails {
+	task?: string;
+	title?: string;
+	model?: string;
+	thinking?: string;
+	runInBackground?: boolean;
+	error?: string;
+	sessionPath?: string;
+	startedAt?: number;
+	endedAt?: number;
+	activity?: AgentActivity;
+	events?: RenderEvent[];
+	status?: string;
+	result?: string;
+	usage?: { durationMs?: number; tokens?: number; toolUses?: number };
+}
+
+// ── Views (same templates as index.ts) ─────────────────────────
+
+const agentView = createToolView<Record<string, unknown>, Record<string, unknown>>({
+	name: "Agent",
+	title: (ctx) => {
+		const d = ctx.result?.data as { title?: string; task?: string } | undefined;
+		return (d?.title ?? d?.task ?? "").slice(0, 60);
+	},
+	tail: (ctx) => (ctx.status === "error" ? "start failed" : ctx.status === "processing" ? "starting\u2026" : "started"),
+	meta: (ctx) => {
+		const d = ctx.result?.data as
+			| { model?: string; thinking?: string; startedAt?: number; endedAt?: number }
+			| undefined;
+		const parts: string[] = [];
+		if (d?.model) parts.push(d.model);
+		if (d?.thinking) parts.push(d.thinking);
+		if (d?.startedAt != null) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+		return parts;
+	},
+	body: {
+		rows: {
+			of: (ctx) => ((ctx.result?.data as { events?: unknown[] } | undefined)?.events ?? []) as unknown[],
+			rows: [
+				{
+					content: (_ctx, ev) => {
+						const e = ev as { kind: string; name?: string; args?: string; text?: string };
+						if (e.kind === "thinking") return { style: "thinking", content: "Thinking..." };
+						if (e.kind === "tool") return { style: "tool", content: `${e.name ?? ""}: ${e.args ?? ""}` };
+						return { style: "text", content: e.text ?? "" };
+					},
+				},
+			],
+		},
+	},
+});
+
+const agentControlView = createToolView<Record<string, unknown>, Record<string, unknown>>({
+	name: "AgentControl",
+	title: (ctx) => String((ctx.result?.data as { title?: string } | undefined)?.title ?? "").slice(0, 60),
+	tail: (ctx) => {
+		const action = (ctx.result?.data as { action?: string } | undefined)?.action;
+		const verb = action === "steer" ? "steer" : action === "stop" ? "stop" : "control";
+		if (ctx.status === "error") return `${verb} failed`;
+		if (ctx.status === "processing") return verb === "stop" ? "stopping\u2026" : `${verb}ing\u2026`;
+		if (ctx.status === "stop") return "stopped";
+		return `${verb}ed`;
+	},
+	body: { text: (ctx) => (ctx.result?.data as { message?: string } | undefined)?.message ?? "" },
+});
 
 const themeName = process.env.THEME || "light";
 initTheme(themeName);
@@ -230,6 +306,16 @@ async function runLive(sections: LiveSection[]): Promise<void> {
 	}
 }
 
+// Local wrappers (cast the loosely-typed preview results to the view's shape).
+const renderAgentResult = (r: unknown, o: unknown, t: unknown, c: unknown): Component =>
+	agentView.renderResult(r as never, o as never, t as never, c as never);
+const renderAgentControlResult = (r: unknown, o: unknown, t: unknown, c: unknown): Component =>
+	agentControlView.renderResult(r as never, o as never, t as never, c as never);
+const renderAgentCall = (args: unknown, t: unknown, c: unknown): Component =>
+	agentView.renderCall(args as never, t as never, c as never);
+const renderAgentControlCall = (args: unknown, t: unknown, c: unknown): Component =>
+	agentControlView.renderCall(args as never, t as never, c as never);
+
 // ── Sections ────────────────────────────────────────────────
 
 // ── Spawn group: spinner → started → start failed, cycling ──
@@ -240,9 +326,9 @@ const spawnCardLines = (w: number) =>
 	toolShell(
 		"toolSuccessBg",
 		[
-			renderAgentCall(spawnParams, theme, context),
+			renderAgentCall(spawnParams as never, theme, context),
 			renderAgentResult(
-				{ details: { runInBackground: true, title: params.title }, content: [] },
+				{ details: { runInBackground: true, title: params.title } as never, content: [] },
 				{ expanded: false, isPartial: false },
 				theme,
 				context,
@@ -254,10 +340,14 @@ const spawnFailedLines = (w: number) =>
 	toolShell(
 		"toolErrorBg",
 		[
-			renderAgentCall(spawnParams, theme, context),
+			renderAgentCall(spawnParams as never, theme, context),
 			renderAgentResult(
 				{
-					details: { runInBackground: true, title: "bad model", error: 'Model "no-such-model-xyz" not available.' },
+					details: {
+						runInBackground: true,
+						title: "bad model",
+						error: 'Model "no-such-model-xyz" not available.',
+					} as never,
 					content: [{ type: "text", text: 'Model "no-such-model-xyz" not available.' }],
 				},
 				{ expanded: false, isPartial: false },
@@ -273,9 +363,9 @@ const spawnSpin = (t: number, w: number) => {
 	return toolShell(
 		"toolPendingBg",
 		[
-			renderAgentCall(spawnParams, theme, context),
+			renderAgentCall(spawnParams as never, theme, context),
 			renderAgentResult(
-				{ details: { runInBackground: true, title: params.title }, content: [] },
+				{ details: { runInBackground: true, title: params.title } as never, content: [] },
 				{ expanded: false, isPartial: true },
 				theme,
 				context,
@@ -409,9 +499,9 @@ const fgCards = [
 		toolShell(
 			"toolSuccessBg",
 			[
-				renderAgentCall(params, theme, context),
+				renderAgentCall(params as never, theme, context),
 				renderAgentResult(
-					{ details: foregroundDetails({ events: longOutput }), content: [] },
+					{ details: foregroundDetails({ events: longOutput }) as never, content: [] },
 					{ expanded: false, isPartial: false },
 					theme,
 					context,
@@ -423,9 +513,9 @@ const fgCards = [
 		toolShell(
 			"toolSuccessBg",
 			[
-				renderAgentCall(params, theme, context),
+				renderAgentCall(params as never, theme, context),
 				renderAgentResult(
-					{ details: foregroundDetails({ events: longOutput }), content: [] },
+					{ details: foregroundDetails({ events: longOutput }) as never, content: [] },
 					{ expanded: true, isPartial: false },
 					theme,
 					context,
@@ -437,7 +527,7 @@ const fgCards = [
 		toolShell(
 			"toolErrorBg",
 			[
-				renderAgentCall(params, theme, errorContext),
+				renderAgentCall(params as never, theme, errorContext),
 				renderAgentResult(
 					{
 						details: foregroundDetails({
@@ -546,7 +636,7 @@ const streamSection: LiveSection = {
 		// Pending background while the stream is live (framework shell).
 		return renderLines(
 			shell("toolPendingBg", [
-				renderAgentCall(params, theme, liveContext),
+				renderAgentCall(params as never, theme, liveContext),
 				renderAgentResult(
 					{
 						details: foregroundDetails({
