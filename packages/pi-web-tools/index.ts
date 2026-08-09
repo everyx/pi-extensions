@@ -75,7 +75,14 @@ async function detectAvailableChannels(
 // ── Result formatting (LLM-facing, token friendly) ───────────────
 
 function formatResults(result: ChannelSearchResult): string {
-	if (result.results.length === 0) return "No results.";
+	const parts: string[] = [];
+	// Answer is a standalone summary field (channel-provided, e.g. Tavily's
+	// include_answer) — shown as its own paragraph, absent when not provided.
+	if (result.answer) parts.push(result.answer.trim());
+	if (result.results.length === 0) {
+		parts.push("No results.");
+		return parts.join("\n\n");
+	}
 	const lines = result.results.map((r, i) => {
 		const meta = [r.publishedDate, r.author].filter(Boolean).join(" · ");
 		const head = meta ? `${i + 1}. ${r.title} (${meta})` : `${i + 1}. ${r.title}`;
@@ -83,7 +90,8 @@ function formatResults(result: ChannelSearchResult): string {
 	});
 	const truncated =
 		result.total > result.results.length ? `\n(${result.total} results total; showing ${result.results.length})` : "";
-	return lines.join("\n") + truncated;
+	parts.push(lines.join("\n") + truncated);
+	return parts.join("\n\n");
 }
 
 // ── web_search ───────────────────────────────────────────────────
