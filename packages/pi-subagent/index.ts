@@ -501,7 +501,7 @@ export default function (pi: ExtensionAPI) {
 			name: "Agent",
 			title: (ctx) => {
 				const d = ctx.result?.data as { title?: string; task?: string } | undefined;
-				return (d?.title ?? d?.task ?? "").slice(0, 60);
+				return String((ctx.args as { title?: unknown }).title ?? d?.title ?? d?.task ?? "").slice(0, 60);
 			},
 			tail: (ctx) =>
 				ctx.status === "error" ? "start failed" : ctx.status === "processing" ? "starting\u2026" : "started",
@@ -685,9 +685,18 @@ export default function (pi: ExtensionAPI) {
 
 		...createToolView<Record<string, unknown>, Record<string, unknown>>({
 			name: "AgentControl",
-			title: (ctx) => String((ctx.result?.data as { title?: string } | undefined)?.title ?? "").slice(0, 60),
+			title: (ctx) =>
+				String(
+					(ctx.args as { agent_id?: unknown } | undefined)?.agent_id ??
+						(ctx.result?.data as { title?: string } | undefined)?.title ??
+						"",
+				).slice(0, 60),
 			tail: (ctx) => {
-				const action = (ctx.result?.data as { action?: string } | undefined)?.action;
+				const action = String(
+					(ctx.args as { action?: unknown } | undefined)?.action ??
+						(ctx.result?.data as { action?: string } | undefined)?.action ??
+						"",
+				);
 				const verb = action === "steer" ? "steer" : action === "stop" ? "stop" : "control";
 				if (ctx.status === "error") return `${verb} failed`;
 				if (ctx.status === "processing") return verb === "stop" ? "stopping\u2026" : `${verb}ing\u2026`;
