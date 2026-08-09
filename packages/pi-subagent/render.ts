@@ -16,8 +16,7 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { Container, Text } from "@earendil-works/pi-tui";
-import { type CardIcon, renderHeader, textLine } from "@everyx/pi-ui/card.js";
+import { type CardIcon, type Component, renderHeader, textLine } from "@everyx/pi-ui/card.js";
 import type { CardBody, CardConfig } from "./card.js";
 import { renderCard, renderNoDetailsCard, renderNotificationCard } from "./card.js";
 import { formatDuration, Spinner } from "./format.js";
@@ -76,7 +75,7 @@ interface RenderContext {
 
 // ── Render call (tool header) ──────────────────────────────────
 
-export function renderAgentCall(args: AgentParams, theme: Theme, context: RenderContext): Text {
+export function renderAgentCall(args: AgentParams, theme: Theme, context: RenderContext): Component {
 	if (context.executionStarted && context.state.startedAt === undefined) {
 		context.state.startedAt = Date.now();
 		context.state.endedAt = undefined;
@@ -126,7 +125,7 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 	);
 }
 
-export function renderAgentControlCall(_args: AgentControlParams, _theme: Theme, _context: RenderContext): Text {
+export function renderAgentControlCall(_args: AgentControlParams, _theme: Theme, _context: RenderContext): Component {
 	// Steer/stop render as single working-indicator status lines from
 	// renderResult — no header (Text("") renders zero lines).
 	return textLine("");
@@ -135,7 +134,7 @@ export function renderAgentControlCall(_args: AgentControlParams, _theme: Theme,
 // ── Render result (output body) ────────────────────────────────
 
 /** Dim one-liner for background-start/control acks and bare errors. */
-function dimOneLiner(text: string | undefined, theme: Theme): Text {
+function dimOneLiner(text: string | undefined, theme: Theme): Component {
 	if (!text) return textLine("");
 	return textLine(theme.fg("dim", text));
 }
@@ -202,7 +201,7 @@ export function renderAgentResult(
 	{ expanded, isPartial }: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
 	context: RenderContext,
-): Text | Container {
+): Component {
 	const details = result.details;
 	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
@@ -305,7 +304,7 @@ export function renderAgentControlResult(
 	{ expanded, isPartial }: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
 	context: RenderContext,
-): Text | Container {
+): Component {
 	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 	const d = result.details;
 
@@ -381,7 +380,7 @@ export function renderNotification(
 	message: { details?: NotificationDetails },
 	{ expanded }: { expanded: boolean },
 	theme: Theme,
-): Container {
+): Component {
 	const d = message.details;
 
 	if (!d) {

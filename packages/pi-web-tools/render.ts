@@ -8,8 +8,14 @@
  */
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import type { Text } from "@earendil-works/pi-tui";
-import { type CardIcon, renderCard, renderIcon, renderNameTitle, textLine } from "@everyx/pi-ui/card.js";
+import {
+	type CardIcon,
+	type Component,
+	renderCard,
+	renderIcon,
+	renderNameTitle,
+	textLine,
+} from "@everyx/pi-ui/card.js";
 import { Spinner } from "@everyx/pi-ui/spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -46,7 +52,7 @@ function contentText(result: AgentToolResult<Record<string, unknown>>): string {
 
 // ── web_search ───────────────────────────────────────────────────
 
-export function renderSearchCall(args: { query?: string }, theme: Theme, context: RenderContext): Text {
+export function renderSearchCall(args: { query?: string }, theme: Theme, context: RenderContext): Component {
 	// Running: spinner + query line. Completed: empty — the result header
 	// owns the completed surface (✓ web_search (via …)), same as pi-subagent.
 	if (!context.isPartial) return textLine("");
@@ -60,7 +66,7 @@ export function renderSearchResult(
 	options: ToolRenderResultOptions,
 	theme: Theme,
 	context: RenderContext,
-): Text {
+): Component {
 	// Running state is owned by the call renderer (spinner + query line).
 	if (context.isPartial) return textLine("");
 	const details = (result.details ?? {}) as Record<string, unknown>;
@@ -77,12 +83,12 @@ export function renderSearchResult(
 			expanded: options.expanded,
 		},
 		theme,
-	) as unknown as Text;
+	) as unknown as Component;
 }
 
 // ── web_fetch ────────────────────────────────────────────────────
 
-export function renderFetchCall(args: { url?: string }, theme: Theme, context: RenderContext): Text {
+export function renderFetchCall(args: { url?: string }, theme: Theme, context: RenderContext): Component {
 	// Running only; completed surfaces come from the result renderer.
 	if (!context.isPartial) return textLine("");
 	const url = (args.url ?? "").slice(0, 80);
@@ -94,7 +100,7 @@ export function renderFetchResult(
 	options: ToolRenderResultOptions,
 	theme: Theme,
 	context: RenderContext,
-): Text {
+): Component {
 	// Running state is owned by the call renderer (spinner + url line).
 	if (context.isPartial) return textLine("");
 	const details = (result.details ?? {}) as Record<string, unknown>;
@@ -113,5 +119,5 @@ export function renderFetchResult(
 			expanded: options.expanded,
 		},
 		theme,
-	) as unknown as Text;
+	) as unknown as Component;
 }

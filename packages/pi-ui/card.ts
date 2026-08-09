@@ -9,7 +9,10 @@
  */
 
 import { keyHint, type Theme, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Box, type Component, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
+
+export type { Component } from "@earendil-works/pi-tui";
+
 import { type Spinner, safeTitle } from "./spinner.js";
 
 export type CardIcon =
@@ -102,7 +105,7 @@ export const PREVIEW_LINES = 5;
 /** One content line with zero padding — pi's Text defaults to padding (1,1),
  * which adds stray blank rows around card content. All card surfaces must
  * use this (or contentRow) instead of bare `new Text(...)`. */
-export function textLine(text: string): Text {
+export function textLine(text: string): Component {
 	return new Text(text, 0, 0);
 }
 
@@ -113,7 +116,7 @@ export type BodyComponent = Text | Container | { invalidate: () => void; render:
  * the bash card draws a blank row between header and output; a bare Text
  * without the leading `\n` would render adjacent to the header).
  */
-export function contentRow(styled: string, x = 0): Text {
+export function contentRow(styled: string, x = 0): Component {
 	return new Text(`\n${styled}`, x, 0);
 }
 
@@ -183,7 +186,7 @@ export interface CardConfig {
 }
 
 /** Unified card content (no background): header + body + footer. */
-function cardContent(theme: Theme, sections: { header?: string; body?: BodyComponent[]; footer?: string }): Container {
+function cardContent(theme: Theme, sections: { header?: string; body?: BodyComponent[]; footer?: string }): Component {
 	const cmp = new Container();
 	if (sections.header) cmp.addChild(new Text(sections.header, 0, 0));
 	for (const part of sections.body ?? []) cmp.addChild(part);
@@ -198,7 +201,7 @@ function cardContent(theme: Theme, sections: { header?: string; body?: BodyCompo
  * return this directly; the framework's default-shell Box paints the
  * background.
  */
-export function renderCard(config: CardConfig, theme: Theme): Container {
+export function renderCard(config: CardConfig, theme: Theme): Component {
 	const sections: { header?: string; body?: BodyComponent[]; footer?: string } = {};
 	if (config.header) sections.header = renderHeader(config.header, theme);
 

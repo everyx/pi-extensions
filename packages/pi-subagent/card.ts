@@ -22,6 +22,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import {
 	type BodyComponent,
+	type Component,
 	cardShell,
 	contentRow,
 	foldedBlock,
@@ -242,7 +243,7 @@ function renderBody(body: CardBody, expanded: boolean, theme: Theme): BodyCompon
  * reason, steer message) + session footer — via pi-ui renderCard (folding
  * built in); the agent activity stream rides body.extra.
  */
-export function renderCard(config: CardConfig, theme: Theme): Container {
+export function renderCard(config: CardConfig, theme: Theme): Component {
 	const b = config.body;
 	const extra: BodyComponent[] = [];
 	if (b && (b.prompt !== undefined || b.events?.length)) {
@@ -259,11 +260,11 @@ export function renderCard(config: CardConfig, theme: Theme): Container {
 	);
 }
 
-export function renderNotificationCard(config: CardConfig, theme: Theme, bg: "error" | "success"): Container {
+export function renderNotificationCard(config: CardConfig, theme: Theme, bg: "error" | "success"): Component {
 	return cardShell(theme, bg === "error" ? "toolErrorBg" : "toolSuccessBg", renderCardUi(config, theme));
 }
 
 /** Notification fallback when no details arrived — dim one-liner in an error shell. */
-export function renderNoDetailsCard(theme: Theme): Container {
+export function renderNoDetailsCard(theme: Theme): Component {
 	return cardShell(theme, "toolErrorBg", contentRow(theme.fg("dim", "(no details)")));
 }
