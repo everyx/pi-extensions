@@ -9,7 +9,7 @@
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { type CardIcon, renderIcon } from "@everyx/pi-ui/card.js";
+import { type CardIcon, renderCard, renderIcon } from "@everyx/pi-ui/card.js";
 import { Spinner } from "@everyx/pi-ui/spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -57,7 +57,7 @@ export function renderSearchCall(args: { query?: string }, theme: Theme, context
 
 export function renderSearchResult(
 	result: AgentToolResult<Record<string, unknown>>,
-	_options: ToolRenderResultOptions,
+	options: ToolRenderResultOptions,
 	theme: Theme,
 	context: RenderContext,
 ): Text {
@@ -66,9 +66,15 @@ export function renderSearchResult(
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const echo = viaEcho(details);
 	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean).join(" \u00b7 ");
-	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_search")}${meta ? theme.fg("muted", ` (${meta})`) : ""}`;
+	const title = `${theme.fg("accent", "web_search")}${meta ? theme.fg("muted", ` (${meta})`) : ""}`;
 	const body = contentText(result);
-	return new Text(body ? `${head}\n\n${body}` : head, 0, 0);
+	if (!body) return new Text(title, 0, 0);
+	// renderCard folds the body (tail preview + expand hint) — folding is
+	// built into the card, nothing to assemble here.
+	return renderCard(
+		{ header: { icon: icon(context), title }, body: { message: body }, expanded: options.expanded },
+		theme,
+	) as unknown as Text;
 }
 
 // ── web_fetch ────────────────────────────────────────────────────
@@ -86,7 +92,7 @@ export function renderFetchCall(args: { url?: string }, theme: Theme, context: R
 
 export function renderFetchResult(
 	result: AgentToolResult<Record<string, unknown>>,
-	_options: ToolRenderResultOptions,
+	options: ToolRenderResultOptions,
 	theme: Theme,
 	context: RenderContext,
 ): Text {
@@ -94,9 +100,13 @@ export function renderFetchResult(
 	if (context.isPartial) return new Text("", 0, 0);
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const title = typeof details.title === "string" ? details.title : "";
-	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")}${title ? theme.fg("muted", ` (${title.slice(0, 60)})`) : ""}`;
+	const titlePart = title.slice(0, 60);
+	const cardTitle = `${theme.fg("accent", "web_fetch")}${titlePart ? theme.fg("muted", ` (${titlePart})`) : ""}`;
 	const body = contentText(result);
-	// Body is the full markdown; show a bounded preview in the card.
-	const preview = body.length > 1200 ? `${body.slice(0, 1200)}\n…` : body;
-	return new Text(preview ? `${head}\n\n${preview}` : head, 0, 0);
+	if (!body) return new Text(cardTitle, 0, 0);
+	// renderCard folds the body (tail preview + expand hint).
+	return renderCard(
+		{ header: { icon: icon(context), title: cardTitle }, body: { message: body }, expanded: options.expanded },
+		theme,
+	) as unknown as Text;
 }
