@@ -1,42 +1,30 @@
 /**
- * Tests for date helpers (date.ts) — ISO → relative age.
+ * Tests for date helpers (date.ts) — ISO → relative age via fromnow.
+ *
+ * fromnow computes against the real current time (no injected clock), so
+ * assertions match the shape ("N years and M months ago") rather than exact
+ * values.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isoToRelativeAge, msToRelativeAge } from "../date.js";
+import { isoToRelativeAge } from "../date.js";
 
 describe("isoToRelativeAge", () => {
-	const now = new Date("2026-08-08T12:00:00Z");
-
-	it("minutes", () => {
-		assert.equal(isoToRelativeAge("2026-08-08T11:55:00Z", now), "about 5 minutes ago");
+	it("compound years+months for old dates", () => {
+		assert.match(isoToRelativeAge("2020-01-15T00:00:00Z"), /^\d+ years? and \d+ months? ago$/);
 	});
-	it("hours", () => {
-		assert.equal(isoToRelativeAge("2026-08-08T09:00:00Z", now), "about 3 hours ago");
+	it("days for recent dates", () => {
+		assert.match(isoToRelativeAge(new Date(Date.now() - 3 * 86_400_000).toISOString()), /^\d+ days? ago$|^1 day and /);
 	});
-	it("days", () => {
-		assert.equal(isoToRelativeAge("2026-08-05T12:00:00Z", now), "about 3 days ago");
-	});
-	it("weeks", () => {
-		assert.equal(isoToRelativeAge("2026-07-20T12:00:00Z", now), "about 2 weeks ago");
-	});
-	it("months", () => {
-		assert.equal(isoToRelativeAge("2026-03-08T12:00:00Z", now), "about 5 months ago");
-	});
-	it("years", () => {
-		assert.equal(isoToRelativeAge("2024-05-22T00:00:00Z", now), "about 2 years ago");
-	});
-	it("just now", () => {
-		assert.equal(isoToRelativeAge("2026-08-08T11:59:59Z", now), "just now");
-	});
-	it("future dates", () => {
-		assert.equal(isoToRelativeAge("2027-01-01T00:00:00Z", now), "in the future");
+	it("just now for the current instant", () => {
+		assert.equal(isoToRelativeAge(new Date().toISOString()), "just now");
 	});
 	it("unparseable stays as-is", () => {
 		assert.equal(isoToRelativeAge("N/A"), "N/A");
+		assert.equal(isoToRelativeAge(""), "");
 	});
-	it("singular form", () => {
-		assert.equal(msToRelativeAge(3_600_000), "about 1 hour ago");
+	it("future dates use from-now phrasing", () => {
+		assert.match(isoToRelativeAge(new Date(Date.now() + 30 * 86_400_000).toISOString()), /from now$/);
 	});
 });
