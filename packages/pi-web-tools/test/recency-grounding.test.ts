@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { groundingEndpointFor, isGroundingAvailable } from "../search/grounding.js";
+import { groundingEndpointFor, isGroundingAvailable, modelSupportsGrounding } from "../search/grounding.js";
 import {
 	recencyToDays,
 	recencyToExa,
@@ -60,7 +60,7 @@ describe("groundingEndpointFor", () => {
 			"gemini",
 		);
 		assert.equal(
-			groundingEndpointFor("deepseek", "https://api.deepseek.com/anthropic", "deepseek-chat")?.kind,
+			groundingEndpointFor("deepseek", "https://api.deepseek.com/anthropic", "deepseek-v4-flash")?.kind,
 			"deepseek",
 		);
 		assert.equal(groundingEndpointFor("openrouter", "https://openrouter.ai/api/v1", "gpt-5.6")?.kind, "openrouter");
@@ -75,13 +75,42 @@ describe("groundingEndpointFor", () => {
 
 	it("provider name match works even with generic baseUrl", () => {
 		assert.equal(
-			groundingEndpointFor("deepseek", "https://custom-proxy.example.com", "deepseek-chat")?.kind,
+			groundingEndpointFor("deepseek", "https://custom-proxy.example.com", "deepseek-v4-pro")?.kind,
 			"deepseek",
 		);
 	});
 
 	it("unknown providers → null", () => {
 		assert.equal(groundingEndpointFor("custom", "https://example.com/v1", "model-x"), null);
+	});
+});
+
+describe("modelSupportsGrounding", () => {
+	it("openai: gpt-5 / gpt-4.1 / gpt-4o only", () => {
+		assert.equal(modelSupportsGrounding("openai", "gpt-5.6"), true);
+		assert.equal(modelSupportsGrounding("openai", "gpt-4.1-mini"), true);
+		assert.equal(modelSupportsGrounding("openai", "gpt-4o"), true);
+		assert.equal(modelSupportsGrounding("openai", "gpt-4-turbo"), false);
+	});
+	it("anthropic: claude models", () => {
+		assert.equal(modelSupportsGrounding("anthropic", "claude-sonnet-4-5"), true);
+		assert.equal(modelSupportsGrounding("anthropic", "gpt-5.6"), false);
+	});
+	it("gemini: 3 / 2.5 / 2.0 series", () => {
+		assert.equal(modelSupportsGrounding("gemini", "gemini-3-flash"), true);
+		assert.equal(modelSupportsGrounding("gemini", "gemini-2.5-pro"), true);
+		assert.equal(modelSupportsGrounding("gemini", "gemini-2.0-flash"), true);
+		assert.equal(modelSupportsGrounding("gemini", "gemini-1.5-pro"), false);
+	});
+	it("deepseek: v4-pro / v4-flash only (server-side search on their infra)", () => {
+		assert.equal(modelSupportsGrounding("deepseek", "deepseek-v4-pro"), true);
+		assert.equal(modelSupportsGrounding("deepseek", "deepseek-v4-flash"), true);
+		assert.equal(modelSupportsGrounding("deepseek", "deepseek-chat"), false);
+		assert.equal(modelSupportsGrounding("deepseek", "claude-sonnet-4-5"), false);
+	});
+	it("openrouter: any tool-calling model (Exa fallback)", () => {
+		assert.equal(modelSupportsGrounding("openrouter", "gpt-5.6"), true);
+		assert.equal(modelSupportsGrounding("openrouter", "anything-else"), true);
 	});
 });
 

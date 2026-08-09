@@ -30,26 +30,50 @@ export interface GroundingEndpoint {
 	model: string;
 }
 
+/**
+ * Model-level grounding support (researched per provider):
+ *   - OpenAI:  gpt-4o, gpt-4.1*, gpt-5* (Responses web_search)
+ *   - Anthropic: most Claude models (web_search_20250305 basic version)
+ *   - Gemini:  gemini-3*, gemini-2.5*, gemini-2.0* (googleSearch)
+ *   - DeepSeek: deepseek-v4-pro / deepseek-v4-flash only (server-side search
+ *     on their own infra — other names silently fall back to v4-flash)
+ *   - OpenRouter: any tool-calling model (server tool falls back to Exa)
+ */
+export function modelSupportsGrounding(kind: GroundingKind, model: string): boolean {
+	const m = model.toLowerCase();
+	switch (kind) {
+		case "openai":
+			return /gpt-5|gpt-4\.1|gpt-4o/.test(m);
+		case "anthropic":
+			return m.startsWith("claude");
+		case "gemini":
+			return /gemini-3|gemini-2\.5|gemini-2\.0/.test(m);
+		case "deepseek":
+			return /deepseek-(v4-pro|v4-flash)/.test(m);
+		case "openrouter":
+			return true;
+	}
+}
+
 /** Map a pi Model (provider + baseUrl) to a grounding endpoint kind, or null. */
 export function groundingEndpointFor(provider: string, baseUrl: string, model: string): GroundingEndpoint | null {
 	const p = provider.toLowerCase();
 	const b = baseUrl.toLowerCase();
+	let kind: GroundingKind | null = null;
 	if (p.includes("deepseek") || b.includes("deepseek.com")) {
-		return { kind: "deepseek", baseUrl: b, model };
+		kind = "deepseek";
+	} else if (p.includes("openrouter") || b.includes("openrouter.ai")) {
+		kind = "openrouter";
+	} else if (p.includes("gemini") || p.includes("google") || b.includes("googleapis")) {
+		kind = "gemini";
+	} else if (p.includes("anthropic") || b.includes("anthropic.com")) {
+		kind = "anthropic";
+	} else if (p.includes("openai") || b.includes("openai.com") || b.includes("azure.com")) {
+		kind = "openai";
 	}
-	if (p.includes("openrouter") || b.includes("openrouter.ai")) {
-		return { kind: "openrouter", baseUrl: b, model };
-	}
-	if (p.includes("gemini") || p.includes("google") || b.includes("googleapis")) {
-		return { kind: "gemini", baseUrl: b, model };
-	}
-	if (p.includes("anthropic") || b.includes("anthropic.com")) {
-		return { kind: "anthropic", baseUrl: b, model };
-	}
-	if (p.includes("openai") || b.includes("openai.com") || b.includes("azure.com")) {
-		return { kind: "openai", baseUrl: b, model };
-	}
-	return null;
+	if (!kind) return null;
+	if (!modelSupportsGrounding(kind, model)) return null;
+	return { kind, baseUrl: b, model };
 }
 
 /** Pure capability check: does the current model endpoint support grounding? */
