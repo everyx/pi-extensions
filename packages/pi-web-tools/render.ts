@@ -9,7 +9,7 @@
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { type CardIcon, renderCard, renderIcon } from "@everyx/pi-ui/card.js";
+import { type CardIcon, renderCard, renderIcon, renderNameTitle } from "@everyx/pi-ui/card.js";
 import { Spinner } from "@everyx/pi-ui/spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -65,14 +65,17 @@ export function renderSearchResult(
 	if (context.isPartial) return new Text("", 0, 0);
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const echo = viaEcho(details);
-	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean).join(" \u00b7 ");
-	const title = `${theme.fg("accent", "web_search")}${meta ? theme.fg("muted", ` (${meta})`) : ""}`;
+	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean) as string[];
+	const query = ((context as { args?: { query?: string } }).args?.query ?? "").slice(0, 60);
 	const body = contentText(result);
-	if (!body) return new Text(title, 0, 0);
-	// renderCard folds the body (tail preview + expand hint) — folding is
-	// built into the card, nothing to assemble here.
+	// Structured header: name + quoted query + meta (query always visible,
+	// like subagent's `Agent "title"`); body folds via renderCard.
 	return renderCard(
-		{ header: { icon: icon(context), title }, body: { message: body }, expanded: options.expanded },
+		{
+			header: { icon: icon(context), name: "web_search", title: query, meta },
+			body: body ? { message: body } : undefined,
+			expanded: options.expanded,
+		},
 		theme,
 	) as unknown as Text;
 }
@@ -83,11 +86,7 @@ export function renderFetchCall(args: { url?: string }, theme: Theme, context: R
 	// Running only; completed surfaces come from the result renderer.
 	if (!context.isPartial) return new Text("", 0, 0);
 	const url = (args.url ?? "").slice(0, 80);
-	return new Text(
-		`${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")} ${theme.fg("dim", url)}`,
-		0,
-		0,
-	);
+	return new Text(`${renderIcon(icon(context), theme)} ${renderNameTitle("web_fetch", url, theme)}`, 0, 0);
 }
 
 export function renderFetchResult(
@@ -99,14 +98,20 @@ export function renderFetchResult(
 	// Running state is owned by the call renderer (spinner + url line).
 	if (context.isPartial) return new Text("", 0, 0);
 	const details = (result.details ?? {}) as Record<string, unknown>;
-	const title = typeof details.title === "string" ? details.title : "";
-	const titlePart = title.slice(0, 60);
-	const cardTitle = `${theme.fg("accent", "web_fetch")}${titlePart ? theme.fg("muted", ` (${titlePart})`) : ""}`;
+	const pageTitle = typeof details.title === "string" ? details.title.slice(0, 60) : "";
+	const url = ((context as { args?: { url?: string } }).args?.url ?? "").slice(0, 80);
 	const body = contentText(result);
-	if (!body) return new Text(cardTitle, 0, 0);
-	// renderCard folds the body (tail preview + expand hint).
 	return renderCard(
-		{ header: { icon: icon(context), title: cardTitle }, body: { message: body }, expanded: options.expanded },
+		{
+			header: {
+				icon: icon(context),
+				name: "web_fetch",
+				title: url,
+				meta: pageTitle ? [pageTitle] : undefined,
+			},
+			body: body ? { message: body } : undefined,
+			expanded: options.expanded,
+		},
 		theme,
 	) as unknown as Text;
 }

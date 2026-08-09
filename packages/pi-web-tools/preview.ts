@@ -51,9 +51,16 @@ function ctx(
 	isError = false,
 	details: Record<string, unknown> = {},
 	state: Record<string, unknown> = {},
+	args: Record<string, unknown> = {},
 ): {
 	result: AgentToolResult<Record<string, unknown>>;
-	context: { state: Record<string, unknown>; isPartial?: boolean; isError: boolean; invalidate: () => void };
+	context: {
+		state: Record<string, unknown>;
+		args: Record<string, unknown>;
+		isPartial?: boolean;
+		isError: boolean;
+		invalidate: () => void;
+	};
 } {
 	return {
 		result: {
@@ -66,6 +73,7 @@ function ctx(
 		} as unknown as AgentToolResult<Record<string, unknown>>,
 		context: {
 			state,
+			args,
 			isPartial,
 			isError,
 			invalidate: () => {},
@@ -121,7 +129,13 @@ const runningSearch = (t: number, w: number) => {
 	void t;
 	return toolShell(
 		"toolPendingBg",
-		[renderSearchCall({ query: "rust web framework" }, theme, ctx(true, false, {}, liveState).context)],
+		[
+			renderSearchCall(
+				{ query: "rust web framework" },
+				theme,
+				ctx(true, false, {}, liveState, { query: "rust web framework" }).context,
+			),
+		],
 		w,
 	);
 };
@@ -133,10 +147,10 @@ const searchSuccess = (t: number, w: number) => {
 		[
 			renderSearchCall({ query: "rust web framework" }, theme, ctx(false).context),
 			renderSearchResult(
-				ctx(false, false, { channel: "exa", count: 5, _body: searchBody }).result,
+				ctx(false, false, { channel: "exa", count: 5, _body: searchBody }, {}, { query: "rust web framework" }).result,
 				{ expanded: true, isPartial: false },
 				theme,
-				ctx(false).context,
+				ctx(false, false, {}, {}, { query: "rust web framework" }).context,
 			),
 		],
 		w,
@@ -150,10 +164,16 @@ const searchBsk = (t: number, w: number) => {
 		[
 			renderSearchCall({ query: "rust web framework", engine: "google" } as never, theme, ctx(false).context),
 			renderSearchResult(
-				ctx(false, false, { channel: "bsk", engine: "google", count: 10, _body: searchBody }).result,
+				ctx(
+					false,
+					false,
+					{ channel: "bsk", engine: "google", count: 10, _body: searchBody },
+					{},
+					{ query: "rust web framework", engine: "google" },
+				).result,
 				{ expanded: true, isPartial: false },
 				theme,
-				ctx(false).context,
+				ctx(false, false, {}, {}, { query: "rust web framework", engine: "google" }).context,
 			),
 		],
 		w,
@@ -167,10 +187,11 @@ const searchEmpty = (t: number, w: number) => {
 		[
 			renderSearchCall({ query: "nonexistent query" }, theme, ctx(false).context),
 			renderSearchResult(
-				ctx(false, false, { channel: "exa", count: 0, _body: "No results." }).result,
+				ctx(false, false, { channel: "exa", count: 0, _body: "No results." }, {}, { query: "nonexistent query" })
+					.result,
 				{ expanded: true, isPartial: false },
 				theme,
-				ctx(false).context,
+				ctx(false, false, {}, {}, { query: "nonexistent query" }).context,
 			),
 		],
 		w,
@@ -184,15 +205,21 @@ const searchError = (t: number, w: number) => {
 		[
 			renderSearchCall({ query: "rust", engine: "yandex" } as never, theme, ctx(false, true).context),
 			renderSearchResult(
-				ctx(false, true, {
-					channel: "bsk",
-					engine: "yandex",
-					error: "real-browser channel: yandex blocked with a captcha challenge",
-					_body: "real-browser channel: yandex blocked with a captcha challenge",
-				}).result,
+				ctx(
+					false,
+					true,
+					{
+						channel: "bsk",
+						engine: "yandex",
+						error: "real-browser channel: yandex blocked with a captcha challenge",
+						_body: "real-browser channel: yandex blocked with a captcha challenge",
+					},
+					{},
+					{ query: "rust", engine: "yandex" },
+				).result,
 				{ expanded: true, isPartial: false },
 				theme,
-				ctx(false, true).context,
+				ctx(false, true, {}, {}, { query: "rust", engine: "yandex" }).context,
 			),
 		],
 		w,
@@ -203,7 +230,13 @@ const runningFetch = (t: number, w: number) => {
 	void t;
 	return toolShell(
 		"toolPendingBg",
-		[renderFetchCall({ url: "https://rocket.rs/" }, theme, ctx(true, false, {}, liveState).context)],
+		[
+			renderFetchCall(
+				{ url: "https://rocket.rs/" },
+				theme,
+				ctx(true, false, {}, liveState, { query: "rust web framework" }).context,
+			),
+		],
 		w,
 	);
 };
@@ -215,15 +248,21 @@ const fetchSuccess = (t: number, w: number) => {
 		[
 			renderFetchCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
 			renderFetchResult(
-				ctx(false, false, {
-					url: "https://rocket.rs/",
-					title: "Rocket - Simple, Fast, Type-Safe",
-					markdownLength: 523,
-					_body: fetchMarkdown,
-				}).result,
+				ctx(
+					false,
+					false,
+					{
+						url: "https://rocket.rs/",
+						title: "Rocket - Simple, Fast, Type-Safe",
+						markdownLength: 523,
+						_body: fetchMarkdown,
+					},
+					{},
+					{ url: "https://rocket.rs/" },
+				).result,
 				{ expanded: true, isPartial: false },
 				theme,
-				ctx(false).context,
+				ctx(false, false, {}, {}, { url: "https://rocket.rs/" }).context,
 			),
 		],
 		w,
@@ -237,14 +276,20 @@ const fetchError = (t: number, w: number) => {
 		[
 			renderFetchCall({ url: "https://example.com/definitely-not-here" }, theme, ctx(false, true).context),
 			renderFetchResult(
-				ctx(false, true, {
-					url: "https://example.com/definitely-not-here",
-					error: "HTTP 404: Not Found",
-					_body: "HTTP 404: Not Found",
-				}).result,
+				ctx(
+					false,
+					true,
+					{
+						url: "https://example.com/definitely-not-here",
+						error: "HTTP 404: Not Found",
+						_body: "HTTP 404: Not Found",
+					},
+					{},
+					{ url: "https://example.com/definitely-not-here" },
+				).result,
 				{ expanded: true, isPartial: false },
 				theme,
-				ctx(false, true).context,
+				ctx(false, true, {}, {}, { url: "https://example.com/definitely-not-here" }).context,
 			),
 		],
 		w,
