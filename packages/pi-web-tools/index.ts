@@ -76,9 +76,11 @@ async function detectAvailableChannels(
 
 function formatResults(result: ChannelSearchResult): string {
 	if (result.results.length === 0) return "No results.";
-	const lines = result.results.map(
-		(r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`,
-	);
+	const lines = result.results.map((r, i) => {
+		const meta = [r.publishedDate, r.author].filter(Boolean).join(" · ");
+		const head = meta ? `${i + 1}. ${r.title} (${meta})` : `${i + 1}. ${r.title}`;
+		return `${head}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`;
+	});
 	const truncated =
 		result.total > result.results.length ? `\n(${result.total} results total; showing ${result.results.length})` : "";
 	return lines.join("\n") + truncated;

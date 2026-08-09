@@ -159,7 +159,7 @@ async function searchAnthropicStyle(
 		);
 	const results: SearchResultItem[] = citations
 		.filter((c) => c.url)
-		.map((c) => ({ title: c.title ?? "", url: c.url, snippet: c.cited_text.slice(0, 300) }));
+		.map((c) => ({ title: c.title ?? "", url: c.url, snippet: c.cited_text }));
 	return { results, total: results.length };
 }
 

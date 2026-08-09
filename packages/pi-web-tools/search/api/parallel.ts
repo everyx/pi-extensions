@@ -59,7 +59,8 @@ export async function searchWithParallel(
 		.map((r) => ({
 			title: r.title || "",
 			url: r.url,
-			snippet: (r.excerpts?.[0] ?? "").slice(0, 300),
+			snippet: (r.excerpts ?? []).join("\n"),
+			...(r.publish_date ? { publishedDate: r.publish_date } : {}),
 		}));
 	return { results, total: results.length };
 }

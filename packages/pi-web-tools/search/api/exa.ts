@@ -60,7 +60,9 @@ async function searchExaSdk(params: WebSearchParams, apiKey: string): Promise<Ch
 		.map((r) => ({
 			title: r.title || "",
 			url: r.url,
-			snippet: (r.highlights?.[0] ?? "").slice(0, 300),
+			snippet: (r.highlights ?? []).join("\n"),
+			...(r.publishedDate ? { publishedDate: r.publishedDate } : {}),
+			...(r.author ? { author: r.author } : {}),
 		}));
 	return { results, total: results.length };
 }
@@ -171,12 +173,20 @@ function parseMcpResults(text: string): SearchResultItem[] {
 		const trimmed = line.trim();
 		if (!trimmed.startsWith("{")) continue;
 		try {
-			const obj = JSON.parse(trimmed) as { title?: string; url?: string; text?: string };
+			const obj = JSON.parse(trimmed) as {
+				title?: string;
+				url?: string;
+				text?: string;
+				publishedDate?: string;
+				author?: string;
+			};
 			if (obj.url) {
 				items.push({
 					title: obj.title || "",
 					url: obj.url,
-					snippet: (obj.text || "").slice(0, 300),
+					snippet: obj.text || "",
+					...(obj.publishedDate ? { publishedDate: obj.publishedDate } : {}),
+					...(obj.author ? { author: obj.author } : {}),
 				});
 			}
 		} catch {
@@ -192,10 +202,14 @@ function parseMcpResults(text: string): SearchResultItem[] {
 		const url = block.match(/URL:\s*(\S+)/)?.[1]?.trim();
 		if (!url || !title) continue;
 		const highlight = block.match(/Highlights:\s*\n([\s\S]*)/)?.[1]?.trim();
+		const published = block.match(/Published:\s*(\S+)/)?.[1]?.trim();
+		const author = block.match(/Author:\s*(.+)/)?.[1]?.trim();
 		items.push({
 			title,
 			url,
-			snippet: (highlight ?? "").slice(0, 300),
+			snippet: highlight ?? "",
+			...(published && published !== "N/A" ? { publishedDate: published } : {}),
+			...(author && author !== "N/A" ? { author } : {}),
 		});
 	}
 	return items;

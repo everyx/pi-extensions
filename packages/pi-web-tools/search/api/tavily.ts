@@ -50,7 +50,8 @@ export async function searchWithTavily(
 		.map((r) => ({
 			title: r.title || "",
 			url: r.url,
-			snippet: (r.content || "").replace(/\s+/g, " ").trim().slice(0, 300),
+			snippet: (r.content || "").replace(/\s+/g, " ").trim(),
+			...(r.publishedDate ? { publishedDate: r.publishedDate } : {}),
 		}));
 	return { results, total: results.length, answer: response.answer };
 }

@@ -9,6 +9,10 @@ export interface SearchResultItem {
 	title: string;
 	url: string;
 	snippet: string;
+	/** Publication date when the channel reports one (YYYY-MM-DD). */
+	publishedDate?: string;
+	/** Author when the channel reports one. */
+	author?: string;
 }
 
 /** Result of web_search: a flat list + honest total (may exceed returned count). */
