@@ -94,7 +94,12 @@ export function contentRow(styled: string, x = 0): Component {
  * loses content, it only caps how much fills the screen). Shared by every
  * card body so the fold behavior is identical across surfaces.
  */
-export function foldedBlock(styledRows: string[], theme: Theme): BodyComponent {
+export function foldedBlock(styledRows: string[], theme: Theme, expanded = false): BodyComponent {
+	if (expanded) {
+		// Full render — every row, no fold. Content is never dropped in either
+		// mode; expanded just stops capping what fills the screen.
+		return { invalidate: () => {}, render: () => ["", ...styledRows] };
+	}
 	const body = styledRows.join("\n");
 	return {
 		invalidate: () => {},
@@ -289,6 +294,7 @@ export function dataCard(config: DataCardConfig, theme: Theme, spinner?: Spinner
 											foldedBlock(
 												(config.body as StyledRow[]).map((r) => styleRow(r, theme)),
 												theme,
+												config.expanded,
 											),
 										]
 									: undefined,

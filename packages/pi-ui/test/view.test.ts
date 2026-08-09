@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
+import { dataCard } from "../card.js";
 import { createToolView } from "../view.js";
 
 initTheme("light");
@@ -94,6 +95,25 @@ describe("createToolView — header ownership while running", () => {
 		assert.ok(
 			out.some((l) => l.includes("one")),
 			"body row in final card",
+		);
+	});
+
+	it("dataCard expanded renders every row (fold lifted)", () => {
+		const body = Array.from({ length: 16 }, (_, i) => ({ style: "text" as const, content: `line ${i + 1}` }));
+		const collapsed = lines(dataCard({ status: "success", name: "probe", body, expanded: false }, theme));
+		const expanded = lines(dataCard({ status: "success", name: "probe", body, expanded: true }, theme));
+		assert.ok(
+			collapsed.some((l) => l.includes("earlier lines")),
+			"collapsed shows the fold hint",
+		);
+		assert.ok(!expanded.some((l) => l.includes("earlier lines")), "expanded drops the fold hint");
+		assert.ok(
+			expanded.some((l) => l.includes("line 1")),
+			"expanded shows the first row",
+		);
+		assert.ok(
+			expanded.some((l) => l.includes("line 16")),
+			"expanded shows the last row",
 		);
 	});
 });
