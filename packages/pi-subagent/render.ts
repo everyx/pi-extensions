@@ -16,7 +16,16 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { type CardIcon, type Component, renderHeader, textLine } from "@everyx/pi-ui/card.js";
+import {
+	type CardIcon,
+	type Component,
+	errorIcon,
+	renderHeader,
+	spinnerIcon,
+	stoppedIcon,
+	successIcon,
+	textLine,
+} from "@everyx/pi-ui/card.js";
 import type { CardBody, CardConfig } from "./card.js";
 import { renderCard, renderNoDetailsCard, renderNotificationCard } from "./card.js";
 import { formatDuration, Spinner } from "./format.js";
@@ -92,11 +101,11 @@ export function renderAgentCall(args: AgentParams, theme: Theme, context: Render
 		? (() => {
 				const state = context.state as TimerState & { spinner?: Spinner };
 				state.spinner = state.spinner ?? new Spinner();
-				return { type: "spinner", spinner: state.spinner };
+				return spinnerIcon(state.spinner);
 			})()
 		: context.isError
-			? { type: "error" }
-			: { type: "success" };
+			? errorIcon
+			: successIcon;
 
 	// Elapsed/Took rides the header meta (shared state carries the timestamps;
 	// the endedAt fallback keeps the first final frame correct even though the
@@ -150,7 +159,7 @@ function errorCard(
 	expanded: boolean,
 ): CardConfig {
 	return {
-		header: { icon: { type: "error" }, name: "Agent", title, state: { verb, phase: "failed" } },
+		header: { icon: errorIcon, name: "Agent", title, tail: { text: stateWord(verb, "failed"), color: "error" } },
 		body: { error },
 		expanded,
 	};
@@ -167,7 +176,7 @@ function doneCard(
 	body?: CardBody,
 ): CardConfig {
 	const config: CardConfig = {
-		header: { icon: { type: "success" }, name: "Agent", title, state: { verb, phase: "done" } },
+		header: { icon: successIcon, name: "Agent", title, tail: { text: stateWord(verb, "done"), color: "muted" } },
 		expanded,
 	};
 	if (body) config.body = body;
@@ -217,9 +226,10 @@ export function renderAgentResult(
 			return renderCard(
 				{
 					header: {
-						icon: { type: "spinner", spinner: startSpinner(state, () => context.invalidate()) },
+						icon: spinnerIcon(startSpinner(state, () => context.invalidate())),
+						name: "Agent",
 						title: details.title,
-						state: { verb: "start", phase: "running" },
+						tail: { text: stateWord("start", "running"), color: "muted" },
 					},
 					expanded,
 				},
@@ -344,10 +354,10 @@ export function renderAgentControlResult(
 			return renderCard(
 				{
 					header: {
-						icon: { type: "spinner", spinner: startSpinner(state, () => context.invalidate()) },
+						icon: spinnerIcon(startSpinner(state, () => context.invalidate())),
 						name: "Agent",
 						title: d.title,
-						state: { verb: "stop", phase: "running" },
+						tail: { text: stateWord("stop", "running"), color: "muted" },
 					},
 					expanded,
 				},
@@ -360,6 +370,24 @@ export function renderAgentControlResult(
 
 	// Bare fallback (no details) — dim one-liner.
 	return dimOneLiner(text, theme);
+}
+
+/** Verb-state word for the card header tail (subagent semantics). */
+function stateWord(verb: "start" | "steer" | "stop" | "control", phase: "running" | "done" | "failed"): string {
+	if (phase === "running") {
+		return verb === "start" ? "starting\u2026" : "stopping\u2026";
+	}
+	if (phase === "failed") return `${verb} failed`;
+	switch (verb) {
+		case "start":
+			return "started";
+		case "stop":
+			return "stopped";
+		case "steer":
+			return "steered";
+		default:
+			return "finished";
+	}
 }
 
 // ── Notification card (registerMessageRenderer) ────────────────
@@ -394,14 +422,13 @@ export function renderNotification(
 	// like bash's `(exit N)` / `(cancelled)`.
 	const isError = d.status !== "completed";
 
-	const icon: CardIcon =
-		d.status === "completed" ? { type: "success" } : d.status === "failed" ? { type: "error" } : { type: "stopped" };
+	const icon: CardIcon = d.status === "completed" ? successIcon : d.status === "failed" ? errorIcon : stoppedIcon;
 
 	const status =
 		d.status === "failed"
-			? { word: d.status, color: "error" as const }
+			? { text: d.status, color: "error" as const }
 			: d.status === "stopped"
-				? { word: d.status, color: "warning" as const }
+				? { text: d.status, color: "warning" as const }
 				: undefined;
 
 	const metaParts: string[] = [];
@@ -425,7 +452,7 @@ export function renderNotification(
 	// header/body/footer layout shared with every tool card.
 	return renderNotificationCard(
 		{
-			header: { icon, name: "Agent", title: d.title, status, meta: metaParts },
+			header: { icon, name: "Agent", title: d.title, tail: status, meta: metaParts },
 			body,
 			footer: d.sessionPath,
 			expanded,

@@ -12,9 +12,10 @@
  */
 
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { WidgetRow } from "@everyx/pi-ui/widget.js";
 import { StatusWidget } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
-import { activityRow } from "./format.js";
+import type { AgentActivity } from "./event-interpret.js";
 
 export class AgentWidget {
 	private readonly widget: StatusWidget;
@@ -29,11 +30,8 @@ export class AgentWidget {
 			id: agent.agentId,
 			title: agent.title,
 			startedAt: agent.startedAt,
-			isActive: () => agent.status === "running",
-			excerpt: (theme) => {
-				const activity = agent.getLatestActivity();
-				return activity ? activityRow(activity, theme, 60) : null;
-			},
+			status: agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done",
+			rows: activityToRows(agent.getLatestActivity() ?? undefined),
 		});
 	}
 
@@ -46,4 +44,12 @@ export class AgentWidget {
 	dispose(): void {
 		this.widget.dispose();
 	}
+}
+
+/** Map the latest activity to structured widget rows (data, not formatted). */
+function activityToRows(activity: AgentActivity | undefined): WidgetRow[] {
+	if (!activity) return [];
+	if (activity.kind === "thinking") return [{ style: "thinking", content: "Thinking..." }];
+	if (activity.kind === "tool") return [{ style: "tool", content: `${activity.name}: ${activity.args}` }];
+	return [{ style: "text", content: activity.text }];
 }

@@ -65,7 +65,12 @@ describe("renderHeader", () => {
 
 	it("renders name + quoted title with a state word", () => {
 		const line = renderHeader(
-			{ icon: { type: "success" }, name: "Agent", title: "t", state: { verb: "stop", phase: "done" } },
+			{
+				icon: { glyph: "\u2713", color: "success" },
+				name: "Agent",
+				title: "t",
+				tail: { text: "stopped", color: "muted" },
+			},
 			theme,
 		);
 		assert.match(line, /Agent/);
@@ -75,10 +80,10 @@ describe("renderHeader", () => {
 	it("stop running phase uses the double-consonant form", () => {
 		const line = renderHeader(
 			{
-				icon: { type: "spinner", spinner: new Spinner() },
+				icon: { glyph: "\u280b", color: "accent" },
 				name: "Agent",
 				title: "t",
-				state: { verb: "stop", phase: "running" },
+				tail: { text: "stopping\u2026", color: "muted" },
 			},
 			theme,
 		);
@@ -87,7 +92,12 @@ describe("renderHeader", () => {
 	});
 	it("start done phase", () => {
 		const line = renderHeader(
-			{ icon: { type: "success" }, name: "Agent", title: "t", state: { verb: "start", phase: "done" } },
+			{
+				icon: { glyph: "\u2713", color: "success" },
+				name: "Agent",
+				title: "t",
+				tail: { text: "started", color: "muted" },
+			},
 			theme,
 		);
 		assert.match(line, /started/);
@@ -95,9 +105,9 @@ describe("renderHeader", () => {
 	it("status word and meta", () => {
 		const line = renderHeader(
 			{
-				icon: { type: "error" },
+				icon: { glyph: "\u2717", color: "error" },
 				title: "web_search",
-				status: { word: "failed", color: "error" },
+				tail: { text: "failed", color: "error" },
 				meta: ["via exa", "5 results"],
 			},
 			theme,
@@ -106,7 +116,7 @@ describe("renderHeader", () => {
 		assert.match(line, /via exa/);
 	});
 	it("plain title without a name", () => {
-		const line = renderHeader({ icon: { type: "success" }, title: "web_search (via exa)" }, theme);
+		const line = renderHeader({ icon: { glyph: "\u2713", color: "success" }, title: "web_search (via exa)" }, theme);
 		assert.match(line, /web_search/);
 	});
 });

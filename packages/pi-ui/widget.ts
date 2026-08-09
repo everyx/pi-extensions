@@ -1,11 +1,13 @@
 /**
  * pi-ui — StatusWidget: a foreground indicator for background work.
  *
- * Generic "running tasks" widget (subagent's Agents widget generalized):
- * tracks a set of items, renders one line each (`⠋ "title" (12.3s)` plus an
- * optional activity excerpt), ticks a wall-clock spinner, and drops items
- * once they report inactive. Any extension with background work that needs
- * a foreground indicator can use it.
+ * Data-driven: consumers add pure-data items (id/title/status/rows); the
+ * widget renders everything (spinner, elapsed, row styling). No render
+ * functions cross the API — like the card view layer, status drives the
+ * icon and colors.
+ *
+ * Rows use the same "activity line" style vocabulary as the card body
+ * (thinking/tool/text) so one model renders on both surfaces.
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
@@ -15,15 +17,22 @@ const WIDGET_KEY = "pi-ui-status";
 const TICK_MS = 500;
 const EXCERPT_INDENT = "    ";
 
-/** One row in the widget: identity + how to render its line. */
+export type WidgetStatus = "running" | "stopped" | "done" | "failed";
+
+/** One activity line in the widget (same style vocabulary as card rows). */
+export interface WidgetRow {
+	style: "thinking" | "tool" | "text";
+	content: string;
+}
+
+/** Pure data for one widget row — consumers never touch theme/colors. */
 export interface WidgetItem {
 	id: string;
 	title: string;
 	startedAt: number;
-	/** True while the work is still running; inactive rows are dropped. */
-	isActive(): boolean;
-	/** Latest-activity excerpt line, or null. Rendered below the status line. */
-	excerpt?(theme: Theme): string | null;
+	status: WidgetStatus;
+	/** Latest activity rows (structured, not pre-formatted). */
+	rows?: WidgetRow[];
 }
 
 interface WidgetRender {
@@ -31,13 +40,36 @@ interface WidgetRender {
 	invalidate(): void;
 }
 
-/** Renders one item's status line + excerpt (shared with card activity rows). */
+/** Render one item's status line + activity rows (colors live here). */
 export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Spinner): string[] {
 	const elapsed = formatDuration(Date.now() - item.startedAt);
 	const label = safeTitle(item.title, 40);
-	const status = ` ${theme.fg("accent", spinner.current())} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`;
-	const excerpt = item.excerpt?.(theme);
-	return excerpt ? [status, `${EXCERPT_INDENT}${excerpt}`] : [status];
+
+	let status: string;
+	if (item.status === "running") {
+		status = theme.fg("accent", spinner.current());
+	} else if (item.status === "failed") {
+		status = theme.fg("error", "\u2717");
+	} else if (item.status === "stopped") {
+		status = theme.fg("warning", "\u25a0");
+	} else {
+		status = theme.fg("success", "\u2713");
+	}
+
+	const line = ` ${status} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`;
+	const rows = (item.rows ?? []).map((r) => `${EXCERPT_INDENT}${styleRow(r, theme)}`);
+	return [line, ...rows];
+}
+
+function styleRow(row: WidgetRow, theme: Theme): string {
+	switch (row.style) {
+		case "thinking":
+			return theme.italic(theme.fg("thinkingText", row.content));
+		case "tool":
+			return theme.fg("toolTitle", row.content);
+		default:
+			return theme.fg("muted", row.content);
+	}
 }
 
 /**
@@ -94,7 +126,7 @@ export class StatusWidget {
 
 	private tick(): void {
 		for (const [id, row] of this.rows) {
-			if (!row.item.isActive()) this.rows.delete(id);
+			if (row.item.status !== "running") this.rows.delete(id);
 		}
 		if (this.rows.size === 0) {
 			this.dispose();
@@ -112,7 +144,6 @@ export class StatusWidget {
 				return {
 					render: () => this.render(theme),
 					invalidate: () => {
-						// Theme changed — force re-registration to capture the fresh theme.
 						this.registered = false;
 						this.tui = undefined;
 					},

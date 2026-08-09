@@ -13,13 +13,21 @@ import { Box, type Component, Container, Text, truncateToWidth } from "@earendil
 
 export type { Component } from "@earendil-works/pi-tui";
 
-import { type Spinner, safeTitle } from "./spinner.js";
+import { Spinner, safeTitle } from "./spinner.js";
 
-export type CardIcon =
-	| { type: "spinner"; spinner: Spinner }
-	| { type: "success" }
-	| { type: "error" }
-	| { type: "stopped" };
+/** Icon slot: any glyph + any color (color is data; preset constants below). */
+export interface CardIcon {
+	glyph: string;
+	color: "accent" | "success" | "error" | "warning" | "muted";
+}
+
+/** Preset icons for the common states. */
+export const successIcon: CardIcon = { glyph: "\u2713", color: "success" };
+export const errorIcon: CardIcon = { glyph: "\u2717", color: "error" };
+export const stoppedIcon: CardIcon = { glyph: "\u25a0", color: "warning" };
+export function spinnerIcon(spinner: Spinner): CardIcon {
+	return { glyph: spinner.current(), color: "accent" };
+}
 
 export interface CardHeader {
 	icon: CardIcon;
@@ -27,26 +35,15 @@ export interface CardHeader {
 	title?: string;
 	/** Optional bold name prefix: `Agent "task"` — use when title is a raw label. */
 	name?: string;
-	/** Verb-state line: "<verb> <phase>" — "starting…" / "started" / "start failed". */
-	state?: { verb: string; phase: "running" | "done" | "failed" };
-	/** Plain colored status word: "failed" (error) / "stopped" (warning). */
-	status?: { word: string; color: "error" | "warning" };
+	/** Status slot — free text (starting…, start failed…); color is data. */
+	tail?: { text: string; color: "error" | "muted" | "warning" };
 	/** Muted parenthesized meta segments, joined with `·`. */
 	meta?: string[];
 }
 
 /** Render the status icon for a card. */
 export function renderIcon(icon: CardIcon, theme: Theme): string {
-	switch (icon.type) {
-		case "spinner":
-			return theme.fg("accent", icon.spinner.current());
-		case "success":
-			return theme.fg("success", "\u2713");
-		case "error":
-			return theme.fg("error", "\u2717");
-		case "stopped":
-			return theme.fg("warning", "\u25a0");
-	}
+	return theme.fg(icon.color, icon.glyph);
 }
 
 /** Bold name + quoted sanitized title (`Agent "task"`, `web_search "q"`). */
@@ -55,42 +52,12 @@ export function renderNameTitle(name: string, title: string | undefined, theme: 
 	return title ? `${bold} ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : bold;
 }
 
-/** Double-consonant verb forms for the running phase (stop → stopping…). */
-const RUNNING_WORDS: Record<string, string> = {
-	start: "starting\u2026",
-	stop: "stopping\u2026",
-	steer: "steering\u2026",
-	control: "controlling\u2026",
-};
-
-/** Past-tense forms with double consonants (stop → stopped). */
-const DONE_WORDS: Record<string, string> = {
-	start: "started",
-	stop: "stopped",
-	steer: "steered",
-	control: "controlled",
-};
-
-function stateWord(verb: string, phase: "running" | "done" | "failed"): string {
-	switch (phase) {
-		case "running":
-			return RUNNING_WORDS[verb] ?? `${verb}ing\u2026`;
-		case "failed":
-			return `${verb} failed`;
-		default:
-			return DONE_WORDS[verb] ?? `${verb}ed`;
-	}
-}
-
 /** One header row for a tool card / notification / status line. */
 export function renderHeader(header: CardHeader, theme: Theme): string {
 	const marker = renderIcon(header.icon, theme);
 	let tail = "";
-	if (header.state) {
-		const { verb, phase } = header.state;
-		tail = ` ${theme.fg(phase === "failed" ? "error" : "muted", stateWord(verb, phase))}`;
-	} else if (header.status) {
-		tail = ` ${theme.fg(header.status.color, header.status.word)}`;
+	if (header.tail) {
+		tail = ` ${theme.fg(header.tail.color, header.tail.text)}`;
 	}
 	const meta = header.meta?.length ? theme.fg("muted", ` (${header.meta.join(" \u00b7 ")})`) : "";
 	const titlePart = header.name ? renderNameTitle(header.name, header.title, theme) : (header.title ?? "");
@@ -233,31 +200,55 @@ export function cardShell(
 // ── Data-driven card (consumers pass data, component handles everything) ─
 
 /** Data-only card config: pass text, the card assembles header + folded body. */
+export type CardStatus = "processing" | "success" | "error" | "stop";
+
 export interface DataCardConfig {
-	icon: CardIcon;
+	/** Semantic state — drives the icon (spinner/✓/✗/■) and tail color. */
+	status: CardStatus;
 	/** Bold tool/task name (`web_search`, `Agent`). */
 	name: string;
 	/** Quoted title (query, url, task) — always visible. */
 	title?: string;
+	/** Status slot — free text (starting…, start failed…); color follows status. */
+	tail?: string;
 	/** Muted parenthesized meta (channel echo, counts). */
 	meta?: string[];
 	/** Body text — folded automatically (tail preview + expand hint). */
 	body?: string;
-	/** Error text — dim folded block below the body. */
+	/** Error block below the body — dim folded. */
 	error?: string;
 	expanded: boolean;
 }
 
+/** Map status → card icon (library decision; consumers pass status only). */
+function iconForStatus(status: CardStatus, spinner?: Spinner): CardIcon {
+	switch (status) {
+		case "processing":
+			return { glyph: (spinner ?? new Spinner()).current(), color: "accent" };
+		case "error":
+			return { glyph: "\u2717", color: "error" };
+		case "stop":
+			return { glyph: "\u25a0", color: "warning" };
+		default:
+			return { glyph: "\u2713", color: "success" };
+	}
+}
+
 /**
- * One data-driven card: consumers pass text fields; the component assembles
- * the header (icon + name + quoted title + meta) and folds the body (long
- * content gets a tail preview + expand hint, full when expanded). No manual
- * CardConfig assembly needed.
+ * One data-driven card: consumers pass text fields + a status; the component
+ * derives the icon and tail color from status and folds the body (long
+ * content gets a tail preview + expand hint, full when expanded).
  */
-export function dataCard(config: DataCardConfig, theme: Theme): Component {
+export function dataCard(config: DataCardConfig, theme: Theme, spinner?: Spinner): Component {
 	return renderCard(
 		{
-			header: { icon: config.icon, name: config.name, title: config.title, meta: config.meta },
+			header: {
+				icon: iconForStatus(config.status, spinner),
+				name: config.name,
+				title: config.title,
+				tail: config.tail ? { text: config.tail, color: config.status === "error" ? "error" : "muted" } : undefined,
+				meta: config.meta,
+			},
 			body: config.body || config.error ? { message: config.body, error: config.error } : undefined,
 			expanded: config.expanded,
 		},

@@ -8,7 +8,17 @@
  */
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { type CardIcon, type Component, dataCard, renderIcon, renderNameTitle, textLine } from "@everyx/pi-ui/card.js";
+import {
+	type CardIcon,
+	type Component,
+	dataCard,
+	errorIcon,
+	renderIcon,
+	renderNameTitle,
+	spinnerIcon,
+	successIcon,
+	textLine,
+} from "@everyx/pi-ui/card.js";
 import { Spinner } from "@everyx/pi-ui/spinner.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
@@ -23,9 +33,9 @@ interface RenderContext {
 function icon(context: RenderContext): CardIcon {
 	if (context.isPartial) {
 		context.state.spinner = context.state.spinner ?? new Spinner();
-		return { type: "spinner", spinner: context.state.spinner };
+		return spinnerIcon(context.state.spinner);
 	}
-	return context.isError ? { type: "error" } : { type: "success" };
+	return context.isError ? errorIcon : successIcon;
 }
 
 /** "via <channel>" / "via <engine> (engine)" echo — UI-only. */
@@ -70,7 +80,7 @@ export function renderSearchResult(
 	// Pass data only — dataCard assembles the header and folds the body.
 	return dataCard(
 		{
-			icon: icon(context),
+			status: context.isError ? "error" : "success",
 			name: "web_search",
 			title: query,
 			meta,
@@ -104,7 +114,7 @@ export function renderFetchResult(
 	const body = contentText(result);
 	return dataCard(
 		{
-			icon: icon(context),
+			status: context.isError ? "error" : "success",
 			name: "web_fetch",
 			title: url,
 			meta: pageTitle ? [pageTitle] : undefined,
