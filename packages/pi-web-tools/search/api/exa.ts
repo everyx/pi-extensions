@@ -9,9 +9,10 @@
  */
 
 import Exa from "exa-js";
+import { isoToRelativeAge } from "../../date.ts";
 import { fetchWithTimeout } from "../../http.ts";
 import { createRateLimiter } from "../../rate-limit.ts";
-import type { ChannelSearchContext, ChannelSearchResult, SearchResultItem, WebSearchParams } from "../../types.ts";
+import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../../types.ts";
 import { recencyToExa } from "../recency.ts";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
@@ -37,14 +38,14 @@ interface ExaMcpRpcResponse {
 	error?: { code?: number; message?: string };
 }
 
-export async function searchWithExa(params: WebSearchParams, ctx: ChannelSearchContext): Promise<ChannelSearchResult> {
+export async function searchWithExa(params: WebSearchParams, ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
 	const key = exaApiKey();
 	return key ? searchExaSdk(params, key) : searchExaMcp(params, ctx);
 }
 
 // ── key mode: official SDK (exa-js) ─────────────────────────────
 
-async function searchExaSdk(params: WebSearchParams, apiKey: string): Promise<ChannelSearchResult> {
+async function searchExaSdk(params: WebSearchParams, apiKey: string): Promise<SearchResultItem[]> {
 	const exa = new Exa(apiKey);
 	const response = await exa.search(params.query, {
 		type: "auto",
@@ -61,19 +62,19 @@ async function searchExaSdk(params: WebSearchParams, apiKey: string): Promise<Ch
 			title: r.title || "",
 			url: r.url,
 			snippet: (r.highlights ?? []).join("\n"),
-			...(r.publishedDate ? { publishedDate: r.publishedDate } : {}),
+			...(r.publishedDate ? { pageAge: isoToRelativeAge(r.publishedDate) } : {}),
 			...(r.author ? { author: r.author } : {}),
 		}));
-	return { results, total: results.length };
+	return results;
 }
 
 // ── keyless mode: MCP (SSE) — no official SDK for this path ─────
 
-async function searchExaMcp(params: WebSearchParams, ctx: ChannelSearchContext): Promise<ChannelSearchResult> {
+async function searchExaMcp(params: WebSearchParams, ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
 	return mcpLimiter.run(() => searchExaMcpInner(params, ctx));
 }
 
-async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchContext): Promise<ChannelSearchResult> {
+async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
 	const response = await fetchWithTimeout(
 		EXA_MCP_URL,
 		{
@@ -126,7 +127,7 @@ async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchCont
 		.map((c) => c.text)
 		.join("\n\n");
 	const results = parseMcpResults(text);
-	return { results, total: results.length };
+	return results;
 }
 
 /** Parse the MCP SSE body (data: lines) into a JSON-RPC response. */
@@ -185,7 +186,7 @@ function parseMcpResults(text: string): SearchResultItem[] {
 					title: obj.title || "",
 					url: obj.url,
 					snippet: obj.text || "",
-					...(obj.publishedDate ? { publishedDate: obj.publishedDate } : {}),
+					...(obj.publishedDate ? { pageAge: isoToRelativeAge(obj.publishedDate) } : {}),
 					...(obj.author ? { author: obj.author } : {}),
 				});
 			}
@@ -208,7 +209,7 @@ function parseMcpResults(text: string): SearchResultItem[] {
 			title,
 			url,
 			snippet: highlight ?? "",
-			...(published && published !== "N/A" ? { publishedDate: published } : {}),
+			...(published && published !== "N/A" ? { pageAge: isoToRelativeAge(published) } : {}),
 			...(author && author !== "N/A" ? { author } : {}),
 		});
 	}

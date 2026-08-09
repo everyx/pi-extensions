@@ -6,8 +6,9 @@
  */
 
 import { tavily } from "@tavily/core";
+import { isoToRelativeAge } from "../../date.ts";
 import { createRateLimiter } from "../../rate-limit.ts";
-import type { ChannelSearchContext, ChannelSearchResult, SearchResultItem, WebSearchParams } from "../../types.ts";
+import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../../types.ts";
 import { countryFromLocale } from "../locale.ts";
 
 const DEFAULT_RESULTS = 5;
@@ -29,7 +30,7 @@ function requireKey(): string {
 export async function searchWithTavily(
 	params: WebSearchParams,
 	ctx: ChannelSearchContext,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	const client = tavily({ apiKey: requireKey() });
 	const response = await limiter.run(() =>
 		client.search(params.query, {
@@ -51,7 +52,7 @@ export async function searchWithTavily(
 			title: r.title || "",
 			url: r.url,
 			snippet: (r.content || "").replace(/\s+/g, " ").trim(),
-			...(r.publishedDate ? { publishedDate: r.publishedDate } : {}),
+			...(r.publishedDate ? { pageAge: isoToRelativeAge(r.publishedDate) } : {}),
 		}));
-	return { results, total: results.length, answer: response.answer };
+	return results;
 }

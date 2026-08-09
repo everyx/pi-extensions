@@ -6,8 +6,9 @@
  */
 
 import Parallel from "parallel-web";
+import { isoToRelativeAge } from "../../date.ts";
 import { createRateLimiter } from "../../rate-limit.ts";
-import type { ChannelSearchContext, ChannelSearchResult, SearchResultItem, WebSearchParams } from "../../types.ts";
+import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../../types.ts";
 import { recencyToParallel } from "../recency.ts";
 
 const DEFAULT_RESULTS = 5;
@@ -29,7 +30,7 @@ function requireKey(): string {
 export async function searchWithParallel(
 	params: WebSearchParams,
 	ctx: ChannelSearchContext,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	const client = new Parallel({ apiKey: requireKey() });
 
 	const response = await limiter.run(() =>
@@ -60,7 +61,7 @@ export async function searchWithParallel(
 			title: r.title || "",
 			url: r.url,
 			snippet: (r.excerpts ?? []).join("\n"),
-			...(r.publish_date ? { publishedDate: r.publish_date } : {}),
+			...(r.publish_date ? { pageAge: isoToRelativeAge(r.publish_date) } : {}),
 		}));
-	return { results, total: results.length };
+	return results;
 }

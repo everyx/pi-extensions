@@ -9,16 +9,15 @@ export interface SearchResultItem {
 	title: string;
 	url: string;
 	snippet: string;
-	/** Publication date when the channel reports one (YYYY-MM-DD). */
-	publishedDate?: string;
+	/** Relative page age when the channel reports one ("about 3 hours ago"). */
+	pageAge?: string;
 	/** Author when the channel reports one. */
 	author?: string;
 }
 
-/** Result of web_search: a flat list + honest total (may exceed returned count). */
+/** Result of web_search: a flat list of source items. */
 export interface WebSearchResult {
 	results: SearchResultItem[];
-	total: number;
 }
 
 /** Channels. "bsk" is the real-browser channel (BrowserSkill CLI). */
@@ -55,15 +54,6 @@ export interface WebSearchParams {
 	blocked_domains?: string[];
 	locale?: string;
 	engine?: "auto" | EngineId;
-}
-
-/** Result of a single channel search (internal — normalized). */
-export interface ChannelSearchResult {
-	results: SearchResultItem[];
-	/** channel-reported total when available, else results.length */
-	total: number;
-	/** channel-reported description when available (used as fallback snippet) */
-	answer?: string;
 }
 
 export interface ChannelSearchContext {

@@ -18,13 +18,7 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
-import type {
-	ChannelSearchContext,
-	ChannelSearchResult,
-	EngineId,
-	SearchResultItem,
-	WebSearchParams,
-} from "../types.js";
+import type { ChannelSearchContext, EngineId, SearchResultItem, WebSearchParams } from "../types.js";
 import { engineSearchUrl } from "./locale.js";
 
 const execFileAsync = promisify(execFile);
@@ -318,7 +312,7 @@ export async function searchWithBsk(
 	params: WebSearchParams,
 	engine: EngineId,
 	ctx: ChannelSearchContext,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	const timeoutMs = ctx.timeoutMs ?? 30_000;
 	// Direct navigation to the engine search URL: query + locale + recency
 	// as URL params (precise, no DOM dependence).
@@ -359,5 +353,5 @@ export async function searchWithBsk(
 		return results;
 	});
 
-	return { results, total: results.length };
+	return results;
 }

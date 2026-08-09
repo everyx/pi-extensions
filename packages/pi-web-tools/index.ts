@@ -24,7 +24,7 @@ import {
 	route,
 } from "./search/channels.js";
 import { type GroundingEndpoint, groundingEndpointFor, searchWithGrounding } from "./search/grounding.js";
-import type { ChannelCapabilities, ChannelId, ChannelSearchResult, WebSearchParams } from "./types.js";
+import type { ChannelCapabilities, ChannelId, EngineId, SearchResultItem, WebSearchParams } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -74,24 +74,30 @@ async function detectAvailableChannels(
 
 // ── Result formatting (LLM-facing, token friendly) ───────────────
 
-function formatResults(result: ChannelSearchResult): string {
-	const parts: string[] = [];
-	// Answer is a standalone summary field (channel-provided, e.g. Tavily's
-	// include_answer) — shown as its own paragraph, absent when not provided.
-	if (result.answer) parts.push(result.answer.trim());
-	if (result.results.length === 0) {
-		parts.push("No results.");
-		return parts.join("\n\n");
-	}
-	const lines = result.results.map((r, i) => {
-		const meta = [r.publishedDate, r.author].filter(Boolean).join(" · ");
-		const head = meta ? `${i + 1}. ${r.title} (${meta})` : `${i + 1}. ${r.title}`;
-		return `${head}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`;
-	});
-	const truncated =
-		result.total > result.results.length ? `\n(${result.total} results total; showing ${result.results.length})` : "";
-	parts.push(lines.join("\n") + truncated);
-	return parts.join("\n\n");
+function formatResults(result: SearchResultItem[]): string {
+	if (result.length === 0) return "No results.";
+	return result
+		.map((r, i) => {
+			const meta = [r.pageAge, r.author].filter(Boolean).join(" · ");
+			const head = meta ? `${i + 1}. ${r.title} (${meta})` : `${i + 1}. ${r.title}`;
+			return `${head}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`;
+		})
+		.join("\n");
+}
+/** build the final tool result. */
+function finalizeResult(
+	result: SearchResultItem[],
+	candidate: { channel: ChannelId; engine?: EngineId },
+): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: boolean } {
+	return {
+		content: [{ type: "text", text: formatResults(result) }],
+		details: {
+			channel: candidate.channel,
+			...(candidate.engine ? { engine: candidate.engine } : {}),
+			count: result.length,
+		},
+		isError: false,
+	};
 }
 
 // ── web_search ───────────────────────────────────────────────────
@@ -128,16 +134,7 @@ async function executeSearch(
 		}
 		try {
 			const result = await runChannel(routed.channel, params, routed.engine, ctx, signal);
-			return {
-				content: [{ type: "text", text: formatResults(result) }],
-				details: {
-					channel: routed.channel,
-					...(routed.engine ? { engine: routed.engine } : {}),
-					total: result.total,
-					count: result.results.length,
-				},
-				isError: false,
-			};
+			return finalizeResult(result, { channel: routed.channel, engine: routed.engine });
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return {
@@ -168,16 +165,7 @@ async function executeSearch(
 	for (const candidate of candidates) {
 		try {
 			const result = await runChannel(candidate.channel, params, candidate.engine, ctx, signal);
-			return {
-				content: [{ type: "text", text: formatResults(result) }],
-				details: {
-					channel: candidate.channel,
-					...(candidate.engine ? { engine: candidate.engine } : {}),
-					total: result.total,
-					count: result.results.length,
-				},
-				isError: false,
-			};
+			return finalizeResult(result, candidate);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			failures.push({ channel: candidate.channel, error: message });
@@ -201,7 +189,7 @@ async function runChannel(
 	engine: "google" | "bing" | "baidu" | "yandex" | undefined,
 	ctx: ExtensionContext,
 	signal: AbortSignal | undefined,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	switch (channel) {
 		case "exa":
 			return searchWithExa(params, { signal });
@@ -266,14 +254,14 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Search the web and return a list of results (title, url, snippet). " +
 			"Use for anything outside your local machine: current facts, docs, code, people, prices. " +
-			"Results may be truncated; the total is reported so you can re-query when you need more. " +
+			"Each result carries the source text; re-query with a different query when you need more or different results. " +
 			"Set engine to google/bing/baidu/yandex to search with that real browser engine and use " +
 			'its native operator syntax (site:, filetype:, intitle:, -exclude, "exact", OR). ' +
 			"allowed_domains/blocked_domains work on every channel.",
 		promptSnippet: "Search the web",
 		promptGuidelines: [
 			"Use web_search for anything that requires current or external information.",
-			"Re-query with a different query when results are insufficient — total reports truncation.",
+			"Re-query with a different query when results are insufficient or you need different coverage.",
 			"Use engine with operator syntax when you need site:, filetype:, intitle: filters; otherwise let auto pick the cheapest channel.",
 		],
 		parameters: WebSearchParamsSchema,

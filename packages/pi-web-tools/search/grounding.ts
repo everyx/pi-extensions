@@ -19,7 +19,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import { fetchWithTimeout } from "../http.ts";
-import type { ChannelSearchContext, ChannelSearchResult, SearchResultItem, WebSearchParams } from "../types.ts";
+import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../types.ts";
 
 /** Endpoints that host a grounding/search capability (SPEC research). */
 export type GroundingKind = "openai" | "anthropic" | "gemini" | "deepseek" | "openrouter";
@@ -96,7 +96,7 @@ export async function searchWithGrounding(
 	endpoint: GroundingEndpoint,
 	apiKey: string,
 	ctx: ChannelSearchContext,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	switch (endpoint.kind) {
 		case "openai":
 			return searchOpenAi(params, endpoint, apiKey);
@@ -121,7 +121,7 @@ async function searchOpenAi(
 	params: WebSearchParams,
 	endpoint: GroundingEndpoint,
 	apiKey: string,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	const client = new OpenAI({ apiKey, baseURL: endpoint.baseUrl });
 	const response = await client.responses.create({
 		model: endpoint.model,
@@ -154,7 +154,7 @@ async function searchOpenAi(
 			return true;
 		})
 		.map((i) => ({ title: i.title ?? "", url: i.url, snippet: "" }));
-	return { results, total: results.length };
+	return results;
 }
 
 // ── Anthropic / DeepSeek (official @anthropic-ai/sdk) ───────────
@@ -163,7 +163,7 @@ async function searchAnthropicStyle(
 	params: WebSearchParams,
 	endpoint: GroundingEndpoint,
 	apiKey: string,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	// DeepSeek serves grounding via its Anthropic-compatible endpoint.
 	const client = new Anthropic({
 		apiKey,
@@ -194,7 +194,7 @@ async function searchAnthropicStyle(
 	const results: SearchResultItem[] = citations
 		.filter((c) => c.url)
 		.map((c) => ({ title: c.title ?? "", url: c.url, snippet: c.cited_text }));
-	return { results, total: results.length };
+	return results;
 }
 
 // ── Gemini (official @google/genai SDK) ─────────────────────────
@@ -203,7 +203,7 @@ async function searchGemini(
 	params: WebSearchParams,
 	endpoint: GroundingEndpoint,
 	apiKey: string,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	const client = new GoogleGenAI({ apiKey });
 	const response = await client.models.generateContent({
 		model: endpoint.model,
@@ -215,7 +215,7 @@ async function searchGemini(
 	const results: SearchResultItem[] = chunks
 		.filter((c) => c.web?.uri)
 		.map((c) => ({ title: c.web?.title ?? "", url: c.web?.uri ?? "", snippet: "" }));
-	return { results, total: results.length };
+	return results;
 }
 
 // ── OpenRouter (no SDK adaptation for server-side web_search) ───
@@ -230,7 +230,7 @@ async function searchOpenRouter(
 	endpoint: GroundingEndpoint,
 	apiKey: string,
 	ctx: ChannelSearchContext,
-): Promise<ChannelSearchResult> {
+): Promise<SearchResultItem[]> {
 	const base = endpoint.baseUrl.replace(/\/$/, "");
 	const url = base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
 	const response = await fetchWithTimeout(
@@ -259,5 +259,5 @@ async function searchOpenRouter(
 	const results: SearchResultItem[] = sources
 		.filter((s) => s.url)
 		.map((s) => ({ title: s.title ?? "", url: s.url ?? "", snippet: "" }));
-	return { results, total: results.length };
+	return results;
 }
