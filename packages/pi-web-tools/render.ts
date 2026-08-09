@@ -47,6 +47,9 @@ function contentText(result: AgentToolResult<Record<string, unknown>>): string {
 // ── web_search ───────────────────────────────────────────────────
 
 export function renderSearchCall(args: { query?: string }, theme: Theme, context: RenderContext): Text {
+	// Running: spinner + query line. Completed: empty — the result header
+	// owns the completed surface (✓ web_search (via …)), same as pi-subagent.
+	if (!context.isPartial) return new Text("", 0, 0);
 	const query = (args.query ?? "").slice(0, 60);
 	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_search")} ${theme.fg("dim", `"${query}"`)}`;
 	return new Text(head, 0, 0);
@@ -58,6 +61,8 @@ export function renderSearchResult(
 	theme: Theme,
 	context: RenderContext,
 ): Text {
+	// Running state is owned by the call renderer (spinner + query line).
+	if (context.isPartial) return new Text("", 0, 0);
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const echo = viaEcho(details);
 	const meta = [echo, details.count != null ? `${details.count} results` : undefined].filter(Boolean).join(" \u00b7 ");
@@ -69,6 +74,8 @@ export function renderSearchResult(
 // ── web_fetch ────────────────────────────────────────────────────
 
 export function renderFetchCall(args: { url?: string }, theme: Theme, context: RenderContext): Text {
+	// Running only; completed surfaces come from the result renderer.
+	if (!context.isPartial) return new Text("", 0, 0);
 	const url = (args.url ?? "").slice(0, 80);
 	return new Text(
 		`${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")} ${theme.fg("dim", url)}`,
@@ -83,6 +90,8 @@ export function renderFetchResult(
 	theme: Theme,
 	context: RenderContext,
 ): Text {
+	// Running state is owned by the call renderer (spinner + url line).
+	if (context.isPartial) return new Text("", 0, 0);
 	const details = (result.details ?? {}) as Record<string, unknown>;
 	const title = typeof details.title === "string" ? details.title : "";
 	const head = `${renderIcon(icon(context), theme)} ${theme.fg("accent", "web_fetch")}${title ? theme.fg("muted", ` (${title.slice(0, 60)})`) : ""}`;
