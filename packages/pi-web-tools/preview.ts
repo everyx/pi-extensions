@@ -275,9 +275,17 @@ const pathA: LifecyclePath = {
 			name: "searching",
 			status: "searching",
 			ticks: 25,
-			// Synchronous tool: nothing streams while running — the card shows
-			// only the header until the result lands (via + count together).
-			stream: [{ kind: "search", args: { query: "rust web framework" }, details: {}, isPartial: true }],
+			// The routed channel streams up front (execute calls onUpdate once
+			// the channel is known) — via shows immediately; the result count
+			// lands on completion.
+			stream: [
+				{
+					kind: "search",
+					args: { query: "rust web framework" },
+					details: { query: "rust web framework", channel: "exa" },
+					isPartial: true,
+				},
+			],
 		},
 		{
 			name: "results",
@@ -320,7 +328,12 @@ const pathB: LifecyclePath = {
 			status: "searching",
 			ticks: 25,
 			stream: [
-				{ kind: "search", args: { query: "nonexistent query", engine: "yandex" }, details: {}, isPartial: true },
+				{
+					kind: "search",
+					args: { query: "nonexistent query", engine: "yandex" },
+					details: { query: "nonexistent query", channel: "browser", engine: "yandex" },
+					isPartial: true,
+				},
 			],
 		},
 		{

@@ -110,6 +110,9 @@ async function executeSearch(
 	params: WebSearchParams,
 	ctx: ExtensionContext,
 	signal: AbortSignal | undefined,
+	onUpdate:
+		| ((update: { content: { type: "text"; text: string }[]; details: Record<string, unknown> }) => void)
+		| undefined,
 ): Promise<{
 	content: { type: "text"; text: string }[];
 	details: Record<string, unknown>;
@@ -136,6 +139,12 @@ async function executeSearch(
 				isError: true,
 			};
 		}
+		// The channel is known once routed — surface it on the live card
+		// immediately (via …), even though the result count lands later.
+		onUpdate?.({
+			content: [{ type: "text", text: `Searching "${params.query}" via ${routed.channel}\u2026` }],
+			details: { query: params.query, channel: routed.channel, engine: routed.engine },
+		});
 		try {
 			const result = await runChannel(routed.channel, params, routed.engine, ctx, signal);
 			return finalizeResult(result, { channel: routed.channel, engine: routed.engine });
@@ -167,6 +176,12 @@ async function executeSearch(
 
 	const failures: { channel: string; error: string }[] = [];
 	for (const candidate of candidates) {
+		// Surface the channel being tried on the live card (updates if a
+		// failure falls through to the next candidate).
+		onUpdate?.({
+			content: [{ type: "text", text: `Searching "${params.query}" via ${candidate.channel}\u2026` }],
+			details: { query: params.query, channel: candidate.channel, engine: candidate.engine },
+		});
 		try {
 			const result = await runChannel(candidate.channel, params, candidate.engine, ctx, signal);
 			return finalizeResult(result, candidate);
@@ -287,8 +302,8 @@ export default function (pi: ExtensionAPI) {
 				},
 			},
 		}),
-		async execute(_toolCallId, raw, signal, _onUpdate, ctx) {
-			return executeSearch(raw as WebSearchParams, ctx, signal);
+		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
+			return executeSearch(raw as WebSearchParams, ctx, signal, onUpdate);
 		},
 	});
 
