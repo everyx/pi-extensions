@@ -173,6 +173,8 @@ UA 来源优先级：
   渲染不可用才回落占位——定位是 LLM friendly 抓取工具，不给占位。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；
   超时与外部取消区分。
+- **GitHub blob 直取文件**：`github.com/…/blob/<ref>/<path>` 重写为 raw 内容
+  （LLM 要文件而非界面）；raw 不可用回退原 URL。
 - **无第三方 fallback**（不引入 r.jina.ai 类中转服务）；复杂抓取
   （认证/交互页）归 LLM 自行用 bash curl 等。
 
