@@ -275,7 +275,16 @@ const pathA: LifecyclePath = {
 			name: "searching",
 			status: "searching",
 			ticks: 25,
-			stream: [{ kind: "search", args: { query: "rust web framework" }, details: {}, isPartial: true }],
+			// The channel is routed up front — via shows immediately; the result
+			// count lands on completion.
+			stream: [
+				{
+					kind: "search",
+					args: { query: "rust web framework" },
+					details: { data: { channel: "exa" } },
+					isPartial: true,
+				},
+			],
 		},
 		{
 			name: "results",
@@ -317,7 +326,15 @@ const pathB: LifecyclePath = {
 			name: "searching",
 			status: "searching",
 			ticks: 25,
-			stream: [{ kind: "search", args: { query: "nonexistent query" }, details: {}, isPartial: true }],
+			// Engine routed up front — via browser (yandex) shows immediately.
+			stream: [
+				{
+					kind: "search",
+					args: { query: "nonexistent query", engine: "yandex" },
+					details: { data: { channel: "browser", engine: "yandex" } },
+					isPartial: true,
+				},
+			],
 		},
 		{
 			name: "failed",
