@@ -31,7 +31,6 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 5. 子 agent 完成后从主会话（工具卡/通知卡）找到 session 路径，`pi --session <path>` 复盘完整过程。
 6. 嵌套：子 agent 是完整 pi 实例，天然可再 spawn 孙 agent，无深度控制。
 7. 父级退出时子进程经 stdin EOF 自动优雅退出（无孤儿进程），会话文件永不删除。
-8. 扩展零运行时 npm 依赖（仅 peerDependencies：pi-ai / pi-coding-agent / pi-tui / typebox）。
 
 ## UI 设计
 
@@ -101,12 +100,14 @@ session: /path/...jsonl
 ### Agents 状态 widget（aboveEditor）
 
 ```
-  ● Agents
+  ● Agents 1/3
   ⠋ 检查 CI 配置 (42.0s)
 ```
 
 - 仅跟踪后台 agent（前台已 inline 流式，不重复）
 - 完成/停止立即移除——完成结果由通知卡承担
+- 标题后显示生命周期进度 `已结束/累计`（如 `1/3`）；含失败/停止时为 `(1+2)/3`
+  （成功+异常，异常数 error 色）——行空 widget 消失，计数随下次任务批重置
 - 每行下方追加最新活动摘录（缩进 3 字符）：工具调用、Thinking...、或最新正文尾部
 
 ## 实现决策
@@ -175,14 +176,6 @@ queued → running ──→ completed（通知）
 - **现象**：扩展工具 `execute()` 返回 `{ isError: true }` 时，TUI 卡片仍显示成功背景。
 - **根因**：pi-agent-core 的 `executePreparedToolCall` 在工具正常返回时硬编码 `isError: false`——只有 throw 异常才能拿到 `isError: true`。该行为自 2025-09-09 引入，上游 issue **#5209** 被维护者拒绝，预期不会修复。
 - **workaround**：所有错误路径的 `details` 带 `error` 字段；注册 `pi.on("tool_result")` hook 检测 `details.error` → 返回 `{ isError: true }`。该 hook 走 `afterToolCall` 的官方覆盖通道，既修正 isError 又保留 details；官方推荐的 throw 方式会清空 details，故不采用。
-
-## 测试决策
-
-- 纯函数全面单测：`protocol.ts`、`model.ts`、`event-interpret.ts`
-- 状态化语义经 seam 测试：`agent-process.ts`（createClient 注入 fake）、`rpc-client.ts`（命令关联 + UTF-8）、`registry.ts`（生命周期 + 完成策略）
-- 渲染语义测试：`render.ts` 通过 mock details 驱动纯渲染输出
-- LLM context 截断：`truncateForContext` 直接单测
-- 基础设施不测：真实 spawn / rpc 传输，以 E2E 冒烟验证
 
 ## 不在此范围
 

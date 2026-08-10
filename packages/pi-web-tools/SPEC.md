@@ -1,6 +1,6 @@
 # pi-web-tools 规格说明（需求定稿）
 
-> 通用设计原则（Pi Native / LLM+Token Friendly / 提供能力 / 极简克制 / 统一视觉语法）见项目级 [`SPEC.md`](../../SPEC.md)。本文件记录本包需求与设计意图。需求经子代理评审（26 条）与多轮设计讨论后定稿。
+> 通用设计原则（Pi Native / LLM+Token Friendly / 提供能力 / 极简克制 / 统一视觉语法）见项目级 [`SPEC.md`](../../SPEC.md)。本文件只记录本包需求与设计意图。
 
 ## 问题陈述
 
@@ -59,20 +59,6 @@ web_fetch(url: string) → { title, markdown }
 | **模型 grounding** | OpenAI 订阅内免费 / Gemini 5k 次每月免费 / Anthropic 默认禁用（$10/1k） | 按厂商订阅态动态判定 | 基础搜索（自然语言） |
 
 **fallback 链**：免费 search API → bsk 真实浏览器 → grounding。顺序可被用户配置覆盖。
-
-### 通道能力矩阵
-
-| 能力 | bsk/google | bsk/bing | bsk/baidu | Tavily | Exa | Parallel | grounding |
-|---|---|---|---|---|---|---|---|
-| 自然语言 query | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 域名过滤（参数） | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗（报错） |
-| recency（参数） | ✓ | ✓ | 部分 | ✓ | ✓ | ✓ | ✗（报错） |
-| locale（参数） | ✓ | ✓ | 天然中文 | ✓ | ✗ | ✗ | ✗ |
-| **操作符**（site:/filetype:/intitle:/inurl:/-/OR/引号） | ✓ 全 | 部分 | 部分 | 部分（site:/布尔/引号） | ✗ | ✗ | ✗ |
-
-**能力驱动的路由**：
-- 请求了某能力 → 优先路由到支持它的通道；无通道支持 → **显式报错**（绝不静默忽略能力）。
-- 普通搜索（无高级能力）→ 免费 API 优先（成本优先）。
 
 ## 操作符设计（engine 门控）
 
@@ -149,7 +135,6 @@ isChannelAvailable(channel): boolean   // key 存在且格式合法 / bsk 已装
 channelCapabilities(channel): { recency: boolean; locale: boolean; domains: boolean; operators: boolean }
 ```
 
-即上文「通道能力矩阵」表的代码化。
 
 ### 路由决策（纯函数）
 
@@ -162,27 +147,6 @@ route(requestedCapabilities): channel | error
 - 路由是内部实现，LLM 只感知结果或显式报错（能力缺失不静默）。
 - 普通搜索（无高级能力）→ 免费 API 优先（成本优先）。
 
-## 跨通道映射（纯函数）
-
-### recency → 各通道原生表达式
-
-| recency | google/bing(bsk) | Tavily | Exa | Parallel |
-|---|---|---|---|---|
-| day | tbs=qdr:d / 当日 | search_days=1 | startPublishedDate=今日 | 当日 |
-| week | tbs=qdr:w / 近周 | search_days=7 | startPublishedDate=近7日 | 近周 |
-| month | tbs=qdr:m / 近月 | search_days=30 | startPublishedDate=近30日 | 近月 |
-| year | tbs=qdr:y / 近1年 | search_days=365 | startPublishedDate=近1年 | 近1年 |
-
-> grounding 不支持 recency → 显式报错（矩阵规则）。
-
-### locale → 各通道落地
-
-| locale | google | bing | baidu |
-|---|---|---|---|
-| BCP-47（如 zh-CN） | gl=CN + hl=zh-CN + lr=lang_zh-CN | mkt=zh-CN | 天然中文无需设置 |
-
-> API 通道（Exa/Tavily/Parallel）不支持 locale → fallback bsk 真实浏览器执行本地化搜索。
-
 ## web_fetch 行为规格
 
 ### UA 策略
@@ -192,26 +156,9 @@ UA 来源优先级：
 1. 系统默认浏览器（xdg 检测）→ --version 读真实版本 → 标准 UA 模板构造（
    firefox: rv 匹配版本；chrome/chromium/edge: Chrome/major.0.0.0）——缓存复用
 2. 默认浏览器不可用 → 探测已安装的 chrome/chromium/firefox/edge 二进制构造
-3. 兜底 → 硬编码现代 Chrome UA
+3. 兜底 → 固定 FALLBACK_UA 常量（发版前 `pnpm update:ua` 用 caniuse-lite
+   数据 pin 市占率最高浏览器的常用版本）
 ```
-
-构造而非探测的理由（实测排除的路线）：
-- bsk evaluate：实际不可靠；Chrome --headless --repl：新版已移除；
-- --headless --dump-dom：UA 带 HeadlessChrome 标记且非默认浏览器；
-- firefox headless 抓 UA：无直接打印命令、headless 启动慢；
-- get_user_agent 思路（在线爬 whatismybrowser.com）：2026 年起 403。
-
-`--version` 秒级、无 headless 启动、无网络依赖；平台段为按 OS 模板（反爬主要
-看浏览器标识 + 版本）。
-
-决策记录：在线官方版本源（Mozilla product-details / Chromium Dash）实测可用且
-永远最新，但拍板不用——模板不变，本机真实版本 + 我们固定内置的常用 Chrome UA
-兜底已足够，不引入网络依赖。本地缓存 + 定期更新也 grill 后否决（fallback 是低频
-场景，不值得网络 + 磁盘缓存 + TTL 复杂度）。
-
-兜底版本维护：`pnpm update:ua`（发版前跑）——caniuse-lite（devDependency，
-browserslist/esbuild 同源）算市占率最高的浏览器 + 使用率最高版本，pinned 进
-FALLBACK_UA 常量（运行时零依赖零网络）。
 
 ### 请求行为
 
@@ -226,13 +173,6 @@ FALLBACK_UA 常量（运行时零依赖零网络）。
 - API key 环境变量：`EXA_API_KEY` / `TAVILY_API_KEY` / `PARALLEL_API_KEY`（与 pi-web 生态同名对齐）。
 - 通道序覆盖（可选）：`PI_WEB_TOOLS_CHANNELS`。
 - 本地化无环境变量（纯自动 + `locale` 参数覆盖）。
-
-## 设计原则映射
-
-- **Pi Native**：工具名多词时对齐生态（snake_case）；`web_fetch` 与 `web_search` 同族对称；渲染复用 pi 原生卡片惯例。
-- **LLM + Token Friendly**：结果只给列表 + `total`；`web_fetch` 返回 Markdown（转化即压缩）；snippet 短摘；操作符用 LLM 先验知识（免 schema 学习）。
-- **提供能力而非方案**：搜索 + 抓取原语；操作符表达在 LLM 手里（engine 门控，不参数化不检测）；组合逻辑归 LLM。
-- **极简克制**：无 count / 无分页 / 无 provider 参数（通道是用户配置层）；不做 storage / curator / PDF / 视频 / SSRF（fetch 与原语等价 bash curl，安全责任在使用方）。
 
 ## 不在此范围
 
