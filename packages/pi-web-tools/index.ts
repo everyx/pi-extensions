@@ -10,6 +10,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { webFetch } from "./fetch/fetch.js";
 import { WebFetchParamsSchema, WebSearchParamsSchema } from "./schema.js";
@@ -89,6 +90,7 @@ function formatResults(result: SearchResultItem[]): string {
 function finalizeResult(
 	result: SearchResultItem[],
 	candidate: { channel: ChannelId; engine?: EngineId },
+	startedAt: number,
 ): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: boolean } {
 	return {
 		content: [{ type: "text", text: formatResults(result) }],
@@ -98,6 +100,8 @@ function finalizeResult(
 				channel: candidate.channel,
 				...(candidate.engine ? { engine: candidate.engine } : {}),
 				count: result.length,
+				startedAt,
+				endedAt: Date.now(),
 			},
 		},
 		isError: false,
@@ -118,6 +122,7 @@ async function executeSearch(
 	details: Record<string, unknown>;
 	isError: boolean;
 }> {
+	const startedAt = Date.now();
 	if (!params.query?.trim()) {
 		return {
 			content: [{ type: "text", text: "`query` is required." }],
@@ -147,12 +152,19 @@ async function executeSearch(
 		});
 		try {
 			const result = await runChannel(routed.channel, params, routed.engine, ctx, signal);
-			return finalizeResult(result, { channel: routed.channel, engine: routed.engine });
+			return finalizeResult(result, { channel: routed.channel, engine: routed.engine }, startedAt);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return {
 				content: [{ type: "text", text: message }],
-				details: { error: message, channel: routed.channel, engine: routed.engine, query: params.query },
+				details: {
+					error: message,
+					channel: routed.channel,
+					engine: routed.engine,
+					query: params.query,
+					startedAt,
+					endedAt: Date.now(),
+				},
 				isError: true,
 			};
 		}
@@ -184,7 +196,7 @@ async function executeSearch(
 		});
 		try {
 			const result = await runChannel(candidate.channel, params, candidate.engine, ctx, signal);
-			return finalizeResult(result, candidate);
+			return finalizeResult(result, candidate, startedAt);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			failures.push({ channel: candidate.channel, error: message });
@@ -197,7 +209,7 @@ async function executeSearch(
 		: "Search failed.";
 	return {
 		content: [{ type: "text", text: last ? last.error : message }],
-		details: { error: message, failures, available, query: params.query },
+		details: { error: message, failures, available, query: params.query, startedAt, endedAt: Date.now() },
 		isError: true,
 	};
 }
@@ -239,18 +251,19 @@ async function executeFetch(
 	details: Record<string, unknown>;
 	isError: boolean;
 }> {
+	const startedAt = Date.now();
 	const result = await webFetch(url, signal);
 	if (result.error) {
 		return {
 			content: [{ type: "text", text: result.error }],
-			details: { error: result.error, url },
+			details: { error: result.error, url, startedAt, endedAt: Date.now() },
 			isError: true,
 		};
 	}
 	const text = result.title ? `${result.title}\n\n${result.markdown}` : result.markdown;
 	return {
 		content: [{ type: "text", text }],
-		details: { data: { title: result.title, markdown: result.markdown } },
+		details: { data: { title: result.title, markdown: result.markdown, startedAt, endedAt: Date.now() } },
 		isError: false,
 	};
 }
@@ -287,12 +300,20 @@ export default function (pi: ExtensionAPI) {
 		...createToolView<Record<string, unknown>, unknown>({
 			name: "web_search",
 			title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? "").slice(0, 60),
-			tail: (ctx) => (ctx.status === "error" ? "search failed" : undefined),
+			tail: (ctx) =>
+				ctx.status === "error" ? "search failed" : ctx.status === "processing" ? "working\u2026" : undefined,
 			meta: (ctx) => {
-				const d = (ctx.result?.data ?? {}) as { channel?: string; engine?: string; count?: number };
+				const d = (ctx.result?.data ?? {}) as {
+					channel?: string;
+					engine?: string;
+					count?: number;
+					startedAt?: number;
+					endedAt?: number;
+				};
 				return [
 					d.channel ? `via ${d.channel}${d.engine ? ` (${d.engine})` : ""}` : undefined,
 					d.count != null ? `${d.count} results` : undefined,
+					durationMeta(ctx.status, d.startedAt, d.endedAt),
 				].filter(Boolean) as string[];
 			},
 			body: {
@@ -324,9 +345,14 @@ export default function (pi: ExtensionAPI) {
 		...createToolView<Record<string, unknown>, unknown>({
 			name: "web_fetch",
 			title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? "").slice(0, 80),
+			tail: (ctx) =>
+				ctx.status === "error" ? "fetch failed" : ctx.status === "processing" ? "working\u2026" : undefined,
 			meta: (ctx) => {
-				const t = (ctx.result?.data as { title?: string } | undefined)?.title;
-				return t ? [t.slice(0, 60)] : undefined;
+				const d = (ctx.result?.data ?? {}) as { title?: string; startedAt?: number; endedAt?: number };
+				const parts: (string | undefined)[] = [];
+				if (d.title) parts.push(d.title.slice(0, 60));
+				parts.push(durationMeta(ctx.status, d.startedAt, d.endedAt));
+				return parts.filter(Boolean) as string[];
 			},
 			body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
 		}),

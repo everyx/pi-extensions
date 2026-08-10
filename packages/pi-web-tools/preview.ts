@@ -16,6 +16,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
+import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 
 // ── Views (same templates as index.ts) ─────────────────────────
@@ -23,12 +24,19 @@ import { createToolView } from "@everyx/pi-ui/view.js";
 const searchView = createToolView<Record<string, unknown>, unknown>({
 	name: "web_search",
 	title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? "").slice(0, 60),
-	tail: (ctx) => (ctx.status === "error" ? "search failed" : undefined),
+	tail: (ctx) => (ctx.status === "error" ? "search failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 	meta: (ctx) => {
-		const d = (ctx.result?.data ?? {}) as { channel?: string; engine?: string; count?: number };
+		const d = (ctx.result?.data ?? {}) as {
+			channel?: string;
+			engine?: string;
+			count?: number;
+			startedAt?: number;
+			endedAt?: number;
+		};
 		return [
 			d.channel ? `via ${d.channel}${d.engine ? ` (${d.engine})` : ""}` : undefined,
 			d.count != null ? `${d.count} results` : undefined,
+			durationMeta(ctx.status, d.startedAt, d.endedAt),
 		].filter(Boolean) as string[];
 	},
 	body: {
@@ -42,9 +50,13 @@ const searchView = createToolView<Record<string, unknown>, unknown>({
 const fetchView = createToolView<Record<string, unknown>, unknown>({
 	name: "web_fetch",
 	title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? "").slice(0, 80),
+	tail: (ctx) => (ctx.status === "error" ? "fetch failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 	meta: (ctx) => {
-		const t = (ctx.result?.data as { title?: string } | undefined)?.title;
-		return t ? [t.slice(0, 60)] : undefined;
+		const d = (ctx.result?.data ?? {}) as { title?: string; startedAt?: number; endedAt?: number };
+		const parts: (string | undefined)[] = [];
+		if (d.title) parts.push(d.title.slice(0, 60));
+		parts.push(durationMeta(ctx.status, d.startedAt, d.endedAt));
+		return parts.filter(Boolean) as string[];
 	},
 	body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
 });
@@ -295,7 +307,15 @@ const pathA: LifecyclePath = {
 				{
 					kind: "search",
 					args: { query: "rust web framework" },
-					details: { data: { results: searchResults, channel: "exa", count: 5 } },
+					details: {
+						data: {
+							results: searchResults,
+							channel: "exa",
+							count: 5,
+							startedAt: 1_752_000_000_000,
+							endedAt: 1_752_000_003_100,
+						},
+					},
 					isPartial: false,
 				},
 			],
@@ -308,7 +328,15 @@ const pathA: LifecyclePath = {
 				{
 					kind: "search",
 					args: { query: "rust web framework" },
-					details: { data: { results: searchResults, channel: "exa", count: 5 } },
+					details: {
+						data: {
+							results: searchResults,
+							channel: "exa",
+							count: 5,
+							startedAt: 1_752_000_000_000,
+							endedAt: 1_752_000_003_100,
+						},
+					},
 					isPartial: false,
 					expanded: true,
 				},
@@ -346,7 +374,13 @@ const pathB: LifecyclePath = {
 					args: { query: "nonexistent query", engine: "yandex" },
 					details: {
 						error: "yandex returned no usable results (captcha wall).",
-						data: { channel: "browser", engine: "yandex", count: 0 },
+						data: {
+							channel: "browser",
+							engine: "yandex",
+							count: 0,
+							startedAt: 1_752_000_000_000,
+							endedAt: 1_752_000_004_200,
+						},
 					},
 					isPartial: false,
 					isError: true,
@@ -377,7 +411,12 @@ const pathC: LifecyclePath = {
 					kind: "fetch",
 					args: { url: "https://rocket.rs/" },
 					details: {
-						data: { title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust", markdown: fetchedMarkdown },
+						data: {
+							title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust",
+							markdown: fetchedMarkdown,
+							startedAt: 1_752_000_000_000,
+							endedAt: 1_752_000_001_800,
+						},
 					},
 					isPartial: false,
 				},
@@ -392,7 +431,12 @@ const pathC: LifecyclePath = {
 					kind: "fetch",
 					args: { url: "https://rocket.rs/" },
 					details: {
-						data: { title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust", markdown: fetchedMarkdown },
+						data: {
+							title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust",
+							markdown: fetchedMarkdown,
+							startedAt: 1_752_000_000_000,
+							endedAt: 1_752_000_001_800,
+						},
 					},
 					isPartial: false,
 					expanded: true,
@@ -422,7 +466,11 @@ const pathD: LifecyclePath = {
 				{
 					kind: "fetch",
 					args: { url: "https://expired.example.invalid/" },
-					details: { error: "fetch failed: ENOTFOUND expired.example.invalid" },
+					details: {
+						error: "fetch failed: ENOTFOUND expired.example.invalid",
+						startedAt: 1_752_000_000_000,
+						endedAt: 1_752_000_002_100,
+					},
 					isPartial: false,
 					isError: true,
 				},
