@@ -19,6 +19,17 @@ const EXCERPT_INDENT = "    ";
 
 export type WidgetStatus = "running" | "stopped" | "done" | "failed";
 
+/** How a tracked item ended — feeds the lifetime progress meta (`1/3`). */
+export type WidgetResult = "done" | "failed" | "stopped";
+
+/** Map a terminal widget status to the result it implies (tick cleanup). */
+function statusToResult(status: WidgetStatus): WidgetResult | undefined {
+	if (status === "done") return "done";
+	if (status === "failed") return "failed";
+	if (status === "stopped") return "stopped";
+	return undefined;
+}
+
 /** One activity line in the widget (same style vocabulary as card rows). */
 export interface WidgetRow {
 	style: "thinking" | "tool" | "text";
@@ -74,9 +85,15 @@ function styleRow(row: WidgetRow, theme: Theme): string {
 
 /**
  * Foreground status widget for background tasks.
- *   add(item)  — start tracking (registers the widget lazily)
- *   remove(id) — stop tracking
- *   dispose()  — clear everything (session shutdown)
+ *   add(item)        — start tracking (registers the widget lazily)
+ *   remove(id, res?) — stop tracking; `res` feeds the lifetime progress meta
+ *   dispose()        — clear everything (session shutdown)
+ *
+ * Lifetime progress: while the widget is alive it counts every tracked item
+ * (`total`) and how each ended (`done`/`failed`/`stopped`), rendered after
+ * the title as `1/3` — or `(1+2)/3` once any item ended abnormally (the
+ * abnormal count is colored error; the parentheses are the math convention
+ * for a polynomial numerator). A remove() without a result is not counted.
  */
 export class StatusWidget {
 	private readonly ui: ExtensionUIContext;
@@ -84,6 +101,10 @@ export class StatusWidget {
 	private interval: ReturnType<typeof setInterval> | undefined;
 	private registered = false;
 	private tui: { requestRender(): void } | undefined;
+	private total = 0;
+	private done = 0;
+	private failed = 0;
+	private stopped = 0;
 
 	constructor(
 		ui: ExtensionUIContext,
@@ -95,12 +116,15 @@ export class StatusWidget {
 
 	add(item: WidgetItem): void {
 		if (this.rows.has(item.id)) return;
+		this.total++;
 		this.rows.set(item.id, { item, spinner: new Spinner() });
 		this.ensureRunning();
 	}
 
-	remove(id: string): void {
-		if (this.rows.delete(id) && this.rows.size === 0) {
+	remove(id: string, result?: WidgetResult): void {
+		if (!this.rows.delete(id)) return;
+		this.countResult(result);
+		if (this.rows.size === 0) {
 			this.dispose();
 			return;
 		}
@@ -113,6 +137,13 @@ export class StatusWidget {
 			this.interval = undefined;
 		}
 		this.rows.clear();
+		// An empty widget ends its lifetime — the progress meta starts fresh
+		// on the next tracked batch (counters are per widget-lifetime, not
+		// per extension session).
+		this.total = 0;
+		this.done = 0;
+		this.failed = 0;
+		this.stopped = 0;
 		if (this.registered) {
 			this.ui.setWidget(WIDGET_KEY, undefined);
 			this.registered = false;
@@ -130,13 +161,31 @@ export class StatusWidget {
 
 	private tick(): void {
 		for (const [id, row] of this.rows) {
-			if (row.item.status !== "running") this.rows.delete(id);
+			if (row.item.status !== "running") {
+				this.rows.delete(id);
+				this.countResult(statusToResult(row.item.status));
+			}
 		}
 		if (this.rows.size === 0) {
 			this.dispose();
 			return;
 		}
 		this.tui?.requestRender();
+	}
+
+	/** Fold an ended item's status into the lifetime counters. */
+	private countResult(result: WidgetResult | undefined): void {
+		if (result === "done") this.done++;
+		else if (result === "failed") this.failed++;
+		else if (result === "stopped") this.stopped++;
+	}
+
+	/** Lifetime progress meta: `1/3` or `(1+2)/3` (abnormal count in error). */
+	private metaLine(theme: Theme): string {
+		if (this.total === 0) return "";
+		const abnormal = this.failed + this.stopped;
+		const numerator = abnormal > 0 ? `(${this.done}+${theme.fg("error", String(abnormal))})` : String(this.done);
+		return ` ${theme.fg("muted", `${numerator}/${this.total}`)}`;
 	}
 
 	private registerWidget(): void {
@@ -163,7 +212,9 @@ export class StatusWidget {
 		if (this.title) {
 			// One marker line: ` ● <Title>` — 1-char left padding (matching the
 			// agent rows), accent dot + bold title color (v1.2.0 style).
-			lines.push(` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold(this.title))}`);
+			lines.push(
+				` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold(this.title))}${this.metaLine(theme)}`,
+			);
 		}
 		for (const row of this.rows.values()) {
 			lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
