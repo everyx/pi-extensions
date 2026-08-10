@@ -429,6 +429,8 @@ function phaseAt(s: LifecyclePath, t: number): { phase: PathPhase; local: number
 	return null; // pause
 }
 
+const lastPhase = new Map<LifecyclePath, string>();
+
 function lifecycleRender(s: LifecyclePath, t: number, w: number): string[] {
 	const total = cycleTicks(s);
 	t %= total;
@@ -437,6 +439,12 @@ function lifecycleRender(s: LifecyclePath, t: number, w: number): string[] {
 		// Fresh round: the next call starts a fresh Elapsed timer.
 		cardState.startedAt = Date.now();
 		return blankLines(s.height, w); // blank pause between rounds
+	}
+	// Phase boundary: drop stale streamed data so a fresh call's header
+	// doesn't flash the previous result's meta.
+	if (lastPhase.get(s) !== hit.phase.name) {
+		lastPhase.set(s, hit.phase.name);
+		delete (cardState as Record<string, unknown>).lastData;
 	}
 	return screenLines(hit.phase.stream ?? [], s.height, w);
 }
