@@ -14,7 +14,7 @@ import { renderPage } from "./headless.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
 import { resolveUserAgent } from "./ua.js";
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** Accept header: prefer Markdown for Agents (content negotiation, Cloudflare). */
 const ACCEPT =
