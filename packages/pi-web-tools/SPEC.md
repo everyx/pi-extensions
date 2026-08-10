@@ -163,8 +163,9 @@ UA 来源优先级：
 ### 请求行为
 
 - 浏览器 UA + 完整请求头（防反爬）；`Accept` 首选 `text/markdown`（内容协商）。
-- 超时控制：AbortController + 默认超时 30s（fetch 与渲染各 30s，慢网络余量；
-  有 working/Elapsed 即时反馈，非静默卡死）。
+- 超时控制：AbortController + 默认超时——直接 fetch 30s；CSR 渲染 60s（
+  渲染要下载大 JS 包 + 执行，慢一个量级，区分对待更宽容）。有
+  working/Elapsed 即时反馈，非静默卡死。
 - **Markdown for Agents 直取**：目标站支持内容协商（Cloudflare 网络转换）时
   直接拿到官方 Markdown（frontmatter + 正文），跳过本地转换。
 - **统一输出格式**（对齐 Markdown for Agents 布局）：frontmatter（

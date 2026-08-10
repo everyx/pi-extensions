@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const RENDER_TIMEOUT_MS = 30_000;
+const RENDER_TIMEOUT_MS = 60_000;
 const VIRTUAL_TIME_BUDGET_MS = 5_000;
 const MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 
