@@ -5,10 +5,6 @@
 - `packages/pi-subagent` — 极简子代理，具体设计见其 [`SPEC.md`](packages/pi-subagent/SPEC.md)
 - 新扩展在此新增一个 package
 
-## 原则
-
-- **TUI 即时反馈**：TUI 应该在执行的关键节点即时反馈有意义的信息给用户——通道/通道切换、活动流、进度、完成/失败都要在发生时就可见，而不是等最终结果一起出现。长时间静默（无 spinner、无状态词、无数据变化）是缺陷。preview 必须 1:1 反应真实行为。
-
 ## 约定
 
 - 工具链只在根（biome / tsconfig / husky / lint-staged），各包不复制
