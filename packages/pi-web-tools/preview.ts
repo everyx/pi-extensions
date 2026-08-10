@@ -17,6 +17,16 @@ import { pathToFileURL } from "node:url";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
+
+/** Meta label for the channel a search went through. Browser engines are
+ * known by their real domain (via google.com, via yandex.com); API channels
+ * by their name (via exa, via tavily). */
+function viaLabel(channel?: string, engine?: string): string | undefined {
+	if (!channel) return undefined;
+	if (channel === "browser" && engine) return `via ${engine}.com`;
+	return `via ${channel}`;
+}
+
 import { createToolView } from "@everyx/pi-ui/view.js";
 
 // ── Views (same templates as index.ts) ─────────────────────────
@@ -24,7 +34,7 @@ import { createToolView } from "@everyx/pi-ui/view.js";
 const searchView = createToolView<Record<string, unknown>, unknown>({
 	name: "web_search",
 	title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? "").slice(0, 60),
-	tail: (ctx) => (ctx.status === "error" ? "search failed" : ctx.status === "processing" ? "working\u2026" : undefined),
+	tail: (ctx) => (ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 	meta: (ctx) => {
 		const d = (ctx.result?.data ?? {}) as {
 			channel?: string;
@@ -34,8 +44,9 @@ const searchView = createToolView<Record<string, unknown>, unknown>({
 			endedAt?: number;
 		};
 		return [
-			d.channel ? `via ${d.channel}${d.engine ? ` (${d.engine})` : ""}` : undefined,
-			d.count != null ? `${d.count} results` : undefined,
+			viaLabel(d.channel, d.engine),
+			// A failed search reports no result count — it's 0 by definition.
+			ctx.status !== "error" && d.count != null ? `${d.count} results` : undefined,
 			durationMeta(ctx.status, d.startedAt, d.endedAt),
 		].filter(Boolean) as string[];
 	},
@@ -50,13 +61,13 @@ const searchView = createToolView<Record<string, unknown>, unknown>({
 const fetchView = createToolView<Record<string, unknown>, unknown>({
 	name: "web_fetch",
 	title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? "").slice(0, 80),
-	tail: (ctx) => (ctx.status === "error" ? "fetch failed" : ctx.status === "processing" ? "working\u2026" : undefined),
+	tail: (ctx) => (ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 	meta: (ctx) => {
-		const d = (ctx.result?.data ?? {}) as { title?: string; startedAt?: number; endedAt?: number };
-		const parts: (string | undefined)[] = [];
-		if (d.title) parts.push(d.title.slice(0, 60));
-		parts.push(durationMeta(ctx.status, d.startedAt, d.endedAt));
-		return parts.filter(Boolean) as string[];
+		// No page title in meta — the URL already fills the header, and the
+		// title would make the row far too long.
+		const d = (ctx.result?.data ?? {}) as { startedAt?: number; endedAt?: number };
+		const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
+		return dur ? [dur] : undefined;
 	},
 	body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
 });
@@ -468,6 +479,7 @@ const pathD: LifecyclePath = {
 					args: { url: "https://expired.example.invalid/" },
 					details: {
 						error: "fetch failed: ENOTFOUND expired.example.invalid",
+						url: "https://expired.example.invalid/",
 						startedAt: 1_752_000_000_000,
 						endedAt: 1_752_000_002_100,
 					},
