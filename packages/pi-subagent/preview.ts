@@ -883,21 +883,21 @@ const pathB: LifecyclePath = {
 			name: "working",
 			status: "working",
 			ticks: 60,
-			// Output grows line by line — the working phase is live, distinct
-			// from the static done card that follows.
+			// Token-stream feel: activity rows appear progressively while the
+			// text output types out character by character — like pi's
+			// assistant messages streaming in.
 			streamFor: (t) => {
-				const n = Math.floor(t / 3); // 0..19 across the phase
-				const tools = Math.min(n, streamActivities.length);
+				const total = 60;
+				const tools = Math.floor((t / total) * (streamActivities.length + 1));
+				const textFull = streamLines.join("\n");
+				const chars = Math.floor((t / total) * textFull.length);
+				const events: RenderEvent[] = [...activityEvents(tools)];
+				if (chars > 0) events.push({ kind: "text", text: textFull.slice(0, Math.min(chars, textFull.length)) });
 				return [
 					{
 						kind: "agent",
 						args: p,
-						details: details({
-							events: [
-								...activityEvents(tools),
-								{ kind: "text", text: streamLines.slice(0, Math.max(0, n - tools)).join("\n") },
-							],
-						}),
+						details: details({ events }),
 						isPartial: true,
 					},
 				];
