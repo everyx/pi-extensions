@@ -11,13 +11,14 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
+import { engineDomain } from "./search/locale.js";
 
 /** Meta label for the channel a search went through. Browser engines are
- * known by their real domain (via google.com, via yandex.com); API channels
- * by their name (via exa, via tavily). */
+ * labeled by the domain actually navigated (via yandex.com — from
+ * engineDomain, the single source of truth); API channels by name (via exa). */
 function viaLabel(channel?: string, engine?: string): string | undefined {
 	if (!channel) return undefined;
-	if (channel === "browser" && engine) return `via ${engine}.com`;
+	if (channel === "browser" && engine) return `via ${engineDomain(engine as EngineId)}`;
 	return `via ${channel}`;
 }
 
