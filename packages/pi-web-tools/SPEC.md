@@ -162,25 +162,16 @@ UA 来源优先级：
 
 ### 请求行为
 
-- 浏览器 UA + 完整请求头（防反爬）；`Accept` 首选 `text/markdown`（内容协商）。
-- 超时控制：AbortController + 默认超时——直接 fetch 30s；CSR 渲染 60s（
-  渲染要下载大 JS 包 + 执行，慢一个量级，区分对待更宽容）。有
-  working/Elapsed 即时反馈，非静默卡死。
-- **Markdown for Agents 直取**：目标站支持内容协商（Cloudflare 网络转换）时
-  直接拿到官方 Markdown（frontmatter + 正文），跳过本地转换。
-- **统一输出格式**（对齐 Markdown for Agents 布局）：frontmatter（
+- **输出统一格式**（对齐 Markdown for Agents 布局）：frontmatter（
   `title`/`description`/`image`，仅输出有值的字段）→ 正文 → JSON-LD（
-  有则末尾 fenced `json` 块）；本地转换与直取输出同一格式。
-  title 优先级：`meta[name=title]` > `og:title` > `<title>`（同 Cloudflare）。
-- **SPA 空正文检测**：HTML 有但正文空（JS 渲染）→ 本地 headless 渲染（
-  chromium `--dump-dom` + 虚拟时间预算，20s 超时杀进程）→ 渲染后 DOM 再
-  提取——LLM 拿到真实内容而非占位；无浏览器/渲染失败才回落占位（
-  `(no readable content)`）。检测剥除 script/style 块（CSR bundle 含
-  HTML 字符串会误判为正文），标记：`__next`/`nuxt`/`react`/`id=app|root`。
-- **错误规范化**：HTTP 状态/网络错误 → `error` 字段（非抛异常），如
-  `HTTP 403: Forbidden`；超时与外部取消区分（`Timed out after 15s`）。
-- 无第三方 fallback（不引入 r.jina.ai 类中转服务）；抓取失败即报错，
-  复杂抓取（认证/交互页）归 LLM 自行用 bash curl 等。
+  有则末尾 fenced `json` 块）；协商直取（`Accept: text/markdown`）与
+  本地转换输出同一格式。
+- **CSR 页**（壳空 + JS 渲染）：本地 headless 渲染后返回真实内容给 LLM，
+  渲染不可用才回落占位——定位是 LLM friendly 抓取工具，不给占位。
+- **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；
+  超时与外部取消区分。
+- **无第三方 fallback**（不引入 r.jina.ai 类中转服务）；复杂抓取
+  （认证/交互页）归 LLM 自行用 bash curl 等。
 
 ## 配置
 
