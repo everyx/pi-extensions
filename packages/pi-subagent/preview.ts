@@ -314,7 +314,9 @@ interface PathPhase {
 	name: string;
 	ticks: number;
 	/** The tool-call stream at this point; null slots don't exist yet. */
-	stream: (StreamCard | null)[];
+	stream?: (StreamCard | null)[];
+	/** Dynamic stream (e.g. output growing line by line) — takes precedence. */
+	streamFor?: (localTick: number) => (StreamCard | null)[];
 	/** Agents pinned in the bottom widget (background tasks). */
 	widget?: WidgetAgent[];
 	/** Status word in the path title to highlight while this phase is live. */
@@ -408,7 +410,7 @@ function renderPathCard(card: StreamCard, w: number): string[] {
  * at the bottom (pi registers it aboveEditor — visually the fixed strip
  * above the input), blank padding between them.
  */
-function screenLines(stream: (StreamCard | null)[], phaseTicks: number, H: number, w: number): string[] {
+function screenLines(stream: (StreamCard | null)[], H: number, w: number): string[] {
 	const cardLines: string[] = [];
 	for (const card of stream) {
 		if (!card) continue;
@@ -416,7 +418,6 @@ function screenLines(stream: (StreamCard | null)[], phaseTicks: number, H: numbe
 		if (cardLines.length) cardLines.push("");
 		cardLines.push(...renderPathCard(card, w));
 	}
-	void phaseTicks;
 	const widgetLines = widgetRender ? widgetRender() : [];
 	const lines = [...cardLines];
 	const bottom = Math.max(0, H - widgetLines.length);
@@ -473,7 +474,7 @@ const bgArgs: AgentParams = { ...p, run_in_background: true };
 // Path A — background: three concurrent agents spawn, work, get steered,
 // stopped, and complete; the widget tracks them at the bottom.
 const pathA: LifecyclePath = {
-	title: "A · background agents — 3 spawn → work → steer → stop → notify (widget pinned at bottom)",
+	title: "A · background agents — 3 spawn → working → steer → stop → notify (widget pinned at bottom)",
 	phases: [
 		{
 			name: "spawn a1",
@@ -487,7 +488,7 @@ const pathA: LifecyclePath = {
 			ticks: 19,
 			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false }],
 			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
-			status: "work",
+			status: "working",
 		},
 		{
 			name: "spawn a2",
@@ -520,7 +521,7 @@ const pathA: LifecyclePath = {
 				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
-			status: "work",
+			status: "working",
 		},
 		{
 			name: "spawn a3",
@@ -569,7 +570,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
-			status: "work",
+			status: "working",
 		},
 		{
 			name: "working",
@@ -594,7 +595,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
-			status: "work",
+			status: "working",
 		},
 		{
 			name: "steer a2",
@@ -870,7 +871,7 @@ const fgEvents: RenderEvent[] = [
 	{ kind: "text", text: streamLines.join("\n") },
 ];
 const pathB: LifecyclePath = {
-	title: "B · foreground agent — starting → stream → collapsed → expanded",
+	title: "B · foreground agent — starting → working → done (expanded)",
 	phases: [
 		{
 			name: "starting",
@@ -879,32 +880,40 @@ const pathB: LifecyclePath = {
 			stream: [{ kind: "agent", args: p, details: details(), isPartial: true }],
 		},
 		{
-			name: "streaming",
+			name: "working",
+			status: "working",
 			ticks: 60,
-			stream: [
-				{
-					kind: "agent",
-					args: p,
-					// Partial activity stream — the agent is working (running…).
-					details: details({
-						events: [...activityEvents(4), { kind: "text", text: streamLines.slice(0, 5).join("\n") }],
-					}),
-					isPartial: true,
-				},
-			],
-			status: "stream",
+			// Output grows line by line — the working phase is live, distinct
+			// from the static done card that follows.
+			streamFor: (t) => {
+				const n = Math.floor(t / 3); // 0..19 across the phase
+				const tools = Math.min(n, streamActivities.length);
+				return [
+					{
+						kind: "agent",
+						args: p,
+						details: details({
+							events: [
+								...activityEvents(tools),
+								{ kind: "text", text: streamLines.slice(0, Math.max(0, n - tools)).join("\n") },
+							],
+						}),
+						isPartial: true,
+					},
+				];
+			},
 		},
 		{
-			name: "collapsed",
+			name: "done",
+			status: "done",
 			ticks: 19,
 			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false }],
-			status: "collapsed",
 		},
 		{
 			name: "expanded",
+			status: "done",
 			ticks: 19,
 			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false, expanded: true }],
-			status: "expanded",
 		},
 	],
 	pauseTicks: 30,
@@ -978,7 +987,7 @@ const pathC: LifecyclePath = {
 // Path D — foreground failure: streams a little, then dies mid-run.
 const partialEvents: RenderEvent[] = [...activityEvents(2), { kind: "text", text: streamLines.slice(0, 2).join("\n") }];
 const pathD: LifecyclePath = {
-	title: "D · foreground failure — starting → partial stream → error",
+	title: "D · foreground failure — starting → working → error",
 	phases: [
 		{
 			name: "starting",
@@ -986,10 +995,10 @@ const pathD: LifecyclePath = {
 			stream: [{ kind: "agent", args: p, details: details(), isPartial: true }],
 		},
 		{
-			name: "partial stream",
+			name: "working",
+			status: "working",
 			ticks: 20,
 			stream: [{ kind: "agent", args: p, details: details({ events: partialEvents }), isPartial: true }],
-			status: "partial stream",
 		},
 		{
 			name: "failed",
@@ -1037,7 +1046,8 @@ function lifecycleRender(s: LifecyclePath, t: number, w: number): string[] {
 		return blankLines(s.height, w); // blank pause between rounds
 	}
 	syncWidget(hit.phase.widget);
-	return screenLines(hit.phase.stream, hit.local, s.height, w);
+	const stream = hit.phase.streamFor ? hit.phase.streamFor(hit.local) : (hit.phase.stream ?? []);
+	return screenLines(stream, s.height, w);
 }
 
 function blankLines(height: number, w: number): string[] {
