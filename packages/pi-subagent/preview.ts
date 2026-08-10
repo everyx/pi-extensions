@@ -384,8 +384,8 @@ function screenLines(stream: (StreamCard | null)[], phaseTicks: number, H: numbe
 	const cardLines: string[] = [];
 	for (const card of stream) {
 		if (!card) continue;
-		// Streaming agent cards get the elapsed time baked into their stream
-		// phase (see path B); others are static.
+		// Blank row between stacked cards, like pi's message stream.
+		if (cardLines.length) cardLines.push("");
 		cardLines.push(...renderPathCard(card, w));
 	}
 	void phaseTicks;
@@ -991,22 +991,16 @@ function blankLines(height: number, w: number): string[] {
 }
 
 async function runLive(): Promise<void> {
-	console.log(
-		"\n\x1b[1m\x1b[4mLive — each path is one full screen, looping with a blank pause between rounds (Ctrl+C to exit)\x1b[0m",
-	);
 	if (!process.stdout.isTTY) {
 		console.error("preview needs a TTY — run it in a terminal (tmux, kitty, …).");
 		process.exit(1);
 	}
 	process.stdout.write("\x1b[2J\x1b[H");
-	process.stdout.write(
-		"\x1b[1m\x1b[4mLive — each path is one full screen, looping with a blank pause between rounds (Ctrl+C to exit)\x1b[0m\n",
-	);
 	process.stdout.write("\x1b[?25l"); // hide cursor
 	const rows = process.stdout.rows ?? 40;
 	const width = process.stdout.columns ?? 100;
 	// One screen per path: full-height canvas, key-paginated.
-	const height = rows - 4; // top title + bottom page indicator + margins
+	const height = rows - 2; // path title row + bottom page indicator
 	for (const s of sections) s.height = height;
 	let page = 0;
 	let quit = false;
@@ -1026,10 +1020,10 @@ async function runLive(): Promise<void> {
 	}
 	try {
 		for (let t = 0; !quit; t++) {
-			process.stdout.write(`\x1b[2;1H\x1b[2K\x1b[1m\x1b[4m${sections[page].title}\x1b[0m`);
+			process.stdout.write(`\x1b[1;1H\x1b[2K\x1b[1m\x1b[4m${sections[page].title}\x1b[0m`);
 			const lines = lifecycleRender(sections[page], t, width);
 			for (let k = 0; k < height; k++) {
-				process.stdout.write(`\x1b[${3 + k};1H\x1b[2K${lines[k] ?? " "}`);
+				process.stdout.write(`\x1b[${2 + k};1H\x1b[2K${lines[k] ?? " "}`);
 			}
 			process.stdout.write(
 				`\x1b[${rows};1H\x1b[2K\x1b[2m— path ${page + 1}/${sections.length} (→/space next · ←/p prev · Ctrl+C quit) —\x1b[0m`,
