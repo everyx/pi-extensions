@@ -1,59 +1,22 @@
 /**
  * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
  *
- *   - UA: bsk evaluate "navigator.userAgent" when BrowserSkill is connected
- *     (cached), else a hardcoded modern Chrome UA.
+ *   - UA: system default browser version → standard UA string (see ua.ts),
+ *     cached per process.
  *   - Browser-like request headers, timeout, SPA empty-body detection,
  *     error normalization (HTTP status → error field, not a throw).
  *   - Jina Reader (r.jina.ai) fallback when the direct fetch is blocked or
  *     yields nothing readable.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { fetchWithTimeout } from "../http.js";
 import type { WebFetchResult } from "../types.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
-
-const execFileAsync = promisify(execFile);
-
-const FALLBACK_UA =
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+import { resolveUserAgent } from "./ua.js";
 
 const JINA_READER_BASE = "https://r.jina.ai/";
 const JINA_TIMEOUT_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
-
-let cachedUserAgent: string | null = null;
-let uaFetchInFlight: Promise<string> | null = null;
-
-/** Resolve a real-browser UA via bsk evaluate (SPEC: UA 策略). */
-export async function resolveUserAgent(): Promise<string> {
-	if (cachedUserAgent) return cachedUserAgent;
-	if (!uaFetchInFlight) {
-		uaFetchInFlight = (async () => {
-			try {
-				const { stdout } = await execFileAsync("bsk", ["evaluate", "--json", "navigator.userAgent"], {
-					timeout: 5_000,
-					env: { ...process.env, NO_COLOR: "1" },
-				});
-				const parsed = JSON.parse(stdout) as { result?: unknown; value?: unknown };
-				const ua =
-					typeof parsed.result === "string" ? parsed.result : typeof parsed.value === "string" ? parsed.value : null;
-				if (ua?.startsWith("Mozilla")) {
-					cachedUserAgent = ua;
-					return ua;
-				}
-			} catch {
-				// fall through to hardcoded UA
-			}
-			return FALLBACK_UA;
-		})();
-	}
-	const ua = await uaFetchInFlight;
-	uaFetchInFlight = null;
-	return ua;
-}
 
 interface FetchPageResult {
 	ok: boolean;

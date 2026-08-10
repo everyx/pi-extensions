@@ -189,9 +189,20 @@ route(requestedCapabilities): channel | error
 
 ```
 UA 来源优先级：
-1. bsk evaluate "navigator.userAgent"（真实浏览器 UA，与用户浏览器同身份，反爬最友好）——缓存复用
-2. bsk 不可用 → 硬编码现代 Chrome UA 兜底
+1. 系统默认浏览器（xdg 检测）→ --version 读真实版本 → 标准 UA 模板构造（
+   firefox: rv 匹配版本；chrome/chromium/edge: Chrome/major.0.0.0）——缓存复用
+2. 默认浏览器不可用 → 探测已安装的 chrome/chromium/firefox/edge 二进制构造
+3. 兜底 → 硬编码现代 Chrome UA
 ```
+
+构造而非探测的理由（实测排除的路线）：
+- bsk evaluate：实际不可靠；Chrome --headless --repl：新版已移除；
+- --headless --dump-dom：UA 带 HeadlessChrome 标记且非默认浏览器；
+- firefox headless 抓 UA：无直接打印命令、headless 启动慢；
+- get_user_agent 思路（在线爬 whatismybrowser.com）：2026 年起 403。
+
+`--version` 秒级、无 headless 启动、无网络依赖；平台段为按 OS 模板（反爬主要
+看浏览器标识 + 版本）。
 
 ### 请求行为
 
