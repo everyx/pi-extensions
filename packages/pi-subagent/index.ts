@@ -507,12 +507,22 @@ export default function (pi: ExtensionAPI) {
 				ctx.status === "error" ? "start failed" : ctx.status === "processing" ? "starting\u2026" : "started",
 			meta: (ctx) => {
 				const d = ctx.result?.data as
-					| { model?: string; thinking?: string; startedAt?: number; endedAt?: number }
+					| { model?: string; thinking?: string; startedAt?: number; endedAt?: number; runInBackground?: boolean }
 					| undefined;
+				const args = ctx.args as { model?: unknown; thinking?: unknown } | undefined;
 				const parts: string[] = [];
-				if (d?.model) parts.push(d.model);
-				if (d?.thinking) parts.push(d.thinking);
-				if (d?.startedAt != null) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+				const model = d?.model ?? args?.model;
+				if (model) parts.push(String(model));
+				const thinking = d?.thinking ?? args?.thinking;
+				if (thinking) parts.push(String(thinking));
+				// Duration meta: live Elapsed while running (the call seeds
+				// startedAt at execution start), fixed Took once the foreground
+				// task finished. A background spawn leaves the task running —
+				// no duration (the widget tracks it live).
+				if (d?.startedAt != null) {
+					if (ctx.status === "processing") parts.push(`Elapsed ${((Date.now() - d.startedAt) / 1000).toFixed(1)}s`);
+					else if (!d.runInBackground) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+				}
 				return parts;
 			},
 			body: {

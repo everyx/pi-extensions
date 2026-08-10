@@ -204,7 +204,13 @@ export function createToolView<Args, Data>(
 			if (status === "processing") {
 				// The call owns the header line while running (the result is a
 				// bare body) — full header: icon + name + title + tail + meta.
-				const ctx = makeCtx(args, status);
+				// Execution start rides the render state (set once, at the first
+				// render) so the meta can show a live Elapsed timer; the result
+				// renderer's data carries the same startedAt on completion.
+				const st = rc.state as Record<string, unknown> | undefined;
+				const startedAt = (st?.startedAt as number | undefined) ?? Date.now();
+				if (st) st.startedAt = startedAt;
+				const ctx = makeCtx(args, status, { data: { startedAt } as Data });
 				const tail = view.tail?.(ctx);
 				return textLine(
 					renderHeader(

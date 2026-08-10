@@ -67,12 +67,22 @@ const agentView = createToolView<Record<string, unknown>, Record<string, unknown
 	tail: (ctx) => (ctx.status === "error" ? "start failed" : ctx.status === "processing" ? "starting\u2026" : "started"),
 	meta: (ctx) => {
 		const d = ctx.result?.data as
-			| { model?: string; thinking?: string; startedAt?: number; endedAt?: number }
+			| { model?: string; thinking?: string; startedAt?: number; endedAt?: number; runInBackground?: boolean }
 			| undefined;
+		const args = ctx.args as { model?: unknown; thinking?: unknown } | undefined;
 		const parts: string[] = [];
-		if (d?.model) parts.push(d.model);
-		if (d?.thinking) parts.push(d.thinking);
-		if (d?.startedAt != null) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+		const model = d?.model ?? args?.model;
+		if (model) parts.push(String(model));
+		const thinking = d?.thinking ?? args?.thinking;
+		if (thinking) parts.push(String(thinking));
+		// Duration meta: live Elapsed while running (the call seeds startedAt
+		// at execution start), fixed Took once the foreground task finished.
+		// A background spawn leaves the task running — no duration (the
+		// widget tracks it live).
+		if (d?.startedAt != null) {
+			if (ctx.status === "processing") parts.push(`Elapsed ${((Date.now() - d.startedAt) / 1000).toFixed(1)}s`);
+			else if (!d.runInBackground) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+		}
 		return parts;
 	},
 	body: {
@@ -174,12 +184,13 @@ const params: AgentParams = {
 
 // Shared timer state — startedAt fixed so elapsed/Took behave like a real
 // long-running card (values tick with the wall clock).
-const startedAt = Date.now() - 27_500;
-const endedAt = Date.now() - 1_200;
+/** Simulated task wall-time per round (Elapsed grows to this, then Took shows it). */
+const TASK_MS = 27_500;
 
 // Shared render state across frames — the spinner instance rides it so the
-// Braille frames keep animating (each render reuses the same Spinner).
-const cardState: Record<string, unknown> = { startedAt, endedAt };
+// Braille frames keep animating; startedAt is the current round's task
+// start (reset on every pause so Elapsed starts fresh each loop).
+const cardState: Record<string, unknown> = { startedAt: Date.now() };
 function pendingContext(args: unknown, isError = false) {
 	return { args, state: cardState, invalidate: () => {}, executionStarted: true, isPartial: true, isError } as never;
 }
@@ -198,10 +209,11 @@ const activityTool: SubagentDetails["activity"] = { kind: "tool", name: "bash", 
 const activityThinking: SubagentDetails["activity"] = { kind: "thinking", text: "" };
 
 function details(extra: Partial<SubagentDetails> = {}): SubagentDetails {
+	const st = cardState.startedAt as number;
 	return {
 		task: params.prompt,
-		startedAt,
-		endedAt,
+		startedAt: st,
+		endedAt: st + TASK_MS,
 		model: params.model,
 		thinking: params.thinking,
 		sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
@@ -976,6 +988,8 @@ function lifecycleRender(s: LifecyclePath, t: number, w: number): string[] {
 	const hit = phaseAt(s, t);
 	if (!hit) {
 		syncWidget([]);
+		// Fresh round: the next spawn starts a new Elapsed timer.
+		cardState.startedAt = Date.now();
 		return blankLines(s.height, w); // blank pause between rounds
 	}
 	syncWidget(hit.phase.widget);
