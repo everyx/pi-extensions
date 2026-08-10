@@ -166,6 +166,9 @@ UA 来源优先级：
   `title`/`description`/`image`，仅输出有值的字段）→ 正文 → JSON-LD（
   有则末尾 fenced `json` 块）；协商直取（`Accept: text/markdown`）与
   本地转换输出同一格式。
+- **内容判定**：仅 HTML/XHTML 走 markdown 提取；其他文本响应（JSON/XML/
+  纯文本等）原样返回原文（title 空——原文无 title 不编造）；二进制
+  （image/audio/video 等）报错。
 - **CSR 页**（壳空 + JS 渲染）：本地 headless 渲染后返回真实内容给 LLM，
   渲染不可用才回落占位——定位是 LLM friendly 抓取工具，不给占位。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；

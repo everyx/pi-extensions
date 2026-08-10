@@ -28,6 +28,11 @@ interface FetchPageResult {
 	error?: string;
 }
 
+/** Only HTML-family responses go through markdown extraction. */
+function isHtmlContent(contentType: string): boolean {
+	return contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
+}
+
 /** Direct HTTP fetch with browser-like headers + timeout. */
 async function fetchPage(url: string, ua: string, signal?: AbortSignal): Promise<FetchPageResult> {
 	let response: Response;
@@ -62,9 +67,9 @@ async function fetchPage(url: string, ua: string, signal?: AbortSignal): Promise
 			error: `HTTP ${response.status}: ${response.statusText}`,
 		};
 	}
-	if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
+	if (!isHtmlContent(contentType)) {
 		const body = await response.text().catch(() => "");
-		// Non-HTML (plain text/JSON): return as-is.
+		// Non-HTML (plain text/JSON/markdown): return as-is.
 		if (
 			!contentType.includes("image/") &&
 			!contentType.includes("audio/") &&
@@ -103,19 +108,15 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 		};
 	}
 
-	// Non-HTML text returned as-is. A text/markdown body (Markdown for
-	// Agents content negotiation) is already the target format — extract the
-	// title from its frontmatter.
-	if (
-		page.contentType &&
-		!page.contentType.includes("text/html") &&
-		!page.contentType.includes("application/xhtml+xml")
-	) {
+	// Non-HTML responses return raw content as-is. text/markdown (negotiated)
+	// is already the target format — title from its frontmatter; other text
+	// bodies (JSON/XML/plain) have no title of their own.
+	if (page.contentType && !isHtmlContent(page.contentType)) {
 		const text = (page.text ?? "").trim();
 		if (!text) return { title: "", markdown: "", error: "Empty response" };
 		return page.contentType.includes("text/markdown")
 			? { title: titleFromMarkdown(text), markdown: text.slice(0, 50_000) }
-			: { title: firstLineAsTitle(text), markdown: text.slice(0, 50_000) };
+			: { title: "", markdown: text.slice(0, 50_000) };
 	}
 
 	const extracted = htmlToMarkdown(page.text ?? "");
