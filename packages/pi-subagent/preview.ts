@@ -1,14 +1,14 @@
 /**
- * Component preview — a mini "storybook" for the extension's TUI renderers.
+ * Component preview — 1:1 simulation of a real pi session screen.
  *
- * Renders the typical sub-agent lifecycles end to end through the real
- * render pipeline with the real pi theme: each section replays one complete
- * lifecycle (background agent, foreground agent, background failure,
- * foreground failure), loops it forever with a blank pause between rounds,
- * and everything that moves animates in place.
+ * Each path occupies one full screen and mirrors how pi actually renders:
+ * tool calls stack top-down (each call is one slot that evolves in place:
+ * pending header → streaming body → completed card), notifications join
+ * the stream, and background agents appear in the bottom-fixed widget
+ * (registered aboveEditor in pi — visually pinned above the input). Every
+ * path loops forever with a blank pause between rounds.
  *
- *   npm run preview              # live lifecycles (TTY)
- *   npm run preview -- static    # sampled frames only
+ *   npm run preview              # 1:1 live paths (TTY)
  *   THEME=ayu-dark npm run preview   # or any pi theme name
  */
 
@@ -157,7 +157,6 @@ function shell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: 
 	return { render: (w: number) => renderLines(box, w) };
 }
 
-/** Render one tool card inside the framework shell (default shell behavior). */
 function toolShell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[], w = 100): string[] {
 	return renderLines(shell(bg, children), w);
 }
@@ -173,9 +172,10 @@ const params: AgentParams = {
 	thinking: "high",
 };
 
-// Shared timer state — the startedAt is fixed so elapsed/Took behave like a
-// real long-running card (values tick with the wall clock).
+// Shared timer state — startedAt fixed so elapsed/Took behave like a real
+// long-running card (values tick with the wall clock).
 const startedAt = Date.now() - 27_500;
+const endedAt = Date.now() - 1_200;
 
 function pendingContext(args: unknown, isError = false) {
 	return {
@@ -187,7 +187,6 @@ function pendingContext(args: unknown, isError = false) {
 		isError,
 	} as never;
 }
-const endedAt = Date.now() - 1_200;
 function doneContext(args: unknown, isError = false) {
 	return {
 		args,
@@ -213,130 +212,6 @@ function details(extra: Partial<SubagentDetails> = {}): SubagentDetails {
 		...extra,
 	};
 }
-
-// ── Lifecycle scaffolding ────────────────────────────────────
-
-interface Phase {
-	name: string;
-	ticks: number;
-	/** Render this phase at local tick t (0..ticks-1) for width w. */
-	render: (t: number, w: number) => string[];
-}
-
-interface LifecycleSection {
-	title: string;
-	phases: Phase[];
-	/** Blank gap between rounds (empty canvas keeps pagination stable). */
-	pauseTicks: number;
-	/** Fixed canvas height (max phase height, measured at setup). */
-	height: number;
-}
-
-function cycleTicks(s: LifecycleSection): number {
-	return s.phases.reduce((a, p) => a + p.ticks, 0) + s.pauseTicks;
-}
-
-function blankLines(height: number, w: number): string[] {
-	return Array.from({ length: height }, () => " ".repeat(w));
-}
-
-function lifecycleRender(s: LifecycleSection, t: number, w: number): string[] {
-	t %= cycleTicks(s);
-	let acc = 0;
-	for (const p of s.phases) {
-		if (t < acc + p.ticks) return p.render(t - acc, w);
-		acc += p.ticks;
-	}
-	return blankLines(s.height, w); // pause: blank separator between rounds
-}
-
-// Render helpers: pending = call header + bare streaming body; done = full
-// card (call renders an empty line once complete).
-function pendingCard(
-	view: ReturnType<typeof createToolView<Record<string, unknown>, Record<string, unknown>>>,
-	args: unknown,
-	result: unknown,
-	w: number,
-) {
-	return toolShell(
-		"toolPendingBg",
-		[
-			view.renderCall(args as never, theme, pendingContext(args)),
-			view.renderResult(
-				{ content: [], details: result } as never,
-				{ expanded: false, isPartial: true },
-				theme,
-				pendingContext(args),
-			),
-		],
-		w,
-	);
-}
-
-function doneCard(
-	view: ReturnType<typeof createToolView<Record<string, unknown>, Record<string, unknown>>>,
-	args: unknown,
-	result: unknown,
-	w: number,
-	opts: { isError?: boolean; expanded?: boolean } = {},
-) {
-	const ctx = doneContext(args, opts.isError ?? false);
-	return toolShell(
-		opts.isError ? "toolErrorBg" : "toolSuccessBg",
-		[
-			view.renderCall(args as never, theme, ctx),
-			view.renderResult(
-				{ content: [], details: result } as never,
-				{ expanded: opts.expanded ?? false, isPartial: false },
-				theme,
-				ctx,
-			),
-		],
-		w,
-	);
-}
-
-// ── Path A: background agent — full lifecycle (spawn → work → steer → stop → notify) ──
-
-let widgetRender: (() => string[]) | undefined;
-const widgetUi = {
-	setWidget: (
-		_key: string,
-		factory: ((tui: unknown, th: Theme) => { render(): string[] }) | undefined,
-		_opts: unknown,
-	) => {
-		widgetRender = factory ? factory({ requestRender: () => {} }, theme).render : undefined;
-	},
-} as never;
-const widget = new AgentWidget(widgetUi as never);
-const fakeAgent = (agentId: string, title: string, startedAt: number, activity: unknown) =>
-	({
-		agentId,
-		title,
-		startedAt,
-		status: "running",
-		getLatestActivity: () => activity,
-	}) as unknown as AgentProcess;
-function widgetLines(_w: number): string[] {
-	return widgetRender ? widgetRender().slice(0, 4) : [];
-}
-
-// Widget presence follows the lifecycle: absent while spawning, present while
-// running, gone once the notification takes over.
-let agentSpawned = false;
-const backgroundWidgetLines = (w: number): string[] => (agentSpawned ? widgetLines(w) : []);
-const widgetOn = () => {
-	if (!agentSpawned) {
-		agentSpawned = true;
-		widget.add(fakeAgent("a1", params.title, Date.now() - 27_500, activityTool));
-	}
-};
-const widgetOff = () => {
-	if (agentSpawned) {
-		agentSpawned = false;
-		widget.remove("a1");
-	}
-};
 
 const streamActivities: AgentActivity[] = [
 	{ kind: "tool", name: "bash", args: "grep -r retries: .github/workflows" },
@@ -368,230 +243,682 @@ function activityEvents(count: number): RenderEvent[] {
 	});
 }
 
-// ── Sections ────────────────────────────────────────────────
+// ── Screen simulation ─────────────────────────────────────────
 
-// Path A — background agent, full lifecycle, widget in sync.
-const bgLifecycle: LifecycleSection = {
-	title: "A · background agent — spawn → work → steer → stop → notify (loops, blank pause between rounds)",
+/**
+ * One slot in the tool-call stream. Like real pi, each call occupies a fixed
+ * position that evolves in place (pending → streaming → completed); slots
+ * appear top-down as calls are made.
+ */
+type StreamCard =
+	| {
+			kind: "agent";
+			args: AgentParams;
+			details: SubagentDetails;
+			isPartial: boolean;
+			isError?: boolean;
+			expanded?: boolean;
+	  }
+	| {
+			kind: "control";
+			args: { agent_id: string; action: string; message?: string };
+			details: { action: string; title?: string; message?: string; error?: string; status?: string };
+			isPartial: boolean;
+			isError?: boolean;
+			expanded?: boolean;
+	  }
+	| {
+			kind: "notification";
+			details: {
+				status: "completed" | "failed" | "stopped";
+				agent_id: string;
+				title: string;
+				model?: string;
+				thinking?: string;
+				result?: string;
+				usage?: { durationMs?: number; tokens?: number; toolUses?: number };
+				sessionPath?: string;
+				sessionId?: string;
+			};
+	  };
+
+interface WidgetAgent {
+	id: string;
+	title: string;
+	/** Offset (ms) behind the round start — elapsed grows from here. */
+	startedOffset: number;
+	activity: AgentActivity;
+}
+
+interface PathPhase {
+	name: string;
+	ticks: number;
+	/** The tool-call stream at this point; null slots don't exist yet. */
+	stream: (StreamCard | null)[];
+	/** Agents pinned in the bottom widget (background tasks). */
+	widget?: WidgetAgent[];
+}
+
+interface LifecyclePath {
+	title: string;
+	phases: PathPhase[];
+	/** Blank gap between rounds (empty screen). */
+	pauseTicks: number;
+	/** Screen height (fixed per terminal; set at run time). */
+	height: number;
+}
+
+function cycleTicks(s: LifecyclePath): number {
+	return s.phases.reduce((a, p) => a + p.ticks, 0) + s.pauseTicks;
+}
+
+function renderPathCard(card: StreamCard, w: number): string[] {
+	switch (card.kind) {
+		case "agent":
+			return card.isPartial
+				? toolShell(
+						"toolPendingBg",
+						[
+							agentView.renderCall(card.args as never, theme, pendingContext(card.args)),
+							agentView.renderResult(
+								{ content: [], details: card.details } as never,
+								{ expanded: false, isPartial: true },
+								theme,
+								pendingContext(card.args),
+							),
+						],
+						w,
+					)
+				: toolShell(
+						card.isError ? "toolErrorBg" : "toolSuccessBg",
+						[
+							agentView.renderCall(card.args as never, theme, doneContext(card.args, card.isError)),
+							agentView.renderResult(
+								{ content: [], details: card.details } as never,
+								{ expanded: card.expanded ?? false, isPartial: false },
+								theme,
+								doneContext(card.args, card.isError),
+							),
+						],
+						w,
+					);
+		case "control":
+			return card.isPartial
+				? toolShell(
+						"toolPendingBg",
+						[
+							agentControlView.renderCall(card.args as never, theme, pendingContext(card.args)),
+							agentControlView.renderResult(
+								{ content: [], details: card.details } as never,
+								{ expanded: false, isPartial: true },
+								theme,
+								pendingContext(card.args),
+							),
+						],
+						w,
+					)
+				: toolShell(
+						card.isError ? "toolErrorBg" : "toolSuccessBg",
+						[
+							agentControlView.renderCall(card.args as never, theme, doneContext(card.args, card.isError)),
+							agentControlView.renderResult(
+								{ content: [], details: card.details } as never,
+								{ expanded: card.expanded ?? false, isPartial: false },
+								theme,
+								doneContext(card.args, card.isError),
+							),
+						],
+						w,
+					);
+		case "notification":
+			return renderLines(renderNotification({ details: card.details }, { expanded: false }, theme), w);
+	}
+}
+
+/**
+ * Assemble one screen: the tool-call stream top-aligned, the widget pinned
+ * at the bottom (pi registers it aboveEditor — visually the fixed strip
+ * above the input), blank padding between them.
+ */
+function screenLines(stream: (StreamCard | null)[], phaseTicks: number, H: number, w: number): string[] {
+	const cardLines: string[] = [];
+	for (const card of stream) {
+		if (!card) continue;
+		// Streaming agent cards get the elapsed time baked into their stream
+		// phase (see path B); others are static.
+		cardLines.push(...renderPathCard(card, w));
+	}
+	void phaseTicks;
+	const widgetLines = widgetRender ? widgetRender() : [];
+	const lines = [...cardLines];
+	const bottom = Math.max(0, H - widgetLines.length);
+	while (lines.length < bottom) lines.push(" ".repeat(w));
+	if (widgetLines.length) lines.push(...widgetLines);
+	return lines.slice(0, H);
+}
+
+// ── Widget (real AgentWidget instance, diffed against each phase) ──
+
+let widgetRender: (() => string[]) | undefined;
+const widgetUi = {
+	setWidget: (
+		_key: string,
+		factory: ((tui: unknown, th: Theme) => { render(): string[] }) | undefined,
+		_opts: unknown,
+	) => {
+		widgetRender = factory ? factory({ requestRender: () => {} }, theme).render : undefined;
+	},
+} as never;
+const widget = new AgentWidget(widgetUi as never);
+const fakeAgent = (agentId: string, title: string, startedAt: number, activity: unknown) =>
+	({
+		agentId,
+		title,
+		startedAt,
+		status: "running",
+		getLatestActivity: () => activity,
+	}) as unknown as AgentProcess;
+const widgetState = new Map<string, { startedAt: number }>();
+function syncWidget(agents: WidgetAgent[] | undefined): void {
+	const want = new Set((agents ?? []).map((a) => a.id));
+	for (const id of widgetState.keys()) {
+		if (!want.has(id)) {
+			widget.remove(id);
+			widgetState.delete(id);
+		}
+	}
+	for (const a of agents ?? []) {
+		if (!widgetState.has(a.id)) {
+			// startedAt per round: elapsed grows from the agent's own start.
+			const started = Date.now() - a.startedOffset;
+			widgetState.set(a.id, { startedAt: started });
+			widget.add(fakeAgent(a.id, a.title, started, a.activity));
+		}
+	}
+}
+
+// ── Path definitions ─────────────────────────────────────────
+
+const p = params;
+const bgArgs: AgentParams = { ...p, run_in_background: true };
+
+// Path A — background: three concurrent agents spawn, work, get steered,
+// stopped, and complete; the widget tracks them at the bottom.
+const pathA: LifecyclePath = {
+	title: "A · background agents — 3 spawn → work → steer → stop → notify (widget pinned at bottom)",
 	phases: [
 		{
-			name: "spawn starting",
+			name: "spawn a1",
 			ticks: 20,
-			render: (_t, w) =>
-				pendingCard(agentView, { ...params, run_in_background: true }, details({ runInBackground: true }), w),
+			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: true }],
+			widget: [],
 		},
 		{
-			name: "started",
+			name: "a1 started",
 			ticks: 19,
-			render: (_t, w) => {
-				widgetOn();
-				return [
-					...backgroundWidgetLines(w),
-					...doneCard(agentView, { ...params, run_in_background: true }, details({ runInBackground: true }), w),
-				];
-			},
+			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false }],
+			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+		},
+		{
+			name: "spawn a2",
+			ticks: 20,
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: true,
+				},
+			],
+			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+		},
+		{
+			name: "a2 started",
+			ticks: 19,
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+			],
+		},
+		{
+			name: "spawn a3",
+			ticks: 20,
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: true,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+			],
+		},
+		{
+			name: "a3 started",
+			ticks: 19,
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+			],
 		},
 		{
 			name: "working",
 			ticks: 40,
-			render: (_t, w) => [
-				...backgroundWidgetLines(w),
-				...doneCard(agentView, { ...params, run_in_background: true }, details({ runInBackground: true }), w),
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 		},
 		{
-			name: "steer pending",
+			name: "steer a2",
 			ticks: 20,
-			render: (_t, w) => [
-				...backgroundWidgetLines(w),
-				...pendingCard(
-					agentControlView,
-					{ agent_id: "a1", action: "steer", message: "重点看 orders 表的索引和慢查询" },
-					{ action: "steer", title: params.title },
-					w,
-				),
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					details: { action: "steer", title: "慢查询排查" },
+					isPartial: true,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 		},
 		{
 			name: "steered",
 			ticks: 19,
-			render: (_t, w) => [
-				...backgroundWidgetLines(w),
-				...doneCard(
-					agentControlView,
-					{ agent_id: "a1", action: "steer", message: "重点看 orders 表的索引和慢查询" },
-					{
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					details: {
 						action: "steer",
-						title: params.title,
-						message: "重点看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
+						title: "慢查询排查",
+						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
-					w,
-				),
+					isPartial: false,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 		},
 		{
-			name: "stop pending",
+			name: "stop a3",
 			ticks: 20,
-			render: (_t, w) => [
-				...backgroundWidgetLines(w),
-				...pendingCard(
-					agentControlView,
-					{ agent_id: "a1", action: "stop" },
-					{ action: "stop", title: params.title },
-					w,
-				),
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					details: {
+						action: "steer",
+						title: "慢查询排查",
+						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
+					},
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a3", action: "stop" },
+					details: { action: "stop", title: "审计 reports 表" },
+					isPartial: true,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 		},
 		{
-			name: "stopped",
+			name: "stopped a3",
 			ticks: 19,
-			render: (_t, w) => [
-				...backgroundWidgetLines(w),
-				...doneCard(
-					agentControlView,
-					{ agent_id: "a1", action: "stop" },
-					{ action: "stop", title: params.title, status: "stop" },
-					w,
-				),
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					details: {
+						action: "steer",
+						title: "慢查询排查",
+						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
+					},
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a3", action: "stop" },
+					details: { action: "stop", title: "审计 reports 表", status: "stop" },
+					isPartial: false,
+				},
+			],
+			widget: [
+				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
 		},
 		{
-			name: "notification",
+			name: "a1 completes",
 			ticks: 20,
-			render: (_t, w) => {
-				widgetOff();
-				return renderLines(
-					renderNotification(
-						{
-							details: {
-								status: "completed",
-								agent_id: "a1",
-								title: params.title,
-								model: params.model,
-								thinking: params.thinking,
-								result: "Found 5 flaky tests. All share the `retries: 0` flag.",
-								usage: { durationMs: 27_500, tokens: 12_500, toolUses: 3 },
-								sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
-								sessionId: "sess-1",
-							},
-						},
-						{ expanded: false },
-						theme,
-					),
-					w,
-				);
-			},
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					details: {
+						action: "steer",
+						title: "慢查询排查",
+						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
+					},
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a3", action: "stop" },
+					details: { action: "stop", title: "审计 reports 表", status: "stop" },
+					isPartial: false,
+				},
+				{
+					kind: "notification",
+					details: {
+						status: "completed",
+						agent_id: "a1",
+						title: "检查 CI 配置",
+						model: p.model,
+						thinking: p.thinking,
+						result: "Found 5 flaky tests. All share the `retries: 0` flag.",
+						usage: { durationMs: 27_500, tokens: 12_500, toolUses: 3 },
+						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
+						sessionId: "sess-1",
+					},
+				},
+			],
+			widget: [{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking }],
+		},
+		{
+			name: "a2 completes",
+			ticks: 20,
+			stream: [
+				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, title: "慢查询排查" }),
+					isPartial: false,
+				},
+				{
+					kind: "agent",
+					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					details: {
+						action: "steer",
+						title: "慢查询排查",
+						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
+					},
+					isPartial: false,
+				},
+				{
+					kind: "control",
+					args: { agent_id: "a3", action: "stop" },
+					details: { action: "stop", title: "审计 reports 表", status: "stop" },
+					isPartial: false,
+				},
+				{
+					kind: "notification",
+					details: {
+						status: "completed",
+						agent_id: "a1",
+						title: "检查 CI 配置",
+						model: p.model,
+						thinking: p.thinking,
+						result: "Found 5 flaky tests. All share the `retries: 0` flag.",
+						usage: { durationMs: 27_500, tokens: 12_500, toolUses: 3 },
+						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
+						sessionId: "sess-1",
+					},
+				},
+				{
+					kind: "notification",
+					details: {
+						status: "completed",
+						agent_id: "a2",
+						title: "慢查询排查",
+						model: p.model,
+						thinking: p.thinking,
+						result: "Slow query found: orders.idx_created_at missing; added.",
+						usage: { durationMs: 42_100, tokens: 18_300, toolUses: 5 },
+						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
+						sessionId: "sess-2",
+					},
+				},
+			],
+			widget: [],
 		},
 	],
 	pauseTicks: 30,
 	height: 0,
 };
 
-// Path B — foreground agent: starting → streaming activity → collapsed → expanded.
-const fgLifecycle: LifecycleSection = {
-	title: "B · foreground agent — starting → stream → collapsed → expanded (loops, blank pause)",
+// Path B — foreground agent: one slot that streams, then completes.
+const fgEvents: RenderEvent[] = [
+	...activityEvents(streamActivities.length),
+	{ kind: "text", text: streamLines.join("\n") },
+];
+const pathB: LifecyclePath = {
+	title: "B · foreground agent — starting → stream → collapsed → expanded",
 	phases: [
 		{
 			name: "starting",
 			ticks: 20,
-			render: (_t, w) => pendingCard(agentView, params, details(), w),
+			stream: [{ kind: "agent", args: p, details: details(), isPartial: true }],
 		},
 		{
 			name: "streaming",
 			ticks: 60,
-			render: (t, w) => {
-				const step = Math.floor(t / 3);
-				const shown = streamLines.slice(0, step + 1).join("\n");
-				return pendingCard(
-					agentView,
-					params,
-					details({ events: [...activityEvents(step), { kind: "text", text: shown }] }),
-					w,
-				);
-			},
+			stream: [
+				{
+					kind: "agent",
+					args: p,
+					details: details({ events: [] }),
+					isPartial: true,
+				},
+			],
 		},
 		{
 			name: "collapsed",
 			ticks: 19,
-			render: (_t, w) =>
-				doneCard(
-					agentView,
-					params,
-					details({
-						events: [...activityEvents(streamActivities.length), { kind: "text", text: streamLines.join("\n") }],
-					}),
-					w,
-				),
+			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false }],
 		},
 		{
 			name: "expanded",
 			ticks: 19,
-			render: (_t, w) =>
-				doneCard(
-					agentView,
-					params,
-					details({
-						events: [...activityEvents(streamActivities.length), { kind: "text", text: streamLines.join("\n") }],
-					}),
-					w,
-					{ expanded: true },
-				),
+			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false, expanded: true }],
 		},
 	],
 	pauseTicks: 30,
 	height: 0,
 };
 
-// Path C — background failure: spawn fails → error card → failed notification.
-const bgFailure: LifecycleSection = {
-	title: "C · background failure — start failed → failed notification (loops, blank pause)",
+// Path C — background failure: spawn dies, failed notification follows.
+const pathC: LifecyclePath = {
+	title: "C · background failure — start failed → failed notification",
 	phases: [
 		{
 			name: "starting",
 			ticks: 20,
-			render: (_t, w) =>
-				pendingCard(agentView, { ...params, run_in_background: true }, details({ runInBackground: true }), w),
+			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: true }],
 		},
 		{
 			name: "start failed",
 			ticks: 19,
-			render: (_t, w) =>
-				doneCard(
-					agentView,
-					{ ...params, run_in_background: true },
-					details({
+			stream: [
+				{
+					kind: "agent",
+					args: bgArgs,
+					details: details({
 						runInBackground: true,
 						title: "bad model",
 						error: 'Model "no-such-model-xyz" not available.',
 					}),
-					w,
-					{ isError: true },
-				),
+					isPartial: false,
+					isError: true,
+				},
+			],
 		},
 		{
 			name: "failed notification",
 			ticks: 20,
-			render: (_t, w) =>
-				renderLines(
-					renderNotification(
-						{
-							details: {
-								status: "failed",
-								agent_id: "a1",
-								title: params.title,
-								model: params.model,
-								thinking: params.thinking,
-								result: 'Model "no-such-model-xyz" not available.',
-								usage: { durationMs: 4_200, tokens: 180, toolUses: 0 },
-								sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
-								sessionId: "sess-1",
-							},
-						},
-						{ expanded: false },
-						theme,
-					),
-					w,
-				),
+			stream: [
+				{
+					kind: "agent",
+					args: bgArgs,
+					details: details({
+						runInBackground: true,
+						title: "bad model",
+						error: 'Model "no-such-model-xyz" not available.',
+					}),
+					isPartial: false,
+					isError: true,
+				},
+				{
+					kind: "notification",
+					details: {
+						status: "failed",
+						agent_id: "a1",
+						title: params.title,
+						model: p.model,
+						thinking: p.thinking,
+						result: 'Model "no-such-model-xyz" not available.',
+						usage: { durationMs: 4_200, tokens: 180, toolUses: 0 },
+						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
+						sessionId: "sess-1",
+					},
+				},
+			],
 		},
 	],
 	pauseTicks: 30,
@@ -599,135 +926,113 @@ const bgFailure: LifecycleSection = {
 };
 
 // Path D — foreground failure: streams a little, then dies mid-run.
-const fgFailure: LifecycleSection = {
-	title: "D · foreground failure — starting → partial stream → error (loops, blank pause)",
+const partialEvents: RenderEvent[] = [...activityEvents(2), { kind: "text", text: streamLines.slice(0, 2).join("\n") }];
+const pathD: LifecyclePath = {
+	title: "D · foreground failure — starting → partial stream → error",
 	phases: [
 		{
 			name: "starting",
 			ticks: 20,
-			render: (_t, w) => pendingCard(agentView, params, details(), w),
+			stream: [{ kind: "agent", args: p, details: details(), isPartial: true }],
 		},
 		{
 			name: "partial stream",
 			ticks: 20,
-			render: (_t, w) =>
-				pendingCard(
-					agentView,
-					params,
-					details({ events: [...activityEvents(2), { kind: "text", text: streamLines.slice(0, 2).join("\n") }] }),
-					w,
-				),
+			stream: [{ kind: "agent", args: p, details: details({ events: partialEvents }), isPartial: true }],
 		},
 		{
 			name: "failed",
 			ticks: 19,
-			render: (_t, w) =>
-				doneCard(
-					agentView,
-					params,
-					details({
-						events: [...activityEvents(2), { kind: "text", text: streamLines.slice(0, 2).join("\n") }],
+			stream: [
+				{
+					kind: "agent",
+					args: p,
+					details: details({
+						events: partialEvents,
 						error: "Agent exited with status 1: bash failed after 3 attempts.",
 					}),
-					w,
-					{ isError: true },
-				),
+					isPartial: false,
+					isError: true,
+				},
+			],
 		},
 	],
 	pauseTicks: 30,
 	height: 0,
 };
 
-// ── Pagination + live loop ───────────────────────────────────
+const sections: LifecyclePath[] = [pathA, pathB, pathC, pathD];
 
-// Paginate: stack sections until the page would overflow the terminal, then
-// start a new page. The canvas is fully redrawn in place per page, so
-// animations loop in place and every section is fully visible even on a
-// short terminal — nothing is ever clipped or scrolled away. Pages are
-// switched with the keyboard (→/space/n next, ←/p previous, q quit).
-function paginate(sections: LifecycleSection[], budget: number): LifecycleSection[][] {
-	const pages: LifecycleSection[][] = [];
-	let page: LifecycleSection[] = [];
-	let used = 0;
-	for (const s of sections) {
-		const need = 1 + s.height + 1; // title row + canvas + blank row
-		if (used + need > budget && page.length > 0) {
-			pages.push(page);
-			page = [];
-			used = 0;
-		}
-		page.push(s);
-		used += need;
+// ── Live loop ────────────────────────────────────────────────
+
+function phaseAt(s: LifecyclePath, t: number): { phase: PathPhase; local: number } | null {
+	let acc = 0;
+	for (const ph of s.phases) {
+		if (t < acc + ph.ticks) return { phase: ph, local: t - acc };
+		acc += ph.ticks;
 	}
-	if (page.length > 0) pages.push(page);
-	return pages.length > 0 ? pages : [sections];
+	return null; // pause
 }
 
-async function runLive(sections: LifecycleSection[]): Promise<void> {
+function lifecycleRender(s: LifecyclePath, t: number, w: number): string[] {
+	const total = cycleTicks(s);
+	t %= total;
+	const hit = phaseAt(s, t);
+	if (!hit) {
+		syncWidget([]);
+		return blankLines(s.height, w); // blank pause between rounds
+	}
+	syncWidget(hit.phase.widget);
+	return screenLines(hit.phase.stream, hit.local, s.height, w);
+}
+
+function blankLines(height: number, w: number): string[] {
+	return Array.from({ length: height }, () => " ".repeat(w));
+}
+
+async function runLive(): Promise<void> {
 	console.log(
-		"\n\x1b[1m\x1b[4mLive — lifecycles looping, blank pause between rounds, key-paginated (Ctrl+C to exit)\x1b[0m",
+		"\n\x1b[1m\x1b[4mLive — each path is one full screen, looping with a blank pause between rounds (Ctrl+C to exit)\x1b[0m",
 	);
 	if (!process.stdout.isTTY) {
-		// Sample each lifecycle at several ticks spanning the full cycle.
-		for (const s of sections) {
-			console.log(`\n\x1b[1m\x1b[4m${s.title}\x1b[0m`);
-			const total = cycleTicks(s);
-			for (const frac of [0, 0.2, 0.45, 0.7, 0.95]) {
-				for (const l of lifecycleRender(s, Math.floor(total * frac), 100)) console.log(l);
-				console.log("· · ·");
-			}
-		}
-		return;
+		console.error("preview needs a TTY — run it in a terminal (tmux, kitty, …).");
+		process.exit(1);
 	}
-	// Own the whole screen: sections stack per page (title + canvas + blank
-	// row each); →/space/n and ←/p flip pages, q quits. Raw stdin so single
-	// keypresses land without Enter.
 	process.stdout.write("\x1b[2J\x1b[H");
 	process.stdout.write(
-		"\x1b[1m\x1b[4mLive — lifecycles looping, blank pause between rounds, key-paginated (Ctrl+C to exit)\x1b[0m\n",
+		"\x1b[1m\x1b[4mLive — each path is one full screen, looping with a blank pause between rounds (Ctrl+C to exit)\x1b[0m\n",
 	);
 	process.stdout.write("\x1b[?25l"); // hide cursor
 	const rows = process.stdout.rows ?? 40;
 	const width = process.stdout.columns ?? 100;
-	const pages = paginate(sections, rows - 3); // top title + page indicator
+	// One screen per path: full-height canvas, key-paginated.
+	const height = rows - 4; // top title + bottom page indicator + margins
+	for (const s of sections) s.height = height;
 	let page = 0;
 	let quit = false;
-	// Raw stdin for single-key paging; only when stdin is a real TTY (piped
-	// stdin falls back to Ctrl+C to exit).
 	if (process.stdin.isTTY) {
 		process.stdin.setRawMode(true);
 		process.stdin.resume();
 		process.stdin.on("data", (chunk: Buffer) => {
 			const s = chunk.toString();
-			// Ctrl+C (\u0003) quits — raw mode turns SIGINT into a char, so it's
-			// handled here; the spinner/widget timers are cleaned up on exit.
 			if (s === "\u0003") {
 				quit = true;
 			} else if (s === " " || s === "n" || s === "\r" || s === "\x1b[C") {
-				page = (page + 1) % pages.length;
+				page = (page + 1) % sections.length;
 			} else if (s === "p" || s === "\x1b[D") {
-				page = (page - 1 + pages.length) % pages.length;
+				page = (page - 1 + sections.length) % sections.length;
 			}
 		});
 	}
 	try {
-		let lastPage = -1;
 		for (let t = 0; !quit; t++) {
-			if (page !== lastPage) {
-				process.stdout.write("\x1b[2J\x1b[H");
-				lastPage = page;
-			}
-			let y = 2;
-			for (const s of pages[page]) {
-				process.stdout.write(`\x1b[${y};1H\x1b[2K\x1b[1m\x1b[4m${s.title}\x1b[0m`);
-				const lines = lifecycleRender(s, t, width);
-				for (let k = 0; k < s.height; k++) {
-					process.stdout.write(`\x1b[${y + 1 + k};1H\x1b[2K${lines[k] ?? " "}`);
-				}
-				y += 1 + s.height + 1;
+			process.stdout.write(`\x1b[2;1H\x1b[2K\x1b[1m\x1b[4m${sections[page].title}\x1b[0m`);
+			const lines = lifecycleRender(sections[page], t, width);
+			for (let k = 0; k < height; k++) {
+				process.stdout.write(`\x1b[${3 + k};1H\x1b[2K${lines[k] ?? " "}`);
 			}
 			process.stdout.write(
-				`\x1b[${rows};1H\x1b[2K\x1b[2m— page ${page + 1}/${pages.length} (→/space next · ←/p prev · Ctrl+C quit) —\x1b[0m`,
+				`\x1b[${rows};1H\x1b[2K\x1b[2m— path ${page + 1}/${sections.length} (→/space next · ←/p prev · Ctrl+C quit) —\x1b[0m`,
 			);
 			await sleep(80);
 		}
@@ -737,19 +1042,9 @@ async function runLive(sections: LifecycleSection[]): Promise<void> {
 			process.stdin.pause();
 		}
 		process.stdout.write("\x1b[?25h\n");
-		// Spinner animations keep their intervals alive (they hold the event
-		// loop), so exit explicitly instead of letting the process hang.
 		process.exit(0);
 	}
 }
 
-// Measure fixed canvas heights over a full cycle (every phase of each
-// lifecycle, including the paused blank), then run all sections forever.
-const sections = [bgLifecycle, fgLifecycle, bgFailure, fgFailure];
-for (const s of sections) {
-	let maxH = 0;
-	for (let t = 0; t < cycleTicks(s); t++) maxH = Math.max(maxH, lifecycleRender(s, t, 100).length);
-	s.height = maxH;
-}
-await runLive(sections);
+await runLive();
 widget.dispose();
