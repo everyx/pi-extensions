@@ -29,6 +29,29 @@ describe("htmlToMarkdown", () => {
 		assert.ok(!result.markdown.includes("Home"));
 		assert.ok(!result.markdown.includes("© 2026"));
 	});
+	it("emits Markdown-for-Agents layout: frontmatter → body → JSON-LD", () => {
+		const html = `<html><head>
+<title>Example Page</title>
+<meta name="description" content="A test page description that is long enough">
+<meta property="og:image" content="https://example.com/cover.png">
+<script type="application/ld+json">{"@type":"Article","headline":"T"}</script>
+</head><body><article><h1>Hello World</h1><p>This is the main content of the page and it is definitely long enough to pass the minimum useful content threshold check.</p></article></body></html>`;
+		const result = htmlToMarkdown(html);
+		assert.equal(result.title, "Example Page");
+		assert.match(
+			result.markdown,
+			/^---\ntitle: Example Page\ndescription: A test page description that is long enough\nimage: https:\/\/example\.com\/cover\.png\n---\n\n/,
+		);
+		assert.match(result.markdown, /```json\n\{"@type":"Article".*\n```\n$/);
+	});
+
+	it("prefers meta title over the <title> tag (Cloudflare precedence)", () => {
+		const html = `<html><head><title>Tag Title</title><meta property="og:title" content="OG Title">
+</head><body><article><h1>Hello World</h1><p>This is the main content of the page and it is definitely long enough to pass the minimum useful content threshold check.</p></article></body></html>`;
+		const result = htmlToMarkdown(html);
+		assert.equal(result.title, "OG Title");
+		assert.match(result.markdown, /^---\ntitle: OG Title\n/);
+	});
 
 	it("returns an error when content is unreadable or too short", () => {
 		const result = htmlToMarkdown("<html><body><p>x</p></body></html>");

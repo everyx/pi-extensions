@@ -162,11 +162,20 @@ UA 来源优先级：
 
 ### 请求行为
 
-- 浏览器 UA + 完整请求头（防反爬）。
+- 浏览器 UA + 完整请求头（防反爬）；`Accept` 首选 `text/markdown`（内容协商）。
 - 超时控制：AbortController + 默认超时（对齐 pi-web 的 DEFAULT_TIMEOUT_MS 语义）。
-- **SPA 空正文检测**：HTML 有但正文空（JS 渲染）→ 返回显式占位（`(no readable content)`，对齐根 SPEC 渲染层兜底）。
-- **错误规范化**：HTTP 状态/网络错误 → `error` 字段（非抛异常），如 `HTTP 403: Forbidden`。
-- **Jina Reader 兜底**：HTTP 提取失败/被反爬时，`r.jina.ai/<url>` 兜底转 Markdown。
+- **Markdown for Agents 直取**：目标站支持内容协商（Cloudflare 网络转换）时
+  直接拿到官方 Markdown（frontmatter + 正文），跳过本地转换。
+- **统一输出格式**（对齐 Markdown for Agents 布局）：frontmatter（
+  `title`/`description`/`image`，仅输出有值的字段）→ 正文 → JSON-LD（
+  有则末尾 fenced `json` 块）；本地转换与直取输出同一格式。
+  title 优先级：`meta[name=title]` > `og:title` > `<title>`（同 Cloudflare）。
+- **SPA 空正文检测**：HTML 有但正文空（JS 渲染）→ 返回显式占位（
+  `(no readable content)`，对齐根 SPEC 渲染层兜底）。
+- **错误规范化**：HTTP 状态/网络错误 → `error` 字段（非抛异常），如
+  `HTTP 403: Forbidden`。
+- 无第三方 fallback（不引入 r.jina.ai 类中转服务）；抓取失败即报错，
+  复杂抓取（认证/交互页）归 LLM 自行用 bash curl 等。
 
 ## 配置
 
