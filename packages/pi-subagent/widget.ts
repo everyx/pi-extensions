@@ -21,7 +21,9 @@ export class AgentWidget {
 	private readonly widget: StatusWidget;
 
 	constructor(ui: ExtensionUIContext) {
-		this.widget = new StatusWidget(ui);
+		// Widget title marks the strip as the Agent plugin's background tasks
+		// (v1.2.0 style) so users recognize it at a glance.
+		this.widget = new StatusWidget(ui, "Agents");
 	}
 
 	/** Track a background agent. No-op when the row is already present. */

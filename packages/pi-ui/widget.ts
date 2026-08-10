@@ -85,7 +85,11 @@ export class StatusWidget {
 	private registered = false;
 	private tui: { requestRender(): void } | undefined;
 
-	constructor(ui: ExtensionUIContext) {
+	constructor(
+		ui: ExtensionUIContext,
+		/** Optional widget title line (e.g. "Agents") — renders above the rows. */
+		private readonly title?: string,
+	) {
 		this.ui = ui;
 	}
 
@@ -156,6 +160,11 @@ export class StatusWidget {
 
 	private render(theme: Theme): string[] {
 		const lines: string[] = [];
+		if (this.title) {
+			// One marker line: `● <Title>` — accent dot + bold title color, so
+			// the widget's purpose is obvious at a glance (v1.2.0 style).
+			lines.push(`${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold(this.title))}`);
+		}
 		for (const row of this.rows.values()) {
 			lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
 		}
