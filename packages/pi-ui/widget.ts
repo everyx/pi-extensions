@@ -161,9 +161,9 @@ export class StatusWidget {
 	private render(theme: Theme): string[] {
 		const lines: string[] = [];
 		if (this.title) {
-			// One marker line: `● <Title>` — accent dot + bold title color, so
-			// the widget's purpose is obvious at a glance (v1.2.0 style).
-			lines.push(`${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold(this.title))}`);
+			// One marker line: ` ● <Title>` — 1-char left padding (matching the
+			// agent rows), accent dot + bold title color (v1.2.0 style).
+			lines.push(` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold(this.title))}`);
 		}
 		for (const row of this.rows.values()) {
 			lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
