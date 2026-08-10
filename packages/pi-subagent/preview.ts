@@ -70,7 +70,7 @@ const agentView = createToolView<Record<string, unknown>, Record<string, unknown
 			// starting… while nothing has streamed yet, running… once the
 			// agent is actually producing activity.
 			const d = ctx.result?.data as { events?: unknown[] } | undefined;
-			return d?.events?.length ? "running\u2026" : "starting\u2026";
+			return d?.events?.length ? "working\u2026" : "starting\u2026";
 		}
 		// Completed: "started" is a background spawn (task keeps running,
 		// tracked by the widget); a foreground agent is simply done.
@@ -317,6 +317,8 @@ interface PathPhase {
 	stream: (StreamCard | null)[];
 	/** Agents pinned in the bottom widget (background tasks). */
 	widget?: WidgetAgent[];
+	/** Status word in the path title to highlight while this phase is live. */
+	status?: string;
 }
 
 interface LifecyclePath {
@@ -330,6 +332,12 @@ interface LifecyclePath {
 
 function cycleTicks(s: LifecyclePath): number {
 	return s.phases.reduce((a, p) => a + p.ticks, 0) + s.pauseTicks;
+}
+
+/** Path title with the current phase's status word highlighted (accent). */
+function pathTitle(s: LifecyclePath, phase: PathPhase | undefined): string {
+	if (!phase?.status) return s.title;
+	return s.title.replace(phase.status, theme.fg("accent", phase.status));
 }
 
 function renderPathCard(card: StreamCard, w: number): string[] {
@@ -472,12 +480,14 @@ const pathA: LifecyclePath = {
 			ticks: 20,
 			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: true }],
 			widget: [],
+			status: "spawn",
 		},
 		{
 			name: "a1 started",
 			ticks: 19,
 			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false }],
 			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			status: "work",
 		},
 		{
 			name: "spawn a2",
@@ -492,6 +502,7 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			status: "spawn",
 		},
 		{
 			name: "a2 started",
@@ -509,6 +520,7 @@ const pathA: LifecyclePath = {
 				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
+			status: "work",
 		},
 		{
 			name: "spawn a3",
@@ -532,6 +544,7 @@ const pathA: LifecyclePath = {
 				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
+			status: "spawn",
 		},
 		{
 			name: "a3 started",
@@ -556,6 +569,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
+			status: "work",
 		},
 		{
 			name: "working",
@@ -580,6 +594,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
+			status: "work",
 		},
 		{
 			name: "steer a2",
@@ -610,6 +625,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
+			status: "steer",
 		},
 		{
 			name: "steered",
@@ -644,6 +660,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
+			status: "steer",
 		},
 		{
 			name: "stop a3",
@@ -684,6 +701,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
+			status: "stop",
 		},
 		{
 			name: "stopped a3",
@@ -715,7 +733,7 @@ const pathA: LifecyclePath = {
 				{
 					kind: "control",
 					args: { agent_id: "a3", action: "stop" },
-					details: { action: "stop", title: "审计 reports 表", status: "stop" },
+					details: { action: "stop", title: "审计 reports 表" },
 					isPartial: false,
 				},
 			],
@@ -723,6 +741,7 @@ const pathA: LifecyclePath = {
 				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
+			status: "stop",
 		},
 		{
 			name: "a1 completes",
@@ -754,7 +773,7 @@ const pathA: LifecyclePath = {
 				{
 					kind: "control",
 					args: { agent_id: "a3", action: "stop" },
-					details: { action: "stop", title: "审计 reports 表", status: "stop" },
+					details: { action: "stop", title: "审计 reports 表" },
 					isPartial: false,
 				},
 				{
@@ -773,6 +792,7 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking }],
+			status: "notify",
 		},
 		{
 			name: "a2 completes",
@@ -804,7 +824,7 @@ const pathA: LifecyclePath = {
 				{
 					kind: "control",
 					args: { agent_id: "a3", action: "stop" },
-					details: { action: "stop", title: "审计 reports 表", status: "stop" },
+					details: { action: "stop", title: "审计 reports 表" },
 					isPartial: false,
 				},
 				{
@@ -837,6 +857,7 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [],
+			status: "notify",
 		},
 	],
 	pauseTicks: 30,
@@ -853,6 +874,7 @@ const pathB: LifecyclePath = {
 	phases: [
 		{
 			name: "starting",
+			status: "starting",
 			ticks: 20,
 			stream: [{ kind: "agent", args: p, details: details(), isPartial: true }],
 		},
@@ -870,16 +892,19 @@ const pathB: LifecyclePath = {
 					isPartial: true,
 				},
 			],
+			status: "stream",
 		},
 		{
 			name: "collapsed",
 			ticks: 19,
 			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false }],
+			status: "collapsed",
 		},
 		{
 			name: "expanded",
 			ticks: 19,
 			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false, expanded: true }],
+			status: "expanded",
 		},
 	],
 	pauseTicks: 30,
@@ -888,7 +913,7 @@ const pathB: LifecyclePath = {
 
 // Path C — background failure: spawn dies, failed notification follows.
 const pathC: LifecyclePath = {
-	title: "C · background failure — start failed → failed notification",
+	title: "C · background failure — starting → start failed → failed notification",
 	phases: [
 		{
 			name: "starting",
@@ -911,6 +936,7 @@ const pathC: LifecyclePath = {
 					isError: true,
 				},
 			],
+			status: "start failed",
 		},
 		{
 			name: "failed notification",
@@ -942,6 +968,7 @@ const pathC: LifecyclePath = {
 					},
 				},
 			],
+			status: "failed notification",
 		},
 	],
 	pauseTicks: 30,
@@ -962,6 +989,7 @@ const pathD: LifecyclePath = {
 			name: "partial stream",
 			ticks: 20,
 			stream: [{ kind: "agent", args: p, details: details({ events: partialEvents }), isPartial: true }],
+			status: "partial stream",
 		},
 		{
 			name: "failed",
@@ -978,6 +1006,7 @@ const pathD: LifecyclePath = {
 					isError: true,
 				},
 			],
+			status: "error",
 		},
 	],
 	pauseTicks: 30,
@@ -1045,7 +1074,10 @@ async function runLive(): Promise<void> {
 	}
 	try {
 		for (let t = 0; !quit; t++) {
-			process.stdout.write(`\x1b[1;1H\x1b[2K\x1b[1m\x1b[4m${sections[page].title}\x1b[0m`);
+			// The path title highlights the live status word.
+			const total = cycleTicks(sections[page]);
+			const hit = phaseAt(sections[page], t % total);
+			process.stdout.write(`\x1b[1;1H\x1b[2K\x1b[1m\x1b[4m${pathTitle(sections[page], hit?.phase)}\x1b[0m`);
 			const lines = lifecycleRender(sections[page], t, width);
 			for (let k = 0; k < height; k++) {
 				process.stdout.write(`\x1b[${2 + k};1H\x1b[2K${lines[k] ?? " "}`);

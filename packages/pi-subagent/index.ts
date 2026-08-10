@@ -509,7 +509,7 @@ export default function (pi: ExtensionAPI) {
 					// starting… while nothing has streamed yet, running… once the
 					// agent is actually producing activity.
 					const d = ctx.result?.data as { events?: unknown[] } | undefined;
-					return d?.events?.length ? "running\u2026" : "starting\u2026";
+					return d?.events?.length ? "working\u2026" : "starting\u2026";
 				}
 				// Completed: "started" is a background spawn (task keeps running,
 				// tracked by the widget); a foreground agent is simply done.
