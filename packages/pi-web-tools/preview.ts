@@ -1,132 +1,24 @@
 /**
- * Component preview — a mini "storybook" for the two tool cards.
+ * web-tools preview — 1:1 screen simulation, aligned with pi-subagent's.
  *
- * Renders every lifecycle state of web_search and web_fetch through the
- * real render pipeline with the real pi theme:
+ * Each path occupies one full screen and mirrors how pi actually renders:
+ * tool calls stack top-down (each call is one slot that evolves in place:
+ * pending header → completed card), results fold, and every path loops with
+ * a blank pause between rounds. The path title highlights the live status
+ * word (accent) as the lifecycle advances.
  *
- *   web_search — running (animated) / success (api channel) / success
- *                (browser engine) / empty / channel-unavailable error
- *   web_fetch  — running (animated) / success / 404 error
- *
- *   pnpm preview              # live: all animations looping in place,
- *                             # key-paginated (→/space next, ←/p prev, Ctrl+C)
- *   pnpm preview -- static    # static grid only
- *   THEME=ayu-dark pnpm preview
+ *   pnpm preview                # 1:1 live paths (TTY)
+ *   THEME=ayu-dark pnpm preview # or any pi theme name
  */
 
-import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
-import { initPreviewTheme } from "@everyx/pi-ui/theme.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 
-const theme: Theme = await initPreviewTheme();
-
-// ── helpers ──────────────────────────────────────────────────────
-
-function renderLines(component: unknown, width = 100): string[] {
-	const c = component as { render(w: number): string[] };
-	return c.render(width);
-}
-
-/** Simulate pi's framework tool shell (default shell). */
-function shell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[]) {
-	const box = new Box(1, 1, (t: string) => theme.bg(bg, t));
-	for (const child of children) box.addChild(child as never);
-	return { render: (w: number) => renderLines(box, w) };
-}
-
-function toolShell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[], w = 100): string[] {
-	return renderLines(shell(bg, children), w);
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Shared state for the animated sections — the spinner is cached here so
- * frames advance with wall-clock time across re-renders (per-render state
- * would restart the spinner every tick and never animate). */
-const liveState = { startedAt: Date.now() - 27500, spinner: undefined as unknown };
-
-function ctx(
-	isPartial: boolean,
-	isError = false,
-	details: Record<string, unknown> = {},
-	state: Record<string, unknown> = {},
-	args: Record<string, unknown> = {},
-): {
-	result: AgentToolResult<Record<string, unknown>>;
-	context: {
-		state: Record<string, unknown>;
-		args: Record<string, unknown>;
-		isPartial?: boolean;
-		isError: boolean;
-		invalidate: () => void;
-	};
-} {
-	return {
-		result: {
-			role: "toolResult",
-			toolCallId: "preview",
-			toolName: "web_search",
-			content: [{ type: "text", text: (details._body as string) ?? "" }],
-			details,
-			isError,
-		} as unknown as AgentToolResult<Record<string, unknown>>,
-		context: {
-			state,
-			args,
-			isPartial,
-			isError,
-			invalidate: () => {},
-		},
-	};
-}
-
-// ── Story data ───────────────────────────────────────────────────
-
-const searchResults = [
-	{
-		title: "Rocket - Simple, Fast, Type-Safe",
-		url: "https://rocket.rs/",
-		snippet: "Rocket is a web framework for Rust that makes it simple to write fast, secure web applications.",
-	},
-	{
-		title: "Actix Web",
-		url: "https://actix.rs/",
-		snippet: "Actix Web is a powerful, pragmatic, and extremely fast web framework for Rust.",
-	},
-	{
-		title: "Axum - Modular web framework",
-		url: "https://github.com/tokio-rs/axum",
-		snippet: "Axum is a modular web framework built on tokio, tower, and hyper.",
-	},
-	{
-		title: "Warp - A super-easy, composable web server",
-		url: "https://github.com/seanmonstar/warp",
-		snippet: "Warp is a super-easy, composable web server framework for warp speeds.",
-	},
-	{
-		title: "Poem - A full-featured and easy-to-use web framework",
-		url: "https://github.com/poem-web/poem",
-		snippet: "Poem is a full-featured and easy-to-use web framework with FastAPI-style ergonomics.",
-	},
-];
-
-const fetchData = {
-	title: "Rocket - Simple, Fast, Type-Safe Web Framework for Rust",
-	markdown: [
-		"Rocket is a web framework for Rust (nightly) that makes it simple to write fast, secure web applications without sacrificing flexibility, usability, or safety.",
-		"",
-		"## Highlights",
-		"- Routing, preprocessing, and validation of request parameters",
-		"- Security and privacy best practices enforced by default",
-		"- Type-safe templating and automatic escaping",
-		"- Built-in support for JSON, cookies, streams, and more",
-		"",
-		"[Learn more](https://rocket.rs/)",
-	].join("\n"),
-};
-
-// ── Views (same templates as index.ts) ───────────────────────────
+// ── Views (same templates as index.ts) ─────────────────────────
 
 const searchView = createToolView<Record<string, unknown>, unknown>({
 	name: "web_search",
@@ -157,260 +49,414 @@ const fetchView = createToolView<Record<string, unknown>, unknown>({
 	body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
 });
 
-// ── Live sections ────────────────────────────────────────────────
+const themeName = process.env.THEME || "light";
+initTheme(themeName);
 
-interface LiveSection {
+// The live theme object lives in an internal module that the package entry
+// doesn't re-export and whose subpath is blocked by its "exports" map. Walk
+// node_modules physically (tsx's resolver enforces exports even for
+// require.resolve) and import the file by absolute URL, which bypasses the
+// exports map entirely.
+function findPkgDir(name: string): string | null {
+	let dir = import.meta.dirname;
+	for (;;) {
+		const candidate = path.join(dir, "node_modules", name);
+		if (existsSync(path.join(candidate, "package.json"))) return candidate;
+		const parent = path.dirname(dir);
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+const pkgDir = findPkgDir("@earendil-works/pi-coding-agent");
+if (!pkgDir) throw new Error("pi-coding-agent not found under node_modules");
+const themeModulePath = path.join(pkgDir, "dist", "modes", "interactive", "theme", "theme.js");
+const { theme: globalTheme } = (await import(pathToFileURL(themeModulePath).href)) as { theme: Theme };
+const theme = globalTheme as Theme;
+
+function renderLines(component: unknown, width = 100): string[] {
+	const c = component as { render(w: number): string[] };
+	return c.render(width);
+}
+
+/** Simulate pi's framework tool shell (tool-execution.js default shell). */
+function shell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[]) {
+	const box = new Box(1, 1, (t: string) => theme.bg(bg, t));
+	for (const child of children) box.addChild(child as never);
+	return { render: (w: number) => renderLines(box, w) };
+}
+
+function toolShell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[], w = 100): string[] {
+	return renderLines(shell(bg, children), w);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Shared render state — the spinner instance rides it so the Braille frames
+// keep animating (each render reuses the same Spinner).
+const cardState: Record<string, unknown> = { startedAt: Date.now() };
+function pendingContext(args: unknown, isError = false) {
+	return { args, state: cardState, invalidate: () => {}, executionStarted: true, isPartial: true, isError } as never;
+}
+function doneContext(args: unknown, isError = false) {
+	return {
+		args,
+		state: cardState,
+		invalidate: () => {},
+		executionStarted: true,
+		isPartial: false,
+		isError,
+	} as never;
+}
+
+// ── Story data ─────────────────────────────────────────────
+
+const searchResults = [
+	{
+		title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust",
+		url: "https://rocket.rs/",
+		snippet:
+			"Rocket is a web framework for Rust that makes it simple to write fast, type-safe, secure web applications.",
+		pageAge: "2 months ago",
+	},
+	{
+		title: "Rocket — A web framework for Rust (GitHub)",
+		url: "https://github.com/rwf2/Rocket",
+		snippet: "Rocket is a web framework for Rust with a focus on ease-of-use, expressibility, and speed.",
+		pageAge: "3 weeks ago",
+	},
+	{
+		title: "Getting Started — Rocket",
+		url: "https://rocket.rs/guide/getting-started",
+		snippet: "Install Rocket, create a project, write your first route and launch the application.",
+		pageAge: "6 days ago",
+	},
+	{
+		title: "Rocket (web framework) — Wikipedia",
+		url: "https://en.wikipedia.org/wiki/Rocket_(web_framework)",
+		snippet: "Rocket is a web framework written in Rust. It is designed to be easy to use while being powerful.",
+		pageAge: "1 year ago",
+	},
+	{
+		title: "Rocket vs Axum: choosing a Rust web framework",
+		url: "https://example.com/rocket-vs-axum",
+		snippet: "A practical comparison of two popular Rust web frameworks: ergonomics, performance and ecosystem.",
+		pageAge: "4 months ago",
+	},
+];
+
+const fetchedMarkdown = `Rocket — A web framework for Rust
+
+# Rocket
+
+Rocket is a web framework for Rust that makes it simple to write fast,
+type-safe, secure web applications. It prioritizes ease of use without
+sacrificing power: most features are built in, and the compiler catches
+the rest.
+
+## Features
+
+- Type-safe routes with automatic request guards
+- Zero-cost futures for async handlers
+- Template and static-file serving out of the box
+- First-class testing support
+
+## Getting started
+
+\`\`\`rust
+#[get("/hello/<name>")]
+fn hello(name: &str) -> String {
+    format!("Hello, {name}!")
+}
+\`\`\`
+
+Run with \`cargo run\` and visit /hello/world.`;
+
+// ── Screen simulation (same structure as pi-subagent's preview) ──
+
+/** One slot in the tool-call stream — evolves in place like real pi. */
+type StreamCard =
+	| {
+			kind: "search";
+			args: { query: string; engine?: string };
+			details: unknown;
+			isPartial: boolean;
+			isError?: boolean;
+			expanded?: boolean;
+	  }
+	| {
+			kind: "fetch";
+			args: { url: string };
+			details: unknown;
+			isPartial: boolean;
+			isError?: boolean;
+			expanded?: boolean;
+	  };
+
+interface PathPhase {
+	name: string;
+	ticks: number;
+	/** The tool-call stream at this point; null slots don't exist yet. */
+	stream?: (StreamCard | null)[];
+	/** Status word in the path title to highlight while this phase is live. */
+	status?: string;
+}
+
+interface LifecyclePath {
 	title: string;
-	/** Render one frame at global tick t for canvas width w. Returns the canvas lines. */
-	render: (t: number, w: number) => string[];
-	/** Fixed canvas height (max frame height, measured at setup). */
+	phases: PathPhase[];
+	/** Blank gap between rounds (empty screen). */
+	pauseTicks: number;
+	/** Screen height (fixed per terminal; set at run time). */
 	height: number;
 }
 
-const runningSearch = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolPendingBg",
-		[
-			searchView.renderCall(
-				{ query: "rust web framework" },
-				theme,
-				ctx(true, false, {}, liveState, { query: "rust web framework" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const searchSuccess = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolSuccessBg",
-		[
-			searchView.renderCall({ query: "rust web framework" }, theme, ctx(false).context),
-			searchView.renderResult(
-				ctx(
-					false,
-					false,
-					{ data: { results: searchResults, channel: "exa", count: 5 } },
-					{},
-					{ query: "rust web framework" },
-				).result,
-				{ expanded: true, isPartial: false },
-				theme,
-				ctx(false, false, {}, {}, { query: "rust web framework" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const searchBsk = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolSuccessBg",
-		[
-			searchView.renderCall({ query: "rust web framework", engine: "google" } as never, theme, ctx(false).context),
-			searchView.renderResult(
-				ctx(
-					false,
-					false,
-					{ data: { results: searchResults, channel: "bsk", engine: "google", count: 10 } },
-					{},
-					{ query: "rust web framework", engine: "google" },
-				).result,
-				{ expanded: true, isPartial: false },
-				theme,
-				ctx(false, false, {}, {}, { query: "rust web framework", engine: "google" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const searchEmpty = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolSuccessBg",
-		[
-			searchView.renderCall({ query: "nonexistent query" }, theme, ctx(false).context),
-			searchView.renderResult(
-				ctx(false, false, { data: { results: [], channel: "exa", count: 0 } }, {}, { query: "nonexistent query" })
-					.result,
-				{ expanded: true, isPartial: false },
-				theme,
-				ctx(false, false, {}, {}, { query: "nonexistent query" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const searchError = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolErrorBg",
-		[
-			searchView.renderCall({ query: "rust", engine: "yandex" } as never, theme, ctx(false, true).context),
-			searchView.renderResult(
-				ctx(
-					false,
-					true,
-					{
-						channel: "bsk",
-						engine: "yandex",
-						error: "real-browser channel: yandex blocked with a captcha challenge",
-						_body: "real-browser channel: yandex blocked with a captcha challenge",
-					},
-					{},
-					{ query: "rust", engine: "yandex" },
-				).result,
-				{ expanded: true, isPartial: false },
-				theme,
-				ctx(false, true, {}, {}, { query: "rust", engine: "yandex" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const runningFetch = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolPendingBg",
-		[
-			fetchView.renderCall(
-				{ url: "https://rocket.rs/" },
-				theme,
-				ctx(true, false, {}, liveState, { query: "rust web framework" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const fetchSuccess = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolSuccessBg",
-		[
-			fetchView.renderCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
-			fetchView.renderResult(
-				ctx(
-					false,
-					false,
-					{ data: { ...fetchData, title: "Rocket - Simple, Fast, Type-Safe" } },
-					{},
-					{ url: "https://rocket.rs/" },
-				).result,
-				{ expanded: true, isPartial: false },
-				theme,
-				ctx(false, false, {}, {}, { url: "https://rocket.rs/" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const fetchFolded = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolSuccessBg",
-		[
-			fetchView.renderCall({ url: "https://rocket.rs/" }, theme, ctx(false).context),
-			fetchView.renderResult(
-				ctx(
-					false,
-					false,
-					{ data: { ...fetchData, title: "Rocket - Simple, Fast, Type-Safe" } },
-					{},
-					{ url: "https://rocket.rs/" },
-				).result,
-				{ expanded: false, isPartial: false },
-				theme,
-				ctx(false, false, {}, {}, { url: "https://rocket.rs/" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const searchFolded = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolSuccessBg",
-		[
-			searchView.renderCall({ query: "rust web framework" }, theme, ctx(false).context),
-			searchView.renderResult(
-				ctx(
-					false,
-					false,
-					{ data: { results: searchResults, channel: "exa", count: 5 } },
-					{},
-					{ query: "rust web framework" },
-				).result,
-				{ expanded: false, isPartial: false },
-				theme,
-				ctx(false, false, {}, {}, { query: "rust web framework" }).context,
-			),
-		],
-		w,
-	);
-};
-
-const fetchError = (t: number, w: number) => {
-	void t;
-	return toolShell(
-		"toolErrorBg",
-		[
-			fetchView.renderCall({ url: "https://example.com/definitely-not-here" }, theme, ctx(false, true).context),
-			fetchView.renderResult(
-				ctx(false, true, { error: "HTTP 404: Not Found" }, {}, { url: "https://example.com/definitely-not-here" })
-					.result,
-				{ expanded: true, isPartial: false },
-				theme,
-				ctx(false, true, {}, {}, { url: "https://example.com/definitely-not-here" }).context,
-			),
-		],
-		w,
-	);
-};
-
-// ── Pagination + live loop ───────────────────────────────────────
-
-function paginate(sections: LiveSection[], budget: number): LiveSection[][] {
-	const pages: LiveSection[][] = [];
-	let page: LiveSection[] = [];
-	let used = 0;
-	for (const s of sections) {
-		const need = 1 + s.height + 1; // title row + canvas + blank row
-		if (used + need > budget && page.length > 0) {
-			pages.push(page);
-			page = [];
-			used = 0;
-		}
-		page.push(s);
-		used += need;
-	}
-	if (page.length > 0) pages.push(page);
-	return pages.length > 0 ? pages : [sections];
+function cycleTicks(s: LifecyclePath): number {
+	return s.phases.reduce((a, p) => a + p.ticks, 0) + s.pauseTicks;
 }
 
-async function runLive(sections: LiveSection[]): Promise<void> {
-	console.log("\n\x1b[1m\x1b[4mLive — all animations looping in place, key-paginated (Ctrl+C to exit)\x1b[0m");
+/** Path title with the current phase's status word highlighted (accent). */
+function pathTitle(s: LifecyclePath, phase: PathPhase | undefined): string {
+	if (!phase?.status) return s.title;
+	return s.title.replace(phase.status, theme.fg("accent", phase.status));
+}
+
+function renderPathCard(card: StreamCard, w: number): string[] {
+	const view = card.kind === "search" ? searchView : fetchView;
+	return card.isPartial
+		? toolShell(
+				"toolPendingBg",
+				[
+					view.renderCall(card.args as never, theme, pendingContext(card.args)),
+					view.renderResult(
+						{ content: [], details: card.details } as never,
+						{ expanded: false, isPartial: true },
+						theme,
+						pendingContext(card.args),
+					),
+				],
+				w,
+			)
+		: toolShell(
+				card.isError ? "toolErrorBg" : "toolSuccessBg",
+				[
+					view.renderCall(card.args as never, theme, doneContext(card.args, card.isError)),
+					view.renderResult(
+						{ content: [], details: card.details } as never,
+						{ expanded: card.expanded ?? false, isPartial: false },
+						theme,
+						doneContext(card.args, card.isError),
+					),
+				],
+				w,
+			);
+}
+
+/** One screen: the tool-call stream top-aligned, blank padding, no widget. */
+function screenLines(stream: (StreamCard | null)[], H: number, w: number): string[] {
+	const cardLines: string[] = [];
+	for (const card of stream) {
+		if (!card) continue;
+		// Blank row between stacked cards, like pi's message stream.
+		if (cardLines.length) cardLines.push("");
+		cardLines.push(...renderPathCard(card, w));
+	}
+	const lines = [...cardLines];
+	while (lines.length < H) lines.push(" ".repeat(w));
+	return lines.slice(0, H);
+}
+
+// ── Path definitions ─────────────────────────────────────────
+
+// Path A — web_search success: pending → results (collapsed) → expanded.
+const pathA: LifecyclePath = {
+	title: "A · web_search — searching → results (expanded)",
+	phases: [
+		{
+			name: "searching",
+			status: "searching",
+			ticks: 25,
+			stream: [{ kind: "search", args: { query: "rust web framework" }, details: {}, isPartial: true }],
+		},
+		{
+			name: "results",
+			status: "results",
+			ticks: 25,
+			stream: [
+				{
+					kind: "search",
+					args: { query: "rust web framework" },
+					details: { data: { results: searchResults, channel: "exa", count: 5 } },
+					isPartial: false,
+				},
+			],
+		},
+		{
+			name: "expanded",
+			status: "results",
+			ticks: 25,
+			stream: [
+				{
+					kind: "search",
+					args: { query: "rust web framework" },
+					details: { data: { results: searchResults, channel: "exa", count: 5 } },
+					isPartial: false,
+					expanded: true,
+				},
+			],
+		},
+	],
+	pauseTicks: 30,
+	height: 0,
+};
+
+// Path B — web_search failure: pending → error (no channel / bad engine).
+const pathB: LifecyclePath = {
+	title: "B · web_search failure — searching → failed",
+	phases: [
+		{
+			name: "searching",
+			status: "searching",
+			ticks: 25,
+			stream: [{ kind: "search", args: { query: "nonexistent query" }, details: {}, isPartial: true }],
+		},
+		{
+			name: "failed",
+			status: "failed",
+			ticks: 25,
+			stream: [
+				{
+					kind: "search",
+					args: { query: "nonexistent query", engine: "yandex" },
+					details: {
+						error: "yandex returned no usable results (captcha wall).",
+						data: { channel: "browser", engine: "yandex", count: 0 },
+					},
+					isPartial: false,
+					isError: true,
+				},
+			],
+		},
+	],
+	pauseTicks: 30,
+	height: 0,
+};
+
+// Path C — web_fetch success: pending → done (collapsed → expanded).
+const pathC: LifecyclePath = {
+	title: "C · web_fetch — fetching → done (expanded)",
+	phases: [
+		{
+			name: "fetching",
+			status: "fetching",
+			ticks: 25,
+			stream: [{ kind: "fetch", args: { url: "https://rocket.rs/" }, details: {}, isPartial: true }],
+		},
+		{
+			name: "done",
+			status: "done",
+			ticks: 25,
+			stream: [
+				{
+					kind: "fetch",
+					args: { url: "https://rocket.rs/" },
+					details: {
+						data: { title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust", markdown: fetchedMarkdown },
+					},
+					isPartial: false,
+				},
+			],
+		},
+		{
+			name: "expanded",
+			status: "done",
+			ticks: 25,
+			stream: [
+				{
+					kind: "fetch",
+					args: { url: "https://rocket.rs/" },
+					details: {
+						data: { title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust", markdown: fetchedMarkdown },
+					},
+					isPartial: false,
+					expanded: true,
+				},
+			],
+		},
+	],
+	pauseTicks: 30,
+	height: 0,
+};
+
+// Path D — web_fetch failure: pending → error.
+const pathD: LifecyclePath = {
+	title: "D · web_fetch failure — fetching → failed",
+	phases: [
+		{
+			name: "fetching",
+			status: "fetching",
+			ticks: 25,
+			stream: [{ kind: "fetch", args: { url: "https://expired.example.invalid/" }, details: {}, isPartial: true }],
+		},
+		{
+			name: "failed",
+			status: "failed",
+			ticks: 25,
+			stream: [
+				{
+					kind: "fetch",
+					args: { url: "https://expired.example.invalid/" },
+					details: { error: "fetch failed: ENOTFOUND expired.example.invalid" },
+					isPartial: false,
+					isError: true,
+				},
+			],
+		},
+	],
+	pauseTicks: 30,
+	height: 0,
+};
+
+const sections: LifecyclePath[] = [pathA, pathB, pathC, pathD];
+
+// ── Live loop (same as pi-subagent's preview) ─────────────────
+
+function phaseAt(s: LifecyclePath, t: number): { phase: PathPhase; local: number } | null {
+	let acc = 0;
+	for (const ph of s.phases) {
+		if (t < acc + ph.ticks) return { phase: ph, local: t - acc };
+		acc += ph.ticks;
+	}
+	return null; // pause
+}
+
+function lifecycleRender(s: LifecyclePath, t: number, w: number): string[] {
+	const total = cycleTicks(s);
+	t %= total;
+	const hit = phaseAt(s, t);
+	if (!hit) {
+		// Fresh round: the next call starts a fresh Elapsed timer.
+		cardState.startedAt = Date.now();
+		return blankLines(s.height, w); // blank pause between rounds
+	}
+	return screenLines(hit.phase.stream ?? [], s.height, w);
+}
+
+function blankLines(height: number, w: number): string[] {
+	return Array.from({ length: height }, () => " ".repeat(w));
+}
+
+async function runLive(): Promise<void> {
 	if (!process.stdout.isTTY) {
-		for (const s of sections) {
-			console.log(`\n\x1b[1m\x1b[4m${s.title}\x1b[0m`);
-			for (let f = 0; f < 4; f++) for (const l of s.render(f * 20, 100)) console.log(l);
-		}
-		return;
+		console.error("preview needs a TTY — run it in a terminal (tmux, kitty, …).");
+		process.exit(1);
 	}
 	process.stdout.write("\x1b[2J\x1b[H");
-	process.stdout.write("\x1b[1m\x1b[4mLive — all animations looping in place, key-paginated (Ctrl+C to exit)\x1b[0m\n");
-	process.stdout.write("\x1b[?25l");
+	process.stdout.write("\x1b[?25l"); // hide cursor
 	const rows = process.stdout.rows ?? 40;
 	const width = process.stdout.columns ?? 100;
-	const pages = paginate(sections, rows - 3);
+	// One screen per path: full-height canvas, key-paginated.
+	const height = rows - 2; // path title row + bottom page indicator
+	for (const s of sections) s.height = height;
 	let page = 0;
 	let quit = false;
 	if (process.stdin.isTTY) {
@@ -421,30 +467,24 @@ async function runLive(sections: LiveSection[]): Promise<void> {
 			if (s === "\u0003") {
 				quit = true;
 			} else if (s === " " || s === "n" || s === "\r" || s === "\x1b[C") {
-				page = (page + 1) % pages.length;
+				page = (page + 1) % sections.length;
 			} else if (s === "p" || s === "\x1b[D") {
-				page = (page - 1 + pages.length) % pages.length;
+				page = (page - 1 + sections.length) % sections.length;
 			}
 		});
 	}
 	try {
-		let lastPage = -1;
 		for (let t = 0; !quit; t++) {
-			if (page !== lastPage) {
-				process.stdout.write("\x1b[2J\x1b[H");
-				lastPage = page;
-			}
-			let y = 2;
-			for (const s of pages[page]) {
-				process.stdout.write(`\x1b[${y};1H\x1b[2K\x1b[1m\x1b[4m${s.title}\x1b[0m`);
-				const lines = s.render(t, width);
-				for (let k = 0; k < s.height; k++) {
-					process.stdout.write(`\x1b[${y + 1 + k};1H\x1b[2K${lines[k] ?? " "}`);
-				}
-				y += 1 + s.height + 1;
+			// The path title highlights the live status word.
+			const total = cycleTicks(sections[page]);
+			const hit = phaseAt(sections[page], t % total);
+			process.stdout.write(`\x1b[1;1H\x1b[2K\x1b[1m\x1b[4m${pathTitle(sections[page], hit?.phase)}\x1b[0m`);
+			const lines = lifecycleRender(sections[page], t, width);
+			for (let k = 0; k < height; k++) {
+				process.stdout.write(`\x1b[${2 + k};1H\x1b[2K${lines[k] ?? " "}`);
 			}
 			process.stdout.write(
-				`\x1b[${rows};1H\x1b[2K\x1b[2m— page ${page + 1}/${pages.length} (→/space next · ←/p prev · Ctrl+C quit) —\x1b[0m`,
+				`\x1b[${rows};1H\x1b[2K\x1b[2m— path ${page + 1}/${sections.length} (→/space next · ←/p prev · Ctrl+C quit) —\x1b[0m`,
 			);
 			await sleep(80);
 		}
@@ -458,45 +498,4 @@ async function runLive(sections: LiveSection[]): Promise<void> {
 	}
 }
 
-// ── Static grid ──────────────────────────────────────────────────
-
-function show(label: string, lines: string[]): void {
-	console.log(
-		`\n${theme.fg("accent", `── ${label} `)}${theme.fg("dim", "─".repeat(Math.max(0, 60 - label.length - 4)))}`,
-	);
-	for (const line of lines) console.log(line);
-}
-
-// ── Entry ────────────────────────────────────────────────────────
-
-const staticMode = process.argv.includes("static");
-
-const sections: LiveSection[] = [
-	{ title: "web_search · running (animated)", render: runningSearch, height: 0 },
-	{ title: "web_search · success (expanded)", render: searchSuccess, height: 0 },
-	{ title: "web_search · success (folded + expand hint)", render: searchFolded, height: 0 },
-	{ title: "web_search · success (browser engine)", render: searchBsk, height: 0 },
-	{ title: "web_search · empty", render: searchEmpty, height: 0 },
-	{ title: "web_search · channel error", render: searchError, height: 0 },
-	{ title: "web_fetch · running (animated)", render: runningFetch, height: 0 },
-	{ title: "web_fetch · success (expanded)", render: fetchSuccess, height: 0 },
-	{ title: "web_fetch · success (folded + expand hint)", render: fetchFolded, height: 0 },
-	{ title: "web_fetch · 404 error", render: fetchError, height: 0 },
-];
-
-// Measure fixed canvas heights over a full cycle, then run live.
-for (const s of sections) {
-	let maxH = 0;
-	for (let t = 0; t < 200; t++) maxH = Math.max(maxH, s.render(t, 100).length);
-	s.height = maxH;
-}
-
-if (staticMode) {
-	console.log(`\x1b[1m\x1b[4mStatic grid\x1b[0m`);
-	for (const s of sections) {
-		show(s.title, s.render(0, 100));
-	}
-	console.log("\n");
-} else {
-	await runLive(sections);
-}
+await runLive();
