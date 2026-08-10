@@ -25,17 +25,19 @@ export interface ExtractResult {
 /** Minimum markdown length below which we consider extraction a failure. */
 export const MIN_USEFUL_CONTENT = 40;
 
-/** Heuristic: page likely needs JS to render content (SPA). */
+/** Heuristic: page likely needs JS to render content (SPA shell). */
 export function isLikelyJSRendered(html: string): boolean {
-	const head = html.slice(0, 20_000).toLowerCase();
-	const bodyHasContent = /<(p|article|h1|h2|h3|pre|table|ul|ol)\b/i.test(html);
+	// Strip script/style blocks first — CSR bundles contain HTML strings that
+	// would otherwise look like body content.
+	const markup = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "");
+	const lower = html.toLowerCase();
+	const bodyHasContent = /<(p|article|h1|h2|h3|pre|table|ul|ol)\b/i.test(markup);
 	return (
 		!bodyHasContent &&
-		(head.includes("__next") ||
-			head.includes("nuxt") ||
-			head.includes("react") ||
-			head.includes('id="app"') ||
-			head.includes("id='app'"))
+		(lower.includes("__next") ||
+			lower.includes("nuxt") ||
+			lower.includes("react") ||
+			/id=["'](app|root)["']/.test(lower))
 	);
 }
 

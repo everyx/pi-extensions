@@ -170,10 +170,13 @@ UA 来源优先级：
   `title`/`description`/`image`，仅输出有值的字段）→ 正文 → JSON-LD（
   有则末尾 fenced `json` 块）；本地转换与直取输出同一格式。
   title 优先级：`meta[name=title]` > `og:title` > `<title>`（同 Cloudflare）。
-- **SPA 空正文检测**：HTML 有但正文空（JS 渲染）→ 返回显式占位（
-  `(no readable content)`，对齐根 SPEC 渲染层兜底）。
+- **SPA 空正文检测**：HTML 有但正文空（JS 渲染）→ 本地 headless 渲染（
+  chromium `--dump-dom` + 虚拟时间预算，20s 超时杀进程）→ 渲染后 DOM 再
+  提取——LLM 拿到真实内容而非占位；无浏览器/渲染失败才回落占位（
+  `(no readable content)`）。检测剥除 script/style 块（CSR bundle 含
+  HTML 字符串会误判为正文），标记：`__next`/`nuxt`/`react`/`id=app|root`。
 - **错误规范化**：HTTP 状态/网络错误 → `error` 字段（非抛异常），如
-  `HTTP 403: Forbidden`。
+  `HTTP 403: Forbidden`；超时与外部取消区分（`Timed out after 15s`）。
 - 无第三方 fallback（不引入 r.jina.ai 类中转服务）；抓取失败即报错，
   复杂抓取（认证/交互页）归 LLM 自行用 bash curl 等。
 

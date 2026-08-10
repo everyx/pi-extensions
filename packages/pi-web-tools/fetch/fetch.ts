@@ -10,6 +10,7 @@
 
 import { fetchWithTimeout } from "../http.js";
 import type { WebFetchResult } from "../types.js";
+import { renderPage } from "./headless.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
 import { resolveUserAgent } from "./ua.js";
 
@@ -118,6 +119,26 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 	}
 
 	const extracted = htmlToMarkdown(page.text ?? "");
+	if (extracted.markdown && !extracted.error) {
+		return { title: extracted.title, markdown: extracted.markdown.slice(0, 50_000) };
+	}
+
+	// Extraction failed or was incomplete + JS framework markers → CSR page.
+	// Render it locally so the LLM gets real content instead of a placeholder.
+	if (isLikelyJSRendered(page.text ?? "")) {
+		const rendered = await renderPage(url);
+		if (rendered) {
+			const renderedExtract = htmlToMarkdown(rendered);
+			if (renderedExtract.markdown && !renderedExtract.error) {
+				return {
+					title: renderedExtract.title,
+					markdown: renderedExtract.markdown.slice(0, 50_000),
+				};
+			}
+		}
+	}
+
+	// Non-CSR partial extraction: return what we have (status quo).
 	if (extracted.markdown) {
 		return { title: extracted.title, markdown: extracted.markdown.slice(0, 50_000) };
 	}

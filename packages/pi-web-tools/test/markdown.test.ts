@@ -79,4 +79,14 @@ describe("isLikelyJSRendered", () => {
 	it("false for plain HTML with content", () => {
 		assert.equal(isLikelyJSRendered("<html><body><article><p>real content here</p></article></body></html>"), false);
 	});
+	it("ignores HTML strings inside scripts (CSR bundles)", () => {
+		const html = `<html><head><script>const t = "<h1>not real</h1><p>also not real</p>";</script></head><body><div id="root"></div></body></html>`;
+		assert.equal(isLikelyJSRendered(html), true);
+	});
+	it("detects an empty root div shell as CSR", () => {
+		assert.equal(
+			isLikelyJSRendered('<html><head><title>T</title></head><body><div id="root"></div></body></html>'),
+			true,
+		);
+	});
 });
