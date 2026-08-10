@@ -132,11 +132,13 @@ function bodyRows<Args, Data>(
 	}
 	if ("rows" in b) {
 		return b.rows.of(ctx).flatMap((item) =>
-			b.rows.rows.map((row) => {
+			b.rows.rows.flatMap((row) => {
 				const out = row.content(ctx, item);
-				return typeof out === "string"
-					? { style: row.style ?? "text", content: out }
-					: { style: out.style, content: out.content };
+				const styled = typeof out === "string" ? { style: row.style ?? "text", content: out } : out;
+				// Multi-line content becomes one StyledRow per line — the shell
+				// paints the card background per row, so an embedded \n would
+				// leave the lines after it without a background.
+				return styled.content.split("\n").map((content) => ({ style: styled.style, content }));
 			}),
 		);
 	}
