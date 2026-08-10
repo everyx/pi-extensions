@@ -20,6 +20,7 @@
  * complete() unifies both to notify → cleanup — no observable difference.
  */
 
+import type { WidgetResult } from "@everyx/pi-ui/widget.js";
 import type { AgentCompletion } from "./agent-process.js";
 
 /** Narrow agent surface the registry needs — AgentProcess satisfies it. */
@@ -35,7 +36,8 @@ export interface RegisteredAgent {
 /** Narrow widget surface — index.ts adapts the TUI AgentWidget to it. */
 export interface WidgetSurface {
 	add(agent: RegisteredAgent): void;
-	remove(agentId: string): void;
+	/** `result` feeds the widget's lifetime progress meta; undefined = unknown. */
+	remove(agentId: string, result?: WidgetResult): void;
 	dispose(): void;
 }
 
@@ -88,7 +90,7 @@ export class AgentRegistry {
 		try {
 			if (!agent.stoppedByControl) await this.notify(agent, completion);
 		} finally {
-			this.remove(agent.agentId);
+			this.remove(agent.agentId, completion.status === "completed" ? "done" : completion.status);
 			await agent.stop().catch(() => {});
 		}
 	}
@@ -102,7 +104,7 @@ export class AgentRegistry {
 		const agent = this.agents.get(agentId);
 		if (!agent) return false;
 		await agent.stop();
-		this.remove(agentId);
+		this.remove(agentId, "stopped");
 		return true;
 	}
 
@@ -115,10 +117,10 @@ export class AgentRegistry {
 		this.getWidget()?.dispose();
 	}
 
-	private remove(agentId: string): void {
+	private remove(agentId: string, result?: WidgetResult): void {
 		// Only touch the widget for agents we actually tracked — a spawn-
 		// failure completion never registered, so delete() returns false and
 		// the widget stays untouched (no spurious requestRender).
-		if (this.agents.delete(agentId)) this.getWidget()?.remove(agentId);
+		if (this.agents.delete(agentId)) this.getWidget()?.remove(agentId, result);
 	}
 }

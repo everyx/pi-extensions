@@ -12,7 +12,7 @@
  */
 
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import type { WidgetRow } from "@everyx/pi-ui/widget.js";
+import type { WidgetResult, WidgetRow } from "@everyx/pi-ui/widget.js";
 import { StatusWidget } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
@@ -37,9 +37,9 @@ export class AgentWidget {
 		});
 	}
 
-	/** Stop tracking (agent finished/stopped — the completion notification takes over immediately). */
-	remove(agentId: string): void {
-		this.widget.remove(agentId);
+	/** Stop tracking; the end result feeds the lifetime progress meta. */
+	remove(agentId: string, result?: WidgetResult): void {
+		this.widget.remove(agentId, result);
 	}
 
 	/** Clear everything (session shutdown). */

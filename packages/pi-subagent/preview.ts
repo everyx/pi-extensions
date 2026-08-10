@@ -19,6 +19,7 @@ import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
+import type { WidgetResult } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
 import { renderNotification } from "./render.js";
@@ -309,10 +310,13 @@ type StreamCard =
 
 interface WidgetAgent {
 	id: string;
-	title: string;
+	/** Present while the agent is running in the widget. */
+	title?: string;
 	/** Offset (ms) behind the round start — elapsed grows from here. */
-	startedOffset: number;
-	activity: AgentActivity;
+	startedOffset?: number;
+	activity?: AgentActivity;
+	/** This phase the agent leaves the widget — `result` feeds the progress meta. */
+	removed?: WidgetResult;
 }
 
 interface PathPhase {
@@ -454,6 +458,14 @@ const fakeAgent = (agentId: string, title: string, startedAt: number, activity: 
 	}) as unknown as AgentProcess;
 const widgetState = new Map<string, { startedAt: number }>();
 function syncWidget(agents: WidgetAgent[] | undefined): void {
+	// 1) Ends first: agents marked `removed` leave the widget with their
+	//    result, feeding the lifetime progress meta (`1/3`, `(1+2)/3`).
+	for (const a of agents ?? []) {
+		if (a.removed && widgetState.delete(a.id)) {
+			widget.remove(a.id, a.removed);
+		}
+	}
+	// 2) Then the running set: drop rows that vanished, add new ones.
 	const want = new Set((agents ?? []).map((a) => a.id));
 	for (const id of widgetState.keys()) {
 		if (!want.has(id)) {
@@ -462,12 +474,11 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 		}
 	}
 	for (const a of agents ?? []) {
-		if (!widgetState.has(a.id)) {
-			// startedAt per round: elapsed grows from the agent's own start.
-			const started = Date.now() - a.startedOffset;
-			widgetState.set(a.id, { startedAt: started });
-			widget.add(fakeAgent(a.id, a.title, started, a.activity));
-		}
+		if (a.removed || widgetState.has(a.id) || a.title == null) continue;
+		// startedAt per round: elapsed grows from the agent's own start.
+		const started = Date.now() - (a.startedOffset ?? 0);
+		widgetState.set(a.id, { startedAt: started });
+		widget.add(fakeAgent(a.id, a.title, started, a.activity));
 	}
 }
 
@@ -746,6 +757,7 @@ const pathA: LifecyclePath = {
 			widget: [
 				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "a3", removed: "stopped" },
 			],
 			status: "stop",
 		},
@@ -797,7 +809,10 @@ const pathA: LifecyclePath = {
 					},
 				},
 			],
-			widget: [{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking }],
+			widget: [
+				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "a1", removed: "done" },
+			],
 			status: "notify",
 		},
 		{
@@ -862,7 +877,7 @@ const pathA: LifecyclePath = {
 					},
 				},
 			],
-			widget: [],
+			widget: [{ id: "a2", removed: "done" }],
 			status: "notify",
 		},
 	],

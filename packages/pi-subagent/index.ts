@@ -74,7 +74,7 @@ function widgetSurface(): WidgetSurface | null {
 	if (!w) return null;
 	return {
 		add: (agent) => w.add(agent as AgentProcess),
-		remove: (agentId) => w.remove(agentId),
+		remove: (agentId, result) => w.remove(agentId, result),
 		dispose: () => w.dispose(),
 	};
 }
