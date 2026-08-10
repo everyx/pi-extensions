@@ -543,11 +543,19 @@ export default function (pi: ExtensionAPI) {
 			},
 			body: {
 				rows: {
-					of: (ctx) => ((ctx.result?.data as { events?: unknown[] } | undefined)?.events ?? []) as unknown[],
+					of: (ctx) => {
+						const d = ctx.result?.data as { task?: string; events?: unknown[] } | undefined;
+						// Mixed activity stream: the task (prompt) heads the flow, then
+						// the sub-agent session events in order — both scroll out of
+						// the fold as output grows (SPEC: prompt 在流头).
+						const events = d?.events ?? [];
+						return d?.task ? [{ kind: "prompt", text: d.task }, ...events] : events;
+					},
 					rows: [
 						{
 							content: (_ctx, ev) => {
 								const e = ev as { kind: string; name?: string; args?: string; text?: string };
+								if (e.kind === "prompt") return { style: "muted", content: e.text ?? "" };
 								if (e.kind === "thinking") return { style: "thinking", content: "Thinking..." };
 								if (e.kind === "tool") return { style: "tool", content: `${e.name ?? ""}: ${e.args ?? ""}` };
 								return { style: "text", content: e.text ?? "" };
@@ -556,6 +564,10 @@ export default function (pi: ExtensionAPI) {
 					],
 				},
 			},
+			// Session footer: recoverable on the card, never into LLM context
+			// (SPEC: footer 仅 session: <path>). Present on foreground completion;
+			// background spawn cards carry no session yet.
+			footer: (ctx) => (ctx.result?.data as { sessionPath?: string } | undefined)?.sessionPath,
 		}),
 	});
 
@@ -713,8 +725,11 @@ export default function (pi: ExtensionAPI) {
 			name: "AgentControl",
 			title: (ctx) =>
 				String(
-					(ctx.args as { agent_id?: unknown } | undefined)?.agent_id ??
-						(ctx.result?.data as { title?: string } | undefined)?.title ??
+					// The task title the user sees on every other card (SPEC: the
+					// AgentControl card reads `Agent "research db schema" steered`) —
+					// agent_id is only a fallback when no title is available.
+					(ctx.result?.data as { title?: string } | undefined)?.title ??
+						(ctx.args as { agent_id?: unknown } | undefined)?.agent_id ??
 						"",
 				).slice(0, 60),
 			tail: (ctx) => {

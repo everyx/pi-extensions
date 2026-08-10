@@ -242,6 +242,8 @@ export interface DataCardConfig {
 	meta?: string[];
 	/** Body — plain text or styled rows; folded automatically. */
 	body?: string | StyledRow[];
+	/** Pre-formatted footer line (muted) — session paths, file links. */
+	footer?: string;
 	/** Error block below the body — dim folded. */
 	error?: string;
 	expanded: boolean;
@@ -302,6 +304,7 @@ export function dataCard(config: DataCardConfig, theme: Theme, spinner?: Spinner
 							}
 					: undefined,
 			expanded: config.expanded,
+			footer: config.footer,
 		},
 		theme,
 	);

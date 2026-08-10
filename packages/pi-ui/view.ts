@@ -77,6 +77,8 @@ export interface ToolView<Args, Data> {
 	meta?: (ctx: ViewContext<Args, Data>) => string[] | undefined;
 	/** Body: text / result list / activity rows (folded automatically). */
 	body?: ViewBody<Args, Data>;
+	/** Card footer line (muted, below the folded body). */
+	footer?: (ctx: ViewContext<Args, Data>) => string | undefined;
 }
 
 // ── status derivation (library, from framework state) ───────────
@@ -191,6 +193,7 @@ export function createToolView<Args, Data>(
 				tail: tailText ?? undefined,
 				meta: view.meta?.(ctx),
 				body,
+				footer: view.footer?.(ctx),
 				error: result?.error,
 				expanded,
 			},
@@ -254,6 +257,7 @@ export function createToolView<Args, Data>(
 						status,
 						name: view.name,
 						body: bodyRows(view, ctx),
+						footer: view.footer?.(ctx),
 						expanded: options.expanded,
 						bare: true,
 					},

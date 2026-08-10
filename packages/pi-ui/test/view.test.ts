@@ -98,6 +98,42 @@ describe("createToolView — header ownership while running", () => {
 		);
 	});
 
+	it("renders the view footer below the body", () => {
+		const withFooter = createToolView<{ query: string }, { sessionPath?: string }>({
+			name: "probe",
+			body: { text: () => "body" },
+			footer: (ctx) => ctx.result?.data.sessionPath,
+		});
+		const out = lines(
+			withFooter.renderResult(
+				{ content: [], details: { data: { sessionPath: "/sessions/abc.jsonl" } } },
+				{ expanded: false, isPartial: false },
+				theme,
+				ctx({ isPartial: false }),
+			),
+		);
+		assert.ok(
+			out.some((l) => l.includes("/sessions/abc.jsonl")),
+			"footer line rendered",
+		);
+	});
+
+	it("omits the footer when the view returns nothing", () => {
+		const noFooter = createToolView<Record<string, unknown>, Record<string, unknown>>({
+			name: "probe",
+			footer: () => undefined,
+		});
+		const out = lines(
+			noFooter.renderResult(
+				{ content: [], details: { data: {} } },
+				{ expanded: false, isPartial: false },
+				theme,
+				ctx({ isPartial: false }),
+			),
+		);
+		assert.ok(!out.some((l) => l.includes("session")), "no footer when undefined");
+	});
+
 	it("dataCard expanded renders every row (fold lifted)", () => {
 		const body = Array.from({ length: 16 }, (_, i) => ({ style: "text" as const, content: `line ${i + 1}` }));
 		const collapsed = lines(dataCard({ status: "success", name: "probe", body, expanded: false }, theme));
