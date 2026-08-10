@@ -206,7 +206,12 @@ UA 来源优先级：
 
 决策记录：在线官方版本源（Mozilla product-details / Chromium Dash）实测可用且
 永远最新，但拍板不用——模板不变，本机真实版本 + 我们固定内置的常用 Chrome UA
-兜底已足够，不引入网络依赖。
+兜底已足够，不引入网络依赖。本地缓存 + 定期更新也 grill 后否决（fallback 是低频
+场景，不值得网络 + 磁盘缓存 + TTL 复杂度）。
+
+兜底版本维护：`pnpm update:ua`（发版前跑）——caniuse-lite（devDependency，
+browserslist/esbuild 同源）算市占率最高的浏览器 + 使用率最高版本，pinned 进
+FALLBACK_UA 常量（运行时零依赖零网络）。
 
 ### 请求行为
 

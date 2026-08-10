@@ -121,7 +121,7 @@ async function defaultBrowserBinary(): Promise<string | undefined> {
 // Fixed fallback when no browser is installed: a commonly-used modern
 // Chrome (version pinned by us, matching the current stable release).
 const FALLBACK_UA =
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
 let cachedUserAgent: string | null = null;
 let uaFetchInFlight: Promise<string> | null = null;

@@ -12,7 +12,8 @@
 	"type": "module",
 	"scripts": {
 		"test": "tsx --test test/*.test.ts",
-		"preview": "tsx preview.ts"
+		"preview": "tsx preview.ts",
+		"update:ua": "node scripts/update-fallback-ua.mjs"
 	},
 	"repository": {
 		"type": "git",
@@ -49,6 +50,7 @@
 		"turndown": "^7.2.4"
 	},
 	"devDependencies": {
-		"@types/turndown": "^5.0.6"
+		"@types/turndown": "^5.0.6",
+		"caniuse-lite": "^1.0.30001809"
 	}
 }
