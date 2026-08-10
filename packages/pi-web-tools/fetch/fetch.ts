@@ -160,8 +160,14 @@ function firstLineAsTitle(text: string): string {
 function titleFromMarkdown(markdown: string): string {
 	const m = markdown.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
 	if (m) {
-		const t = m[0].match(/^title:\s*(.+)$/m);
-		if (t) return t[1].trim().slice(0, 200);
+		// Frontmatter present: title comes only from its title field — never
+		// guess from the first line (that would yield "---").
+		return (
+			m[0]
+				.match(/^title:\s*(.+)$/m)?.[1]
+				?.trim()
+				.slice(0, 200) ?? ""
+		);
 	}
 	return firstLineAsTitle(markdown);
 }
