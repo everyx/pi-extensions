@@ -23,6 +23,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
+import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
@@ -531,8 +532,12 @@ export default function (pi: ExtensionAPI) {
 				// task finished. A background spawn leaves the task running —
 				// no duration (the widget tracks it live).
 				if (d?.startedAt != null) {
-					if (ctx.status === "processing") parts.push(`Elapsed ${((Date.now() - d.startedAt) / 1000).toFixed(1)}s`);
-					else if (!d.runInBackground) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+					// A background spawn leaves the task running — no duration
+					// meta (the widget tracks it live).
+					if (!d.runInBackground) {
+						const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
+						if (dur) parts.push(dur);
+					}
 				}
 				return parts;
 			},

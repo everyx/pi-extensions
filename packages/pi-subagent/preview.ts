@@ -17,6 +17,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
+import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import type { AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
@@ -92,8 +93,12 @@ const agentView = createToolView<Record<string, unknown>, Record<string, unknown
 		// A background spawn leaves the task running — no duration (the
 		// widget tracks it live).
 		if (d?.startedAt != null) {
-			if (ctx.status === "processing") parts.push(`Elapsed ${((Date.now() - d.startedAt) / 1000).toFixed(1)}s`);
-			else if (!d.runInBackground) parts.push(`Took ${((d.endedAt ?? Date.now()) - d.startedAt) / 1000}s`);
+			// A background spawn leaves the task running — no duration meta
+			// (the widget tracks it live).
+			if (!d.runInBackground) {
+				const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
+				if (dur) parts.push(dur);
+			}
 		}
 		return parts;
 	},

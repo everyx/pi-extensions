@@ -40,6 +40,21 @@ export function formatDuration(ms: number): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/**
+ * Duration meta shared by tool views: a live `Elapsed` while running (wall
+ * clock, updates every frame), a fixed `Took` once complete. Pass the task's
+ * startedAt (the call seeds it into the render state at execution start).
+ */
+export function durationMeta(
+	status: "processing" | "success" | "error" | "stop",
+	startedAt?: number,
+	endedAt?: number,
+): string | undefined {
+	if (startedAt == null) return undefined;
+	if (status === "processing") return `Elapsed ${formatDuration(Date.now() - startedAt)}`;
+	return `Took ${formatDuration((endedAt ?? Date.now()) - startedAt)}`;
+}
+
 /** Collapse whitespace, trim, and cut long tails to `max` chars (ellipsis prefix). */
 export function clipTail(s: string, max = 60): string {
 	const clean = s.replace(/\s+/g, " ").trim();
