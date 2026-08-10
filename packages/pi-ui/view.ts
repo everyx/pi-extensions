@@ -94,6 +94,14 @@ function statusForResult(result: AgentToolResult<Record<string, unknown>>, conte
 }
 
 /** Map status → card icon (library decision; consumers never pass icons). */
+/** Reuse the spinner instance stored in the render state so the frames
+ * animate across re-renders (time-driven: current() derives from wall clock). */
+function spinnerFor(state: RenderContext["state"] | undefined): Spinner | undefined {
+	const sp = (state?.spinner as Spinner | undefined) ?? new Spinner();
+	if (state) state.spinner = sp;
+	return sp;
+}
+
 function iconForStatus(status: CardStatus, spinner: Spinner | undefined): CardIcon {
 	switch (status) {
 		case "processing":
@@ -201,7 +209,7 @@ export function createToolView<Args, Data>(
 				return textLine(
 					renderHeader(
 						{
-							icon: iconForStatus(status, rc.state?.spinner as Spinner | undefined),
+							icon: iconForStatus(status, spinnerFor(rc.state)),
 							name: view.name,
 							title: view.title?.(ctx),
 							tail: tail ? { text: tail, color: "muted" } : undefined,
@@ -235,7 +243,7 @@ export function createToolView<Args, Data>(
 						bare: true,
 					},
 					theme,
-					rc.state?.spinner as Spinner | undefined,
+					spinnerFor(rc.state),
 				);
 			}
 			return renderCardFrom(
@@ -243,7 +251,7 @@ export function createToolView<Args, Data>(
 				rc.args as Args,
 				{ data, error: details.error },
 				options.expanded,
-				rc.state?.spinner as Spinner | undefined,
+				spinnerFor(rc.state),
 				theme,
 			);
 		},

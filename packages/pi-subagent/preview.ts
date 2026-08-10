@@ -177,20 +177,16 @@ const params: AgentParams = {
 const startedAt = Date.now() - 27_500;
 const endedAt = Date.now() - 1_200;
 
+// Shared render state across frames — the spinner instance rides it so the
+// Braille frames keep animating (each render reuses the same Spinner).
+const cardState: Record<string, unknown> = { startedAt, endedAt };
 function pendingContext(args: unknown, isError = false) {
-	return {
-		args,
-		state: { startedAt },
-		invalidate: () => {},
-		executionStarted: true,
-		isPartial: true,
-		isError,
-	} as never;
+	return { args, state: cardState, invalidate: () => {}, executionStarted: true, isPartial: true, isError } as never;
 }
 function doneContext(args: unknown, isError = false) {
 	return {
 		args,
-		state: { startedAt, endedAt },
+		state: cardState,
 		invalidate: () => {},
 		executionStarted: true,
 		isPartial: false,
