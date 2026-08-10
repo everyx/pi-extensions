@@ -12,6 +12,7 @@ import { fetchWithTimeout } from "../http.js";
 import type { WebFetchResult } from "../types.js";
 import { renderPage } from "./headless.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
+import { adaptUrl } from "./sites/index.js";
 import { resolveUserAgent } from "./ua.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -31,17 +32,6 @@ interface FetchPageResult {
 /** Only HTML-family responses go through markdown extraction. */
 function isHtmlContent(contentType: string): boolean {
 	return contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
-}
-
-/**
- * github.com blob URLs → raw.githubusercontent.com: fetch the file content
- * instead of the HTML UI (LLM wants the file, not the page chrome).
- * Branch is taken as a single path segment; raw/ links already redirect.
- */
-export function githubRawUrl(url: string): string | null {
-	const m = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/i);
-	if (!m) return null;
-	return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}/${m[4]}`;
 }
 
 /** Direct HTTP fetch with browser-like headers + timeout. */
@@ -108,11 +98,11 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 	}
 
 	const ua = await resolveUserAgent();
-	// GitHub blob → raw content (fall back to the UI page when raw is
-	// unavailable, e.g. private repos or 404s).
-	const rawUrl = githubRawUrl(url);
-	let page = await fetchPage(rawUrl ?? url, ua, signal);
-	if (rawUrl && (!page.ok || !page.text)) {
+	// Site adapters rewrite content URLs (e.g. GitHub blob → raw); fall back
+	// to the original URL when the rewrite target is unavailable.
+	const targetUrl = adaptUrl(url) ?? url;
+	let page = await fetchPage(targetUrl, ua, signal);
+	if (targetUrl !== url && (!page.ok || !page.text)) {
 		page = await fetchPage(url, ua, signal);
 	}
 
