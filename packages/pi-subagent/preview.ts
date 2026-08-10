@@ -64,7 +64,19 @@ const agentView = createToolView<Record<string, unknown>, Record<string, unknown
 		const d = ctx.result?.data as { title?: string; task?: string } | undefined;
 		return String((ctx.args as { title?: unknown } | undefined)?.title ?? d?.title ?? d?.task ?? "").slice(0, 60);
 	},
-	tail: (ctx) => (ctx.status === "error" ? "start failed" : ctx.status === "processing" ? "starting\u2026" : "started"),
+	tail: (ctx) => {
+		if (ctx.status === "error") return "start failed";
+		if (ctx.status === "processing") {
+			// starting… while nothing has streamed yet, running… once the
+			// agent is actually producing activity.
+			const d = ctx.result?.data as { events?: unknown[] } | undefined;
+			return d?.events?.length ? "running\u2026" : "starting\u2026";
+		}
+		// Completed: "started" is a background spawn (task keeps running,
+		// tracked by the widget); a foreground agent is simply done.
+		const d = ctx.result?.data as { runInBackground?: boolean } | undefined;
+		return d?.runInBackground ? "started" : "done";
+	},
 	meta: (ctx) => {
 		const d = ctx.result?.data as
 			| { model?: string; thinking?: string; startedAt?: number; endedAt?: number; runInBackground?: boolean }
@@ -851,7 +863,10 @@ const pathB: LifecyclePath = {
 				{
 					kind: "agent",
 					args: p,
-					details: details({ events: [] }),
+					// Partial activity stream — the agent is working (running…).
+					details: details({
+						events: [...activityEvents(4), { kind: "text", text: streamLines.slice(0, 5).join("\n") }],
+					}),
 					isPartial: true,
 				},
 			],

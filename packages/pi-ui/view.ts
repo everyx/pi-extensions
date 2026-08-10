@@ -210,7 +210,12 @@ export function createToolView<Args, Data>(
 				const st = rc.state as Record<string, unknown> | undefined;
 				const startedAt = (st?.startedAt as number | undefined) ?? Date.now();
 				if (st) st.startedAt = startedAt;
-				const ctx = makeCtx(args, status, { data: { startedAt } as Data });
+				// Merge the last streamed result data (if any) so the header can
+				// react to activity (e.g. the running… tail) before the next
+				// result render.
+				const ctx = makeCtx(args, status, {
+					data: { ...((st?.lastData as Partial<Data> | undefined) ?? {}), startedAt } as Data,
+				});
 				const tail = view.tail?.(ctx);
 				return textLine(
 					renderHeader(
@@ -238,6 +243,8 @@ export function createToolView<Args, Data>(
 			// While running, pi renders the call and the result in the same
 			// shell: the call owns the header line, so the streaming result is
 			// a bare card (body only) — the header must not repeat.
+			const st = rc.state as Record<string, unknown> | undefined;
+			if (st) st.lastData = data; // let the call header see streamed data
 			if (status === "processing") {
 				const ctx = makeCtx(rc.args as Args, status, { data, error: details.error });
 				return dataCard(
