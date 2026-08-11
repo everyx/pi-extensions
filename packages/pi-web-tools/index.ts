@@ -40,6 +40,7 @@ import {
 	resolveEngines,
 	route,
 } from "./search/channels.js";
+import { systemLocale } from "./search/system-locale.js";
 import type { ChannelCapabilities, ChannelId, EngineId, SearchResultItem, WebSearchParams } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -49,11 +50,11 @@ const execFileAsync = promisify(execFile);
 /** The enabled api channels + bsk engines. Config wins; else system-locale
  * defaults. Mirrored into the engine enum so the LLM only sees usable
  * engines (SPEC: 枚举即事实). */
-const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+const systemLocaleValue = systemLocale();
 const enginesConfig = parseEnginesConfig(process.env.PI_WEB_TOOLS_ENGINES);
 const ENABLED = {
 	api: resolveApiChannels(enginesConfig),
-	engines: resolveEngines(enginesConfig, systemLocale),
+	engines: resolveEngines(enginesConfig, systemLocaleValue),
 };
 
 // ── Channel availability ─────────────────────────────────────────
