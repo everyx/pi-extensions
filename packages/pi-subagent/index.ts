@@ -634,7 +634,16 @@ export default function (pi: ExtensionAPI) {
 				return {
 					// Pure text result — no session hint: the output stands alone
 					// (the session path is the card footer, recoverable by the user).
-					content: [{ type: "text", text: truncateForContext(completion.output) }],
+					// A persistent foreground agent stays resident — the LLM needs
+					// its id to wake it later with agent_send (or stop it).
+					content: [
+						{
+							type: "text",
+							text: agent.persistent
+								? `${truncateForContext(completion.output)}\n\n(agent ${agent.agentId} is resident — send it follow-ups with agent_send)`
+								: truncateForContext(completion.output),
+						},
+					],
 					details: {
 						task,
 						sessionPath: completion.sessionPath,
