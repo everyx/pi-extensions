@@ -133,7 +133,7 @@ describe("AgentRegistry — completion policy", () => {
 		assert.equal(agent.stopped, true);
 	});
 
-	it("suppresses the notification for AgentControl stops (deliberate user action)", async () => {
+	it("suppresses the notification for agent_stop (deliberate user action)", async () => {
 		const { registry, widget, notified } = makeRegistry();
 		const agent = new FakeAgent("a1");
 		agent.stoppedByControl = true;
@@ -277,6 +277,13 @@ describe("AgentRegistry — in-tree routing", () => {
 		if (widget) widget.statuses.length = 0; // reset the idle flip
 		assert.equal(await registry.deliver("a2", "continue"), true);
 		assert.deepEqual(widget?.statuses, [{ id: "a2", status: "running" }]);
+	});
+
+	it("markIdle flips the row back to idle (wake finished)", () => {
+		const { registry, widget } = makeRegistry();
+		registry.register(new FakeAgent("a2", "stay", true));
+		registry.markIdle("a2");
+		assert.deepEqual(widget?.statuses, [{ id: "a2", status: "idle" }]);
 	});
 
 	it("deliver returns false for unknown or un-deliverable agents", async () => {

@@ -32,16 +32,16 @@ describe("RpcClient — command correlation", () => {
 	it("correlates concurrent commands by unique id even when responses arrive out of order", async () => {
 		const client = makeClient();
 		try {
-			// get_state is delayed 60ms, steer 10ms — the steer response lands
+			// get_state is delayed 60ms, abort 10ms — the abort response lands
 			// first. With a shared id the second sendCommand would overwrite the
 			// first waiter and the late get_state response would resolve the
-			// steer call (mismatch).
-			const [state, steer] = await Promise.all([
+			// abort call (mismatch).
+			const [state, abort] = await Promise.all([
 				client.sendCommand({ type: "get_state" }),
-				client.sendCommand({ type: "steer", message: "focus" }),
+				client.sendCommand({ type: "abort" }),
 			]);
 			assert.equal(state.command, "get_state");
-			assert.equal(steer.command, "steer");
+			assert.equal(abort.command, "abort");
 		} finally {
 			await close(client);
 		}
@@ -50,12 +50,12 @@ describe("RpcClient — command correlation", () => {
 	it("keeps each waiter bound to its own timeout", async () => {
 		const client = makeClient();
 		try {
-			const [abort, steer] = await Promise.all([
+			const [abort, prompt] = await Promise.all([
 				client.sendCommand({ type: "abort" }),
-				client.sendCommand({ type: "steer", message: "wrap up" }),
+				client.sendCommand({ type: "get_last_assistant_text" }),
 			]);
 			assert.equal(abort.command, "abort");
-			assert.equal(steer.command, "steer");
+			assert.equal(prompt.command, "get_last_assistant_text");
 		} finally {
 			await close(client);
 		}

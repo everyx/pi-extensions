@@ -18,12 +18,6 @@ describe("serializeCommand", () => {
 		assert.equal(parsed.streamingBehavior, "steer");
 	});
 
-	it("serializes a steer command with message", () => {
-		const line = serializeCommand({ type: "steer", message: "focus on errors" });
-		assert.ok(line.includes('"type":"steer"'));
-		assert.ok(line.endsWith("\n"));
-	});
-
 	it("escapes JSON inside the message (quotes, newlines)", () => {
 		const line = serializeCommand({ type: "prompt", message: 'say "hi"\nnext' });
 		const parsed = JSON.parse(line);

@@ -79,15 +79,23 @@ let widget: AgentWidget | null = null;
 let uiRef: { setStatus(key: string, text: string | undefined): void } | undefined;
 
 function ensureWidget(ctx: { mode: string; ui: unknown }): AgentWidget | null {
-	// Refresh the uplink handle on every execute — rpc-mode children need it
-	// too (their execute ctx.mode is "rpc", but ui.setStatus still emits the
-	// extension_ui_request event stream the parent consumes).
-	uiRef = ctx.ui as { setStatus(key: string, text: string | undefined): void };
+	captureUi(ctx);
 	if (widget) return widget;
 	if (ctx.mode !== "tui") return null;
 	// biome-ignore lint/suspicious/noExplicitAny: ExtensionUIContext shape from pi
 	widget = new AgentWidget(ctx.ui as any);
 	return widget;
+}
+
+/**
+ * Refresh the uplink handle from any tool execute. Every execute runs with
+ * a UI context (rpc children too — their setStatus emits the
+ * extension_ui_request event stream the parent consumes), and a sub-agent
+ * must have run its own execute before it can spawn children, so the ref
+ * is always warm before any inbound message needs to forward up.
+ */
+function captureUi(ctx: { mode: string; ui: unknown }): void {
+	uiRef = ctx.ui as { setStatus(key: string, text: string | undefined): void };
 }
 
 /** Narrow TUI adapter: AgentWidget → WidgetSurface (registry seam). */
@@ -191,7 +199,7 @@ const StopParamsSchema = Type.Object({
 const SendParamsSchema = Type.Object({
 	to: Type.String({
 		description:
-			'Message target: a tree-path agent id ("a2", "a1/a1-1") or "@parent" (the session ' +
+			'Message target: a tree-path agent id ("a2", "a1/a1") or "@parent" (the session ' +
 			"that spawned you — only available inside a sub-agent).",
 	}),
 	message: Type.String({ description: "The message text." }),
@@ -408,6 +416,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: SpawnParamsSchema,
 
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
+			captureUi(ctx);
 			const params = raw as SpawnParams;
 			const task = params.prompt?.trim();
 			if (!task) {
@@ -447,7 +456,7 @@ export default function (pi: ExtensionAPI) {
 				activity,
 				events: agent.getEvents(),
 			});
-			// Tree-path id: "a1" at the root session, "a1/a1-1" nested (the
+			// Tree-path id: "a1" at the root session, "a1/a1" nested (the
 			// parent injects its own id as the path prefix). The registry keys
 			// by this full path so routing prefix-matches across hops.
 			const agentId = HAS_PARENT ? `${MY_AGENT_ID}/${registry.nextAgentId()}` : registry.nextAgentId();
@@ -470,6 +479,8 @@ export default function (pi: ExtensionAPI) {
 				},
 				// Child→parent messages re-enter the router on this hop.
 				onMessage: onChildMessage,
+				// A wake finished — the widget row flips back to idle.
+				onIdle: () => registry.markIdle(agentId),
 				onDelta: (delta) => {
 					if (params.run_in_background) return;
 					streamed += delta;
@@ -522,7 +533,7 @@ export default function (pi: ExtensionAPI) {
 
 					// Abort is wired to stop while spawning only; once the spawn
 					// settled, the background agent runs on its own — the user
-					// controls it via AgentControl, and this (already returned)
+					// controls it via agent_stop, and this (already returned)
 					// tool call's signal must not kill it later.
 					signal?.removeEventListener("abort", onAbort);
 					ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
@@ -573,7 +584,20 @@ export default function (pi: ExtensionAPI) {
 				});
 
 				const completion = await agent.waitForCompletion();
-				await teardownAgent(agent, signal, onAbort);
+
+				// persistent: the process stays resident after completion (idle,
+				// zero token) and registers so agent_send can wake it later —
+				// foreground users already saw the inline result, so there is no
+				// follow-up notification (background notifications are the
+				// background path's job).
+				if (agent.persistent && completion.status === "completed") {
+					signal?.removeEventListener("abort", onAbort);
+					ensureWidget(ctx);
+					registry.register(agent);
+					registry.markIdle(agent.agentId);
+				} else {
+					await teardownAgent(agent, signal, onAbort);
+				}
 
 				// Failures and limit-stops are both errors for the caller: the
 				// stopped case (total timeout / hard token limit) must not look
@@ -714,7 +738,8 @@ export default function (pi: ExtensionAPI) {
 		],
 		parameters: StopParamsSchema,
 
-		async execute(_toolCallId, raw, _signal, onUpdate) {
+		async execute(_toolCallId, raw, _signal, onUpdate, ctx) {
+			captureUi(ctx);
 			const params = raw as StopParams;
 			const agent = registry.lookup(params.agent_id);
 
@@ -784,7 +809,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Send Message",
 		description:
 			"Send a message to another agent in the tree. Target a direct child by its agent id " +
-			'("a2", or the full tree path "a1/a1-1" — the intermediate parent forwards it), ' +
+			'("a2", or the full tree path "a1/a1" — the intermediate parent forwards it), ' +
 			'or "@parent" to message the session that spawned you (only inside a sub-agent). ' +
 			"Messages wake idle persistent agents and queue on running ones — delivery is a " +
 			"prompt into the target's context.",
@@ -796,7 +821,8 @@ export default function (pi: ExtensionAPI) {
 		],
 		parameters: SendParamsSchema,
 
-		async execute(_toolCallId, raw, _signal, onUpdate) {
+		async execute(_toolCallId, raw, _signal, onUpdate, ctx) {
+			captureUi(ctx);
 			const params = raw as SendParams;
 			const to = params.to?.trim();
 			const message = params.message?.trim();

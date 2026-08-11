@@ -571,6 +571,19 @@ describe("AgentProcess — persistent / in-tree messages", () => {
 		assert.equal(agent.status, "completed");
 	});
 
+	it("onIdle fires when a woken persistent agent settles back to idle", async () => {
+		let idleFired = 0;
+		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true, onIdle: () => idleFired++ });
+		await agent.spawnAndSend("do it");
+		const done = agent.waitForCompletion();
+		fake.emitSettled();
+		await done;
+		assert.equal(idleFired, 0, "no onIdle before a wake");
+		await agent.sendMessage("continue");
+		fake.emitSettled();
+		assert.equal(idleFired, 1, "onIdle fires on the post-wake settle");
+	});
+
 	it("in-tree messages from the child fire onMessage", () => {
 		const received: Array<{ to: string; from: string; message: string }> = [];
 		const { fake } = makeAgent({ cwd: "/tmp", onMessage: (m) => received.push(m) });

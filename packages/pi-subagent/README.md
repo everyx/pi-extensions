@@ -126,7 +126,7 @@ The directory lives **outside** pi's standard session tree so `pi -r` (resume) s
 
 | Param | Meaning |
 |---|---|
-| `to` | **required** — a tree path id (`"a2"`, or `"a1/a1-1"` for a grandchild), or `"@parent"` to message your parent session. |
+| `to` | **required** — a tree path id (`"a2"`, or `"a1/a1"` for a grandchild), or `"@parent"` to message your parent session. |
 | `message` | **required** — the message text; delivered after the target's current turn settles, or wakes an idle persistent agent. |
 
 Messages travel the parent↔child edges of the agent tree: a direct child is delivered straight down, `@parent` goes up, and cross‑level/sibling messages are forwarded through the parent LLM's context along the way.
@@ -168,7 +168,7 @@ Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
 
 A child is a full pi instance — so if you installed this extension globally, it spawns children of its own. Each level is its own process with its own context; depth multiplies startup time and token cost. You — or the model — judge when it's worth it.
 
-The tree is the address space: every child gets a tree path id (`a2`, `a1/a1-1`…), and `agent_send` routes along parent↔child edges. A child can also message back up with `"@parent"` — e.g. to ask a blocking question when it hits a missing decision — and the parent's reply continues its context. Cross‑level and sibling messages are forwarded through the parent LLM's context along the way; that's the tree's coordination cost.
+The tree is the address space: every child gets a tree path id (`a2`, `a1/a1`…), and `agent_send` routes along parent↔child edges. A child can also message back up with `"@parent"` — e.g. to ask a blocking question when it hits a missing decision — and the parent's reply continues its context. Cross‑level and sibling messages are forwarded through the parent LLM's context along the way; that's the tree's coordination cost.
 
 ## Costs & caveats
 

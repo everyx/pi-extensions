@@ -464,12 +464,12 @@ const widgetUi = {
 	},
 } as never;
 const widget = new AgentWidget(widgetUi as never);
-const fakeAgent = (agentId: string, title: string, startedAt: number, activity: unknown, idle = false) =>
+const fakeAgent = (agentId: string, title: string, startedAt: number, activity: unknown) =>
 	({
 		agentId,
 		title,
 		startedAt,
-		status: idle ? "idle" : "running",
+		status: "running",
 		getLatestActivity: () => activity,
 	}) as unknown as AgentProcess;
 const widgetState = new Map<string, { startedAt: number }>();
@@ -500,7 +500,10 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 		// startedAt per round: elapsed grows from the agent's own start.
 		const started = Date.now() - (a.startedOffset ?? 0);
 		widgetState.set(a.id, { startedAt: started });
-		widget.add(fakeAgent(a.id, a.title, started, a.activity, a.idle));
+		widget.add(fakeAgent(a.id, a.title, started, a.activity));
+		// Persistent agent already completed: register (running) then flip to
+		// idle — same two-step path as the real registry (register → markIdle).
+		if (a.idle) widget.setStatus(a.id, "idle");
 	}
 }
 

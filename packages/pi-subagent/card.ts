@@ -3,7 +3,7 @@
  *
  * The Card is the shared visual shell for every surface: a header row
  * (status icon + `Agent "title"` + optional state word / muted meta), an
- * optional body (prompt + activity stream / failure reason / steer message,
+ * optional body (prompt + activity stream / failure reason / delivered message,
  * uniformly folded), and an optional footer (session path). Tool results
  * return `renderCard` directly — the framework's default-shell Box paints
  * the background; the notification card wraps it in its own shell
@@ -234,13 +234,13 @@ function renderBody(body: CardBody, expanded: boolean, theme: Theme): BodyCompon
 
 /**
  * Assemble a full card (no background shell): header row + optional body
- * sections (activity stream, failure reason, steer message) + optional
+ * sections (activity stream, failure reason, delivered message) + optional
  * session footer. Tool results return this directly — the framework's
  * default-shell Box paints the background.
  */
 /**
  * Assemble a full card: header + body sections (activity stream, failure
- * reason, steer message) + session footer — via pi-ui renderCard (folding
+ * reason, delivered message) + session footer — via pi-ui renderCard (folding
  * built in); the agent activity stream rides body.extra.
  */
 export function renderCard(config: CardConfig, theme: Theme): Component {

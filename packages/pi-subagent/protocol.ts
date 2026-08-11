@@ -26,11 +26,6 @@ export interface RpcCommandPrompt {
 	streamingBehavior?: "steer" | "followUp";
 }
 
-export interface RpcCommandSteer {
-	type: "steer";
-	message: string;
-}
-
 export interface RpcCommandAbort {
 	type: "abort";
 }
@@ -49,7 +44,6 @@ export interface RpcCommandGetSessionStats {
 
 export type RpcCommand =
 	| RpcCommandPrompt
-	| RpcCommandSteer
 	| RpcCommandAbort
 	| RpcCommandGetLastAssistantText
 	| RpcCommandGetState
@@ -85,7 +79,7 @@ export type ParsedLine = { kind: "response"; response: RpcResponse } | { kind: "
 /** One agent_send payload — flows child→parent over the event stream
  * (extension_ui_request) and parent→child as an rpc prompt. */
 export interface AgentMessage {
-	/** Routing target: "@parent" or a tree-path id ("a2", "a1/a1-1"). */
+	/** Routing target: "@parent" or a tree-path id ("a2", "a1/a1"). */
 	to: string;
 	/** Sender's tree-path id ("" for the root session). */
 	from: string;
@@ -127,7 +121,7 @@ export function formatFrom(from: string): string {
 }
 
 /** LLM-visible routing hint for cross-generation deliveries (the message
- *  must be forwarded by the receiving agent's LLM): "[to a1/a1-1] ".
+ *  must be forwarded by the receiving agent's LLM): "[to a1/a1] ".
  *  Empty when the message is for the receiving agent itself. */
 export function formatTo(to: string, receiver: string): string {
 	return to === receiver ? "" : `[to ${to}] `;
