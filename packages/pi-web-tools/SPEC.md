@@ -98,6 +98,7 @@ LLM 对搜索操作符有先验知识（训练语料含 `site:` / `filetype:` / 
 
 - **启用集内无语言优先级命中时**（如 zh 用户只启用 yandex）取启用集首个引擎（不报错——配置集的完整兜底）。
 - **bsk 的 recency 仅 google（`qdr:`）与 bing（`filters`）**：baidu/yandex 无时效参数——请求 recency 时**显式报错**而非静默丢弃（SPEC: 能力缺失不静默）。
+- **bsk 的 domains 翻译为 `site:` / `-site:`**（追加进 query）：`site:` 四引擎均支持；`-site:`（blocked）google/bing 完整、baidu 基本（自家平台过滤不彻底属引擎限制）、**yandex 无此操作符 → blocked_domains 显式报错**。
 - **API 通道不支持 locale**（含 tavily——其 `country` 参数是弱本地化，非 spec 承诺的域名级落地）→ 自动 fallback 到 bsk 真实浏览器执行对应本地化搜索。
 
 ## 人机验证（captcha）处理

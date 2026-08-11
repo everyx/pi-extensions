@@ -339,6 +339,12 @@ export async function searchWithBsk(
 	if (params.recency && engine !== "google" && engine !== "bing") {
 		throw new Error(`engine "${engine}" does not support recency`);
 	}
+	// -site: (blocked_domains) exists on google/bing; baidu parses it (with
+	// engine-side limits); yandex has no such operator — explicit error
+	// instead of silently treating it as plain query text.
+	if (params.blocked_domains?.length && engine === "yandex") {
+		throw new Error(`engine "yandex" does not support blocked_domains`);
+	}
 	// Direct navigation to the engine search URL: query + locale + recency
 	// as URL params (precise, no DOM dependence).
 	const recencyParam = params.recency
