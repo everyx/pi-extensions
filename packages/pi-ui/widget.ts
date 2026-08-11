@@ -67,9 +67,10 @@ export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Sp
 		status = theme.fg("warning", "\u25a0");
 		meta = "(stopped)";
 	} else if (item.status === "idle") {
-		// Resident persistent agent: pause marker, no meta — the icon carries
-		// the state (zero-token wait).
-		status = theme.fg("muted", "\u23f8");
+		// Resident persistent agent: double-vertical-bar pause marker, no meta —
+		// the icon carries the state (zero-token wait). Unframed, so it reads
+		// uniformly with the other status glyphs (⠋✓✗■).
+		status = theme.fg("muted", "\u2016");
 		meta = "";
 	} else {
 		status = theme.fg("success", "\u2713");

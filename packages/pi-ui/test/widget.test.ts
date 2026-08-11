@@ -133,7 +133,7 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 	it("renders an idle row with a pause marker and no meta", () => {
 		const lines = renderWidgetItemLine({ id: "a", title: "stay", startedAt: 0, status: "idle" }, theme, new Spinner());
 		assert.ok(lines[0]);
-		assert.match(lines[0] ?? "", /\u23f8/); // ⏸ pause marker
+		assert.match(lines[0] ?? "", /\u2016/); // ‖ pause marker
 		assert.ok(!(lines[0] ?? "").includes("("), "no meta tail — the icon carries the state");
 	});
 
@@ -144,11 +144,11 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		w.add(item("a"));
 		w.updateStatus("a", "idle");
 		assert.ok(
-			lines().some((l) => l.includes("\u23f8")),
+			lines().some((l) => l.includes("\u2016")),
 			"row shows the pause marker after the flip",
 		);
 		w.updateStatus("a", "running");
-		assert.ok(!lines().some((l) => l.includes("\u23f8")), "row shows running again");
+		assert.ok(!lines().some((l) => l.includes("\u2016")), "row shows running again");
 		w.dispose();
 	});
 
