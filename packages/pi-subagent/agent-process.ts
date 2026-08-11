@@ -325,9 +325,9 @@ export class AgentProcess {
 		if (!this.client.isClosed) this.client.kill("SIGTERM");
 	}
 
-	/** Latest activity excerpt for the widget (null until the first message_update). */
-	getLatestActivity(): AgentActivity | null {
-		return this.latestActivity;
+	/** Latest activity excerpt for the widget (undefined until the first message_update). */
+	getLatestActivity(): AgentActivity | undefined {
+		return this.latestActivity ?? undefined;
 	}
 
 	/**

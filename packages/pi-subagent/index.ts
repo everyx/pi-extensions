@@ -156,7 +156,9 @@ const SpawnParamsSchema = Type.Object({
 	thinking: Type.Optional(
 		StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"], {
 			description:
-				'Reasoning intensity for the sub-agent ("off"…"max"). ' + "Omit to inherit your current thinking level.",
+				'Reasoning intensity for the sub-agent ("off"…"max"). ' +
+				"Omit to inherit your current thinking level — don't change it unless the task " +
+				"requires a different depth.",
 		}),
 	),
 	tools: Type.Optional(
@@ -243,6 +245,16 @@ function spawnErrorResult(
 		details: { error: started.error, ...extra },
 		isError: true as const,
 	};
+}
+
+/**
+ * Card title for agent_stop / agent_send: the target's human title when the
+ * result carried one, else the target id from the result, else from args.
+ */
+function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, idKey: string): string {
+	const data = (ctx.result?.data as ({ title?: string } & Record<string, unknown>) | undefined) ?? {};
+	const args = ctx.args as Record<string, unknown> | undefined;
+	return String(data.title ?? data[idKey] ?? args?.[idKey] ?? "").slice(0, 60);
 }
 
 /**
@@ -486,13 +498,13 @@ export default function (pi: ExtensionAPI) {
 				onDelta: (delta) => {
 					if (params.run_in_background) {
 						// Live widget excerpt: the latest streamed text tail.
-						widget?.updateActivity(agent.agentId, agent.getLatestActivity() ?? undefined);
+						widget?.updateActivity(agent.agentId, agent.getLatestActivity());
 						return;
 					}
 					streamed += delta;
 					onUpdate?.({
 						content: [{ type: "text", text: streamed }],
-						details: liveDetails(agent.getLatestActivity() ?? undefined),
+						details: liveDetails(agent.getLatestActivity()),
 					});
 				},
 				onActivityChange: (activity) => {
@@ -806,14 +818,7 @@ export default function (pi: ExtensionAPI) {
 
 		...createToolView<Record<string, unknown>, Record<string, unknown>>({
 			name: "agent_stop",
-			title: (ctx) =>
-				String(
-					// The task title the user sees on every other card — agent_id
-					// is only a fallback when no title is available.
-					(ctx.result?.data as { title?: string } | undefined)?.title ??
-						(ctx.args as { agent_id?: unknown } | undefined)?.agent_id ??
-						"",
-				).slice(0, 60),
+			title: (ctx) => titleFrom(ctx, "agent_id"),
 			tail: (ctx) => {
 				if (ctx.status === "error") return "stop failed";
 				if (ctx.status === "processing") return "stopping\u2026";
@@ -880,15 +885,7 @@ export default function (pi: ExtensionAPI) {
 
 		...createToolView<Record<string, unknown>, Record<string, unknown>>({
 			name: "agent_send",
-			title: (ctx) =>
-				String(
-					// The target's human title (uniform with agent_stop); the id is
-					// the fallback when the target is gone or unknown (@parent).
-					(ctx.result?.data as { title?: string } | undefined)?.title ??
-						(ctx.result?.data as { to?: string } | undefined)?.to ??
-						(ctx.args as { to?: unknown })?.to ??
-						"",
-				).slice(0, 60),
+			title: (ctx) => titleFrom(ctx, "to"),
 			tail: (ctx) => {
 				if (ctx.status === "error") return "failed";
 				if (ctx.status === "processing") return "sending\u2026";
