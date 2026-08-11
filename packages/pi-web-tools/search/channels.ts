@@ -55,15 +55,16 @@ export function parseEnginesConfig(raw?: string): { api: ChannelId[]; engines: E
 }
 
 /**
- * Default engine set for a language (SPEC: 系统 locale 决定启用集). Each
- * group = one localization-specialist + google as the generic fallback.
- * baidu / bing-russian are deliberately absent — they only come in via an
- * explicit PI_WEB_TOOLS_ENGINES.
+ * Default engine set for a language (SPEC: 系统 locale 决定启用集).
+ * google is the global fallback everywhere; each localized language adds
+ * exactly one localization-specialist (zh → bing/cn.bing.com, ru →
+ * yandex/yandex.ru). Everything else is google-only — bing/baidu only
+ * come in via an explicit PI_WEB_TOOLS_ENGINES.
  */
 export function defaultEnginesFor(language: string): EngineId[] {
 	if (language === "zh") return ["bing", "google"];
 	if (language === "ru") return ["yandex", "google"];
-	return ["google", "bing"];
+	return ["google"];
 }
 
 /** Resolve the bsk engine set: config wins, else the system-locale default. */

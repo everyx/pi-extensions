@@ -188,9 +188,9 @@ UA 来源优先级：
 |---|---|
 | zh | bing, google（bing 落 cn.bing.com） |
 | ru | yandex, google（yandex 落 yandex.ru） |
-| 其他 | google, bing |
+| 其他（含 en） | google |
 
-  api 组在默认集内按 **key 驱动**（有 key 即启用）。每语言组 = 一个本地化主力 + google 通用兜底；baidu / 俄语 bing 需显式配置才会启用。
+  api 组在默认集内按 **key 驱动**（有 key 即启用）。**google 是全局托底**，每个本地化语言只补一个本地化引擎；bing（国际版）/ baidu / yandex 等需显式配置才会启用。
 - **枚举即事实**：engine 枚举在启动时按启用集动态生成——LLM 看到的枚举就是实际可用的引擎，无死选项；显式指定未启用引擎 → 报错（配置指引进 details）。
 - 配置/系统语言变更需重启 pi 生效（启动时静态解析一次）。
 

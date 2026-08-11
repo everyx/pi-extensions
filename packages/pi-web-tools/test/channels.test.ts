@@ -76,17 +76,18 @@ describe("enabled set (PI_WEB_TOOLS_ENGINES)", () => {
 		assert.equal(parseEnginesConfig(""), undefined);
 		assert.equal(parseEnginesConfig("foo,bar"), undefined);
 	});
-	it("default engines: one localization-specialist + google per language", () => {
+	it("default engines: google is the global fallback; localized langs add one", () => {
 		assert.deepEqual(defaultEnginesFor("zh"), ["bing", "google"]); // baidu not default
 		assert.deepEqual(defaultEnginesFor("ru"), ["yandex", "google"]);
-		assert.deepEqual(defaultEnginesFor("en"), ["google", "bing"]);
-		assert.deepEqual(defaultEnginesFor("ja"), ["google", "bing"]);
+		assert.deepEqual(defaultEnginesFor("en"), ["google"]);
+		assert.deepEqual(defaultEnginesFor("ja"), ["google"]);
+		assert.deepEqual(defaultEnginesFor("ko"), ["google"]);
 	});
 	it("resolveEngines: config wins, else the system-locale default", () => {
 		assert.deepEqual(resolveEngines({ engines: ["baidu"] }, "en-US"), ["baidu"]);
 		assert.deepEqual(resolveEngines(undefined, "zh-CN"), ["bing", "google"]);
 		assert.deepEqual(resolveEngines(undefined, "ru-RU"), ["yandex", "google"]);
-		assert.deepEqual(resolveEngines(undefined, "en-US"), ["google", "bing"]);
+		assert.deepEqual(resolveEngines(undefined, "en-US"), ["google"]);
 	});
 	it("resolveApiChannels: config wins, else all", () => {
 		assert.deepEqual(resolveApiChannels({ api: ["tavily"] }), ["tavily"]);
