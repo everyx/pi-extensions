@@ -31,7 +31,7 @@ import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, MSG_STATUS_KEY } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
-import { type AgentMessage, formatFrom, formatTo } from "./protocol.js";
+import { type AgentMessage, formatFrom } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
 import type { NotificationDetails } from "./types.js";
@@ -199,8 +199,8 @@ const StopParamsSchema = Type.Object({
 const SendParamsSchema = Type.Object({
 	to: Type.String({
 		description:
-			'Message target: a tree-path agent id ("a2", "a1/a1") or "@parent" (the session ' +
-			"that spawned you — only available inside a sub-agent).",
+			"The agent id from agent_spawn (a spawn result or completion notification carries it), " +
+			'or "@parent" to message the session that spawned you.',
 	}),
 	message: Type.String({ description: "The message text." }),
 });
@@ -264,9 +264,10 @@ async function handleMessage(
 	const d = registry.route(msg);
 	switch (d.kind) {
 		case "child": {
-			// Deliver to a direct child (or a descendant via its LLM — the
-			// [to …] hint tells the receiver to forward).
-			const text = `${formatFrom(d.message.from)}${formatTo(d.message.to, d.childId)}${d.message.message}`;
+			// Deliver to a direct child (or a descendant via its prefix — the
+			// receiving LLM decides on its own whether to forward further;
+			// cross-level coordination is natural language, not a marker).
+			const text = `${formatFrom(d.message.from)}${d.message.message}`;
 			const ok = await registry.deliver(d.childId, text);
 			return ok ? { ok: true, verb: "delivered" } : { ok: false, error: `delivery to ${d.childId} failed` };
 		}
@@ -729,7 +730,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Stop Agent",
 		description:
 			"Terminate a sub-agent: a running agent discards its work; a persistent (idle) " +
-			"agent exits and is removed from the tree. The completion notification is " +
+			"agent exits and is removed. The completion notification is " +
 			"suppressed for deliberate stops.",
 		promptSnippet: "Stop a running or idle sub-agent",
 		promptGuidelines: [
@@ -808,11 +809,10 @@ export default function (pi: ExtensionAPI) {
 		name: "agent_send",
 		label: "Send Message",
 		description:
-			"Send a message to another agent in the tree. Target a direct child by its agent id " +
-			'("a2", or the full tree path "a1/a1" — the intermediate parent forwards it), ' +
-			'or "@parent" to message the session that spawned you (only inside a sub-agent). ' +
-			"Messages wake idle persistent agents and queue on running ones — delivery is a " +
-			"prompt into the target's context.",
+			"Send a message to another agent. `to` is the agent id agent_spawn gave you (a spawn " +
+			'result or completion notification carries it), or "@parent" to message the session ' +
+			"that spawned you. Messages wake idle persistent agents and queue on running ones — " +
+			"delivery is a prompt into the target's context.",
 		promptSnippet: "Send a message to a sub-agent or your parent",
 		promptGuidelines: [
 			"Send follow-up instructions to a persistent agent with agent_send — its context is intact and it wakes to handle the message.",
