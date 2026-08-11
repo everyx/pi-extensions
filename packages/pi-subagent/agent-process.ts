@@ -17,7 +17,7 @@
  */
 
 import { type AgentActivity, interpretEvent } from "./event-interpret.js";
-import type { RpcCommand, RpcEvent } from "./protocol.js";
+import type { AgentMessage, RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
 import type { RenderEvent } from "./types.js";
 
@@ -63,6 +63,12 @@ export interface AgentProcessOptions {
 	onDelta?: (delta: string) => void;
 	/** Thinking/tool activity transitions (no text delta involved) — for live tool-card rows. */
 	onActivityChange?: (activity: AgentActivity) => void;
+	/** In-tree message received from this child (extension_ui_request under the reserved key). */
+	onMessage?: (message: AgentMessage) => void;
+	/** Resident after completion (idle, zero token) — explicit opt-in, default off. */
+	persistent?: boolean;
+	/** Extra child environment (identity injection: PI_SUBAGENT_AGENT_ID / PI_SUBAGENT_PARENT). */
+	env?: NodeJS.ProcessEnv;
 }
 
 export interface AgentProcessDeps {
@@ -83,6 +89,8 @@ export class AgentProcess {
 	readonly startedAt = Date.now();
 	readonly model: string | undefined;
 	readonly thinking: string | undefined;
+	/** Resident after completion (idle, zero token) — explicit opt-in. */
+	readonly persistent: boolean;
 
 	status: AgentStatus = "queued";
 
@@ -118,8 +126,10 @@ export class AgentProcess {
 		this.abortSettleGraceMs = options.abortSettleGraceMs ?? DEFAULT_ABORT_SETTLE_GRACE_MS;
 		this.model = options.model;
 		this.thinking = options.thinking;
+		this.persistent = options.persistent ?? false;
 		this.onDelta = options.onDelta;
 		this.onActivityChange = options.onActivityChange;
+		this.onMessage = options.onMessage;
 
 		const args: string[] = [];
 		if (options.model) args.push("--model", options.model);
@@ -132,6 +142,7 @@ export class AgentProcess {
 		const clientOptions: RpcClientOptions = {
 			args,
 			cwd: options.cwd,
+			env: options.env,
 			onEvent: (event) => this.onEvent(event),
 			onExit: () => {
 				// Process died (any reason): release everyone waiting on settle.
@@ -177,6 +188,28 @@ export class AgentProcess {
 	/** Hard-interrupt the current turn. */
 	async abort(): Promise<void> {
 		await this.client.sendCommand({ type: "abort" }).catch(() => {});
+	}
+
+	/**
+	 * Deliver one in-tree message to this agent (parent→child): a prompt
+	 * with streamingBehavior "steer" — idle starts a new turn (wake), a
+	 * running child queues it (delivered after the turn). Resolves whether
+	 * the prompt preflight accepted the message. Waking an idle persistent
+	 * agent flips it back to running.
+	 */
+	async sendMessage(text: string): Promise<boolean> {
+		const response = await this.client
+			.sendCommand({ type: "prompt", message: text, streamingBehavior: "steer" })
+			.catch((err: Error) => ({
+				type: "response" as const,
+				command: "prompt" as const,
+				success: false as const,
+				error: err.message,
+			}));
+		if (!response.success) return false;
+		// Woke an idle persistent agent — activity resumes.
+		if (this.status === "completed" || this.status === "failed") this.status = "running";
+		return true;
 	}
 
 	/** Current final assistant text (rpc get_last_assistant_text). */
@@ -313,17 +346,22 @@ export class AgentProcess {
 
 	private readonly onDelta: ((delta: string) => void) | undefined;
 	private readonly onActivityChange: ((activity: AgentActivity) => void) | undefined;
+	private readonly onMessage: ((message: AgentMessage) => void) | undefined;
 
 	private onEvent(event: RpcEvent): void {
 		// Raw protocol shapes are interpreted in event-interpret.ts — the only
 		// place pi's event vocabulary is mapped onto ours. Since v0.84.0 the
 		// wire carries only assistantMessageEvent deltas, so each event maps to
 		// a discrete marker here: the policy surface is settle bookkeeping,
-		// thinking/tool activity push, and streamed text folding.
+		// thinking/tool activity push, streamed text folding, and in-tree
+		// message delivery.
 		for (const ev of interpretEvent(event)) {
 			switch (ev.type) {
 				case "settled":
 					this.settle();
+					// Persistent agent woke by sendMessage finished its turn —
+					// back to idle (completed) so the widget shows it as such.
+					if (this.done && this.persistent && this.status === "running") this.status = "completed";
 					break;
 				case "thinking":
 					// Collapse consecutive thinking deltas into one marker.
@@ -360,6 +398,9 @@ export class AgentProcess {
 				}
 				case "agent_failed":
 					this.agentError = ev.error;
+					break;
+				case "agent_msg":
+					this.onMessage?.(ev.message);
 					break;
 			}
 		}
