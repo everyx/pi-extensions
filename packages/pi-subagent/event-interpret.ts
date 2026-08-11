@@ -19,7 +19,7 @@
  * arrive off the wire. AgentProcess.onEvent is a thin switch over the result.
  */
 
-import type { RpcEvent } from "./protocol.js";
+import type { AgentMessage, RpcEvent } from "./protocol.js";
 
 /**
  * One unit of sub-agent activity — thinking, streamed text, or a tool call.
@@ -38,7 +38,11 @@ export type AgentEvent =
 	| { type: "thinking" }
 	| { type: "tool_call"; activity: Extract<AgentActivity, { kind: "tool" }> }
 	| { type: "text_delta"; delta: string }
-	| { type: "agent_failed"; error: string };
+	| { type: "agent_failed"; error: string }
+	| { type: "agent_msg"; message: AgentMessage };
+
+/** Status key that carries agent_send messages over extension_ui_request. */
+export const MSG_STATUS_KEY = "pi-subagent-msg";
 
 /**
  * Summarize tool-call arguments into a one-line excerpt: the friendly arg
@@ -95,6 +99,33 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 			};
 			if (typeof ae.toolCall.id === "string") activity.id = ae.toolCall.id;
 			return [{ type: "tool_call", activity }];
+		}
+		return [];
+	}
+
+	if (raw.type === "extension_ui_request") {
+		// In-tree message delivery: the sender's extension emits a setStatus
+		// carrying the JSON payload under our reserved key (rpc-mode forwards
+		// extension_ui_request verbatim, no throttling). Anything else in the
+		// extension_ui_request namespace is not ours — ignore.
+		if (raw.method === "setStatus" && raw.statusKey === MSG_STATUS_KEY && typeof raw.statusText === "string") {
+			try {
+				const parsed = JSON.parse(raw.statusText) as { to?: unknown; from?: unknown; message?: unknown };
+				if (typeof parsed.to === "string" && typeof parsed.message === "string") {
+					return [
+						{
+							type: "agent_msg" as const,
+							message: {
+								to: parsed.to,
+								from: typeof parsed.from === "string" ? parsed.from : "",
+								message: parsed.message,
+							},
+						},
+					];
+				}
+			} catch {
+				/* malformed payload — ignore */
+			}
 		}
 		return [];
 	}
