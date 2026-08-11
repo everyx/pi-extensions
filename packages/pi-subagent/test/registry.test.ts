@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentCompletion } from "../agent-process.js";
+import type { AgentMessage } from "../protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "../registry.js";
 
 // ── Fakes ──────────────────────────────────────────────────
@@ -17,13 +18,23 @@ import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "../regi
 class FakeAgent implements RegisteredAgent {
 	readonly agentId: string;
 	readonly title: string;
+	readonly persistent?: boolean;
 	stoppedByControl = false;
 	stopCalls = 0;
 	stopped = false;
+	/** sendMessage deliveries (texts). */
+	delivered: string[] = [];
+	sendOk = true;
 
-	constructor(agentId: string, title = "fake") {
+	constructor(agentId: string, title = "fake", persistent = false) {
 		this.agentId = agentId;
 		this.title = title;
+		this.persistent = persistent;
+	}
+
+	async sendMessage(text: string): Promise<boolean> {
+		this.delivered.push(text);
+		return this.sendOk;
 	}
 
 	async stop(): Promise<void> {
@@ -60,13 +71,14 @@ function completion(overrides: Partial<AgentCompletion> = {}): AgentCompletion {
 	};
 }
 
-function makeRegistry(widget: FakeWidget | null = new FakeWidget()) {
+function makeRegistry(widget: FakeWidget | null = new FakeWidget(), hasParent = false) {
 	const notified: Array<{ agentId: string; status: string }> = [];
 	const registry = new AgentRegistry({
 		notify: (agent, c) => {
 			notified.push({ agentId: agent.agentId, status: c.status });
 		},
 		getWidget: () => widget,
+		hasParent,
 	});
 	return { registry, widget, notified };
 }
@@ -160,6 +172,90 @@ describe("AgentRegistry — completion policy", () => {
 		await registry.complete(agent, completion());
 
 		assert.deepEqual(notified, []);
+	});
+});
+
+describe("AgentRegistry — persistent (idle) completion", () => {
+	it("notifies but keeps the process and bookkeeping (idle)", async () => {
+		const { registry, widget, notified } = makeRegistry();
+		const agent = new FakeAgent("a1", "stay", true);
+		registry.register(agent);
+
+		await registry.complete(agent, completion());
+
+		assert.deepEqual(notified, [{ agentId: "a1", status: "completed" }]);
+		assert.equal(agent.stopCalls, 0, "process stays resident");
+		assert.equal(registry.lookup("a1"), agent, "still registered (agent_stop removes later)");
+		assert.deepEqual(widget?.removed, [], "widget row kept");
+	});
+
+	it("a persistent agent that failed still cleans up (only completed goes idle)", async () => {
+		const { registry, widget } = makeRegistry();
+		const agent = new FakeAgent("a1", "stay", true);
+		registry.register(agent);
+
+		await registry.complete(agent, completion({ status: "failed" }));
+
+		assert.equal(agent.stopCalls, 1);
+		assert.equal(registry.lookup("a1"), undefined);
+		assert.deepEqual(widget?.removed, ["a1"]);
+	});
+
+	it("a persistent idle agent can be stopped and removed", async () => {
+		const { registry, widget } = makeRegistry();
+		const agent = new FakeAgent("a1", "stay", true);
+		registry.register(agent);
+		await registry.complete(agent, completion());
+
+		assert.equal(await registry.stopAndRemove("a1"), true);
+		assert.equal(agent.stopCalls, 1);
+		assert.equal(registry.lookup("a1"), undefined);
+		assert.deepEqual(widget?.removed, ["a1"]);
+	});
+});
+
+describe("AgentRegistry — in-tree routing", () => {
+	const msg = (to: string, from = "a1"): AgentMessage => ({ to, from, message: "hi" });
+
+	it("routes a direct child for delivery", () => {
+		const { registry } = makeRegistry(null);
+		registry.register(new FakeAgent("a2"));
+		const d = registry.route(msg("a2"));
+		assert.deepEqual(d, { kind: "child", childId: "a2", message: msg("a2") });
+	});
+
+	it("routes @parent to the parent when this process is a child", () => {
+		const { registry } = makeRegistry(null, true);
+		assert.equal(registry.route(msg("@parent")).kind, "parent");
+	});
+
+	it("errors @parent at the root session", () => {
+		const { registry } = makeRegistry(null, false);
+		assert.equal(registry.route(msg("@parent", "")).kind, "error");
+	});
+
+	it("uplinks unknown targets when a parent exists, errors at root", () => {
+		const { registry: child } = makeRegistry(null, true);
+		assert.equal(child.route(msg("zzz")).kind, "uplink");
+		const { registry: root } = makeRegistry(null, false);
+		assert.equal(root.route(msg("zzz", "")).kind, "error");
+	});
+
+	it("delivers a message to a direct child via its sendMessage", async () => {
+		const { registry } = makeRegistry(null);
+		const agent = new FakeAgent("a2");
+		registry.register(agent);
+		assert.equal(await registry.deliver("a2", "[from ] hi"), true);
+		assert.deepEqual(agent.delivered, ["[from ] hi"]);
+	});
+
+	it("deliver returns false for unknown or un-deliverable agents", async () => {
+		const { registry } = makeRegistry(null);
+		assert.equal(await registry.deliver("zzz", "hi"), false);
+		const plain = new FakeAgent("a2");
+		(plain as { sendMessage?: unknown }).sendMessage = undefined;
+		registry.register(plain);
+		assert.equal(await registry.deliver("a2", "hi"), false);
 	});
 });
 
