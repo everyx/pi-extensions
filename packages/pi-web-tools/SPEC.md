@@ -96,7 +96,9 @@ LLM 对搜索操作符有先验知识（训练语料含 `site:` / `filetype:` / 
 
 > 判据：当地使用量最大 + 实际可用性（bsk 反爬/质量）。韩国 Naver（63%）与日本 Yahoo（6.6%，底层即 Google）因单市场价值低、维护成本高而不支持，Google/Bing 兜底即可。
 
-- **API 通道不支持 locale** → 自动 fallback 到 bsk 真实浏览器执行对应本地化搜索。
+- **启用集内无语言优先级命中时**（如 zh 用户只启用 yandex）取启用集首个引擎（不报错——配置集的完整兜底）。
+- **bsk 的 recency 仅 google（`qdr:`）与 bing（`filters`）**：baidu/yandex 无时效参数——请求 recency 时**显式报错**而非静默丢弃（SPEC: 能力缺失不静默）。
+- **API 通道不支持 locale**（含 tavily——其 `country` 参数是弱本地化，非 spec 承诺的域名级落地）→ 自动 fallback 到 bsk 真实浏览器执行对应本地化搜索。
 
 ## 人机验证（captcha）处理
 
@@ -125,7 +127,7 @@ LLM 对搜索操作符有先验知识（训练语料含 `site:` / `filetype:` / 
 ### 通道可用性检测
 
 ```ts
-isChannelAvailable(channel): boolean   // key 存在且格式合法 / bsk 已装 / 订阅态判定
+isChannelAvailable(channel): boolean   // key 非空 / bsk 已装（格式错误由调用时 fallback 兜住，不预校验）
 ```
 
 每个通道一个纯函数（可单测）。**不含占位符黑名单**（防御性机制不做）。

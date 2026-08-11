@@ -1,15 +1,15 @@
 /**
  * pi-web-tools — Tavily channel (official SDK @tavily/core).
  *
- * Requires TAVILY_API_KEY. Supports domains + recency natively; locale via
- * the country param when a region is present.
+ * Requires TAVILY_API_KEY. Supports domains + recency natively; no
+ * localization (a bare `country` param is not the domain-level locale the
+ * spec promises — auto + locale routes to bsk, see channels.ts).
  */
 
 import { tavily } from "@tavily/core";
 import { isoToRelativeAge } from "../../date.ts";
 import { createRateLimiter } from "../../rate-limit.ts";
 import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../../types.ts";
-import { countryFromLocale } from "../locale.ts";
 
 const DEFAULT_RESULTS = 5;
 
@@ -39,7 +39,6 @@ export async function searchWithTavily(
 			...(params.allowed_domains?.length ? { includeDomains: params.allowed_domains } : {}),
 			...(params.blocked_domains?.length ? { excludeDomains: params.blocked_domains } : {}),
 			...(params.recency ? { timeRange: params.recency } : {}),
-			...(countryFromLocale(params.locale) ? { country: countryFromLocale(params.locale) } : {}),
 		}),
 	);
 

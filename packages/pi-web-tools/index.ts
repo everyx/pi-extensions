@@ -5,25 +5,15 @@
  * → real browser (bsk). The enabled set — which api channels and which
  * traditional engines are usable — is resolved once at startup from
  * PI_WEB_TOOLS_ENGINES (or the system locale's default set) and mirrored
- * into the engine enum (SPEC: 枚举即事实). LLM sees only results or a terse
- * error; engine echo and diagnostics live in details (UI-visible).
+ * into the engine enum (SPEC: 枚举即事实). Engines only surface when bsk is
+ * installed, so the LLM never sees a dead option. LLM sees only results or
+ * a terse error; engine echo and diagnostics live in details (UI-visible).
  */
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
-import { engineDomain } from "./search/locale.js";
-
-/** Meta label for the channel a search went through. Browser engines are
- * labeled by the domain actually navigated (via cn.bing.com — from
- * engineDomain + the call's locale); api channels by name (via exa). */
-function viaLabel(channel?: string, engine?: string, locale?: string): string | undefined {
-	if (!channel) return undefined;
-	if (channel === "bsk" && engine) return `via ${engineDomain(engine as EngineId, locale)}`;
-	return `via ${channel}`;
-}
-
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { webFetch } from "./fetch/fetch.js";
 import { buildWebSearchSchema, WebFetchParamsSchema } from "./schema.js";
@@ -32,7 +22,6 @@ import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.j
 import { isTavilyAvailable, searchWithTavily } from "./search/api/tavily.js";
 import { searchWithBsk } from "./search/browser.js";
 import {
-	DEFAULT_CHANNEL_ORDER,
 	orderedCandidates,
 	parseEnginesConfig,
 	requestedCapabilities,
@@ -40,6 +29,7 @@ import {
 	resolveEngines,
 	route,
 } from "./search/channels.js";
+import { viaLabel } from "./search/locale.js";
 import { systemLocale } from "./search/system-locale.js";
 import type { ChannelCapabilities, ChannelId, EngineId, SearchResultItem, WebSearchParams } from "./types.js";
 
@@ -49,12 +39,22 @@ const execFileAsync = promisify(execFile);
 
 /** The enabled api channels + bsk engines. Config wins; else system-locale
  * defaults. Mirrored into the engine enum so the LLM only sees usable
- * engines (SPEC: 枚举即事实). */
+ * engines (SPEC: 枚举即事实) — engines additionally require bsk to be
+ * installed, otherwise they'd be dead options at call time. */
+function isBskInstalledSync(): boolean {
+	try {
+		execFileSync("bsk", ["--version"], { timeout: 5_000, stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 const systemLocaleValue = systemLocale();
 const enginesConfig = parseEnginesConfig(process.env.PI_WEB_TOOLS_ENGINES);
 const ENABLED = {
 	api: resolveApiChannels(enginesConfig),
-	engines: resolveEngines(enginesConfig, systemLocaleValue),
+	engines: isBskInstalledSync() ? resolveEngines(enginesConfig, systemLocaleValue) : [],
 };
 
 // ── Channel availability ─────────────────────────────────────────
@@ -105,7 +105,7 @@ function formatResults(result: SearchResultItem[]): string {
 function finalizeResult(
 	result: SearchResultItem[],
 	candidate: { channel: ChannelId; engine?: EngineId },
-	params: WebSearchParams,
+	locale: string | undefined,
 	startedAt: number,
 ): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: boolean } {
 	return {
@@ -115,7 +115,7 @@ function finalizeResult(
 				results: result,
 				channel: candidate.channel,
 				...(candidate.engine ? { engine: candidate.engine } : {}),
-				...(params.locale ? { locale: params.locale } : {}),
+				...(locale ? { locale } : {}),
 				count: result.length,
 				startedAt,
 				endedAt: Date.now(),
@@ -148,15 +148,15 @@ async function executeSearch(
 	}
 
 	const { available, capabilities } = await detectAvailableChannels();
-	const order = DEFAULT_CHANNEL_ORDER;
+	const routeOptions = { capabilities, engines: ENABLED.engines };
 
 	// Explicit engine: honor the intent — no auto-fallback on failure.
 	if (params.engine && params.engine !== "auto") {
-		const routed = route(params, available, order, capabilities, ENABLED.engines);
+		const routed = route(params, available, routeOptions);
 		if ("error" in routed) {
 			return {
 				content: [{ type: "text", text: routed.error }],
-				details: { error: routed.error, unsatisfied: routed.unsatisfied, available },
+				details: { error: routed.error, hint: routed.hint, unsatisfied: routed.unsatisfied, available },
 				isError: true,
 			};
 		}
@@ -168,7 +168,7 @@ async function executeSearch(
 		});
 		try {
 			const result = await runChannel(routed.channel, params, routed.engine, signal);
-			return finalizeResult(result, { channel: routed.channel, engine: routed.engine }, params, startedAt);
+			return finalizeResult(result, { channel: routed.channel, engine: routed.engine }, params.locale, startedAt);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return {
@@ -188,7 +188,7 @@ async function executeSearch(
 
 	// engine auto: try candidates in order; on failure fall through to the
 	// next usable channel (SPEC: 静默降级). All failures → terse error.
-	const candidates = orderedCandidates(params, available, order, capabilities, ENABLED.engines);
+	const candidates = orderedCandidates(params, available, routeOptions);
 	if (candidates.length === 0) {
 		const requested = requestedCapabilities(params);
 		const unsatisfied = Object.entries(requested)
@@ -212,7 +212,7 @@ async function executeSearch(
 		});
 		try {
 			const result = await runChannel(candidate.channel, params, candidate.engine, signal);
-			return finalizeResult(result, candidate, params, startedAt);
+			return finalizeResult(result, candidate, params.locale, startedAt);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			failures.push({ channel: candidate.channel, error: message });

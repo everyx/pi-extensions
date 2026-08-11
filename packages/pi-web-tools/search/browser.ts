@@ -8,8 +8,8 @@
  * simulation.
  *
  * Per-engine serial queues share one bsk session across a burst of queued
- * searches (SPEC: 批量搜索一次打开浏览器). bsk errors surface as-is
- * (SPEC: bsk 运行报错透传到 TUI；安装归 bsk 自己).
+ * searches. bsk errors surface as-is in the TUI; install is bsk's own
+ * concern (SPEC: bsk 运行报错透传到 TUI).
  *
  * Follows BrowserSkill's lifecycle: session start → commands with --session
  * → session stop (always, even on error paths).
@@ -189,7 +189,7 @@ async function ensureBrowserConnected(timeoutMs = 15_000): Promise<{ ok: boolean
 	return {
 		ok: false,
 		detail: launched
-			? "launched browser but the bsk extension did not connect (is the BrowserSkill extension installed?)"
+			? "launched browser but the bsk extension did not connect"
 			: "no Chromium-family browser found to launch; open one manually",
 	};
 }
@@ -333,6 +333,12 @@ export async function searchWithBsk(
 	ctx: ChannelSearchContext,
 ): Promise<SearchResultItem[]> {
 	const timeoutMs = ctx.timeoutMs ?? 30_000;
+	// recency exists on google (qdr:) and bing (filters) only; baidu/yandex
+	// have no freshness param — request it explicitly rather than silently
+	// dropping it (SPEC: 能力缺失不静默).
+	if (params.recency && engine !== "google" && engine !== "bing") {
+		throw new Error(`engine "${engine}" does not support recency`);
+	}
 	// Direct navigation to the engine search URL: query + locale + recency
 	// as URL params (precise, no DOM dependence).
 	const recencyParam = params.recency

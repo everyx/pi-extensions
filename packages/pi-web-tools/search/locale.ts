@@ -53,23 +53,23 @@ export function engineHost(engine: EngineId, locale?: string): string {
 	}
 }
 
-/** Bare domain identity for the via label (mirrors engineHost's locale split). */
+/** Bare domain identity for the via label (engineHost minus the www.). */
 export function engineDomain(engine: EngineId, locale?: string): string {
-	switch (engine) {
-		case "google":
-			return "google.com";
-		case "bing":
-			return isZhCn(locale) ? "cn.bing.com" : "bing.com";
-		case "baidu":
-			return "baidu.com";
-		case "yandex":
-			return primaryLanguage(locale) === "ru" ? "yandex.ru" : "yandex.com";
-	}
+	return engineHost(engine, locale).replace(/^www\./, "");
 }
 
 /** True for the zh-CN locale (mainland data source — cn.bing.com). */
 function isZhCn(locale?: string): boolean {
 	return primaryLanguage(locale) === "zh" && countryFromLocale(locale) === "CN";
+}
+
+/** Meta label for the channel a search went through (shared by index.ts and
+ * the 1:1 preview). Browser engines are labeled by the domain actually
+ * navigated (via cn.bing.com); api channels by name (via exa). */
+export function viaLabel(channel?: string, engine?: string, locale?: string): string | undefined {
+	if (!channel) return undefined;
+	if (channel === "bsk" && engine) return `via ${engineDomain(engine as EngineId, locale)}`;
+	return `via ${channel}`;
 }
 
 /** Build a search URL for an engine + locale + optional recency. */

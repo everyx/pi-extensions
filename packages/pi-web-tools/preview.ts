@@ -17,19 +17,8 @@ import { pathToFileURL } from "node:url";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
-import { engineDomain } from "./search/locale.js";
-
-/** Meta label for the channel a search went through. Browser engines are
- * labeled by the domain actually navigated (via cn.bing.com — from
- * engineDomain + the call's locale); API channels by name (via exa). */
-function viaLabel(channel?: string, engine?: string, locale?: string): string | undefined {
-	if (!channel) return undefined;
-	if (channel === "bsk" && engine) return `via ${engineDomain(engine as EngineId, locale)}`;
-	return `via ${channel}`;
-}
-
 import { createToolView } from "@everyx/pi-ui/view.js";
-import type { EngineId } from "./types.js";
+import { viaLabel } from "./search/locale.js";
 
 // ── Views (same templates as index.ts) ─────────────────────────
 

@@ -9,12 +9,15 @@
  */
 
 import type { ChannelCapabilities, ChannelId, EngineId, RequestedCapabilities, WebSearchParams } from "../types.js";
-import { enginePriorityForLocale } from "./locale.js";
+import { enginePriorityForLocale, primaryLanguage } from "./locale.js";
 
-/** SPEC 通道能力矩阵 (code-ified). "operators" = native query-operator syntax. */
+/** SPEC 通道能力矩阵 (code-ified). "operators" = native query-operator syntax.
+ * tavily's locale is a bare `country` param — not the domain-level
+ * localization the spec promises, so it stays out of the locale path
+ * (auto + locale routes to bsk, the only real localization). */
 export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapabilities> = {
 	exa: { domains: true, recency: true, locale: false, operators: false },
-	tavily: { domains: true, recency: true, locale: true, operators: true }, // site:/布尔/引号
+	tavily: { domains: true, recency: true, locale: false, operators: true }, // site:/布尔/引号
 	parallel: { domains: true, recency: true, locale: false, operators: false },
 	bsk: { domains: true, recency: true, locale: true, operators: true }, // 真实引擎全操作符
 };
@@ -70,19 +73,13 @@ export function defaultEnginesFor(language: string): EngineId[] {
 /** Resolve the bsk engine set: config wins, else the system-locale default. */
 export function resolveEngines(config: { engines: EngineId[] } | undefined, systemLocale: string): EngineId[] {
 	if (config) return config.engines;
-	return defaultEnginesFor(primaryLanguageOf(systemLocale));
+	return defaultEnginesFor(primaryLanguage(systemLocale));
 }
 
 /** Resolve the api channel set: config wins (excludes unlisted), else all. */
 export function resolveApiChannels(config: { api: ChannelId[] } | undefined): ChannelId[] {
 	if (config) return config.api;
 	return [...API_CHANNELS];
-}
-
-function primaryLanguageOf(locale: string): string {
-	const tag = locale.trim().toLowerCase();
-	const sep = tag.search(/[-_]/);
-	return (sep >= 0 ? tag.slice(0, sep) : tag).trim();
 }
 
 export function channelCapabilities(channel: ChannelId): ChannelCapabilities {
@@ -124,6 +121,19 @@ export interface RouteFailure {
 	error: string;
 	/** Capabilities no available channel satisfied (for the error message). */
 	unsatisfied: string[];
+	/** Config guidance — details-only, never into LLM context (SPEC: 错误分层). */
+	hint?: string;
+}
+
+/** Optional knobs for route()/orderedCandidates() — kept as one bundle so
+ * the signatures stay stable as the enabled-set concept grows. */
+export interface RouteOptions {
+	/** Candidate order (defaults to DEFAULT_CHANNEL_ORDER). */
+	order?: ChannelId[];
+	/** Runtime capability overrides (e.g. keyless Exa MCP). */
+	capabilities?: Partial<Record<ChannelId, ChannelCapabilities>>;
+	/** Enabled bsk engine set (SPEC: 启用集). */
+	engines?: EngineId[];
 }
 
 /**
@@ -135,16 +145,15 @@ export interface RouteFailure {
  *   cover the requested ones. Explicit error when none does (no silent
  *   capability drop).
  *
- * `engines` = the enabled bsk engine set (SPEC: 启用集); the bsk engine is
- * the locale-priority engine that is enabled (no locale → google).
+ * `options.engines` = the enabled bsk engine set; the bsk engine is the
+ * locale-priority engine that is enabled (no locale → google).
  */
 export function route(
 	params: WebSearchParams,
 	available: ChannelId[],
-	order: ChannelId[] = DEFAULT_CHANNEL_ORDER,
-	capabilities?: Partial<Record<ChannelId, ChannelCapabilities>>,
-	engines?: EngineId[],
+	options: RouteOptions = {},
 ): RouteResult | RouteFailure {
+	const { order = DEFAULT_CHANNEL_ORDER, capabilities, engines } = options;
 	const requested = requestedCapabilities(params);
 
 	if (params.engine && params.engine !== "auto") {
@@ -156,7 +165,8 @@ export function route(
 		}
 		if (engines && !engines.includes(params.engine)) {
 			return {
-				error: `engine "${params.engine}" is not enabled (set PI_WEB_TOOLS_ENGINES to include it).`,
+				error: `engine "${params.engine}" is not enabled.`,
+				hint: `set PI_WEB_TOOLS_ENGINES to include "${params.engine}"`,
 				unsatisfied: ["operators"],
 			};
 		}
@@ -226,10 +236,9 @@ export function satisfies(
 export function orderedCandidates(
 	params: WebSearchParams,
 	available: ChannelId[],
-	order: ChannelId[] = DEFAULT_CHANNEL_ORDER,
-	capabilities?: Partial<Record<ChannelId, ChannelCapabilities>>,
-	engines?: EngineId[],
+	options: RouteOptions = {},
 ): Array<{ channel: ChannelId; engine?: EngineId }> {
+	const { order = DEFAULT_CHANNEL_ORDER, capabilities, engines } = options;
 	const requested = requestedCapabilities(params);
 	return order
 		.filter((c) => available.includes(c) && satisfies(c, requested, capabilities))
