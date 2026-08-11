@@ -67,9 +67,10 @@ export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Sp
 		status = theme.fg("warning", "\u25a0");
 		meta = "(stopped)";
 	} else if (item.status === "idle") {
-		// Resident persistent agent: muted marker, no elapsed — zero-token wait.
-		status = theme.fg("muted", "\u2026");
-		meta = "(idle)";
+		// Resident persistent agent: pause marker, no meta — the icon carries
+		// the state (zero-token wait).
+		status = theme.fg("muted", "\u23f8");
+		meta = "";
 	} else {
 		status = theme.fg("success", "\u2713");
 		meta = "(done)";
@@ -137,6 +138,14 @@ export class StatusWidget {
 		const row = this.rows.get(id);
 		if (!row) return;
 		row.item = { ...row.item, status };
+		this.tui?.requestRender();
+	}
+
+	/** Update one row's activity excerpt in place (live working output). */
+	updateRows(id: string, rows: WidgetRow[]): void {
+		const row = this.rows.get(id);
+		if (!row) return;
+		row.item = { ...row.item, rows };
 		this.tui?.requestRender();
 	}
 
