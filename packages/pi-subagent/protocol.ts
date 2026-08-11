@@ -120,13 +120,6 @@ export function formatFrom(from: string): string {
 	return from ? `[from ${from}] ` : "";
 }
 
-/** LLM-visible routing hint for cross-generation deliveries (the message
- *  must be forwarded by the receiving agent's LLM): "[to a1/a1] ".
- *  Empty when the message is for the receiving agent itself. */
-export function formatTo(to: string, receiver: string): string {
-	return to === receiver ? "" : `[to ${to}] `;
-}
-
 // ─── Pure helpers ──────────────────────────────────────────
 
 /** Serialize a command to a single JSONL line (LF-terminated). */

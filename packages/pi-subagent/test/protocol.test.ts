@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatFrom, formatTo, parseLine, routeMessage, serializeCommand } from "../protocol.js";
+import { formatFrom, parseLine, routeMessage, serializeCommand } from "../protocol.js";
 
 describe("serializeCommand", () => {
 	it("serializes a prompt command as a single LF-terminated line", () => {
@@ -152,14 +152,9 @@ describe("routeMessage — in-tree routing (per-hop, O(1))", () => {
 	});
 });
 
-describe("formatFrom / formatTo — LLM-visible markers", () => {
-	it("formatFrom prefixes the sender id (empty for root)", () => {
+describe("formatFrom — LLM-visible sender marker", () => {
+	it("prefixes the sender id (empty for root)", () => {
 		assert.equal(formatFrom("a1"), "[from a1] ");
 		assert.equal(formatFrom(""), "");
-	});
-
-	it("formatTo hints cross-generation forwarding only", () => {
-		assert.equal(formatTo("a2", "a2"), ""); // direct child — no hint
-		assert.equal(formatTo("a2/a2-1", "a2"), "[to a2/a2-1] ");
 	});
 });
