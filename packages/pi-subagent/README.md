@@ -27,7 +27,7 @@ Pi has no built‑in sub‑agents. So heavy, parallel, or context‑heavy work c
 - **Reviewable** — every session persists and is never deleted; attach any result with `pi --session <path>`.
 - **Zero deps & nestable** — only `peerDependencies`. A child is a full pi instance, so it can spawn another child.
 - **Token economy** — the system side stays lean:
-  - **System prompt** — three tools and terse guidance cost ≈**587 tokens** of injection (~2.3KB; drifts with the tokenizer).
+  - **System prompt** — three tools and terse guidance inject roughly 2–3KB of system prompt (token count drifts with the tokenizer).
   - **Notification** — the LLM sees only minimal structured data; decoration (title, usage, session path) stays in the render layer.
   - **Results** — tail‑truncated (2000 lines / 50KB); expand any card for the full transcript.
 
