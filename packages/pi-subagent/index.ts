@@ -873,18 +873,22 @@ export default function (pi: ExtensionAPI) {
 			}
 			return {
 				content: [{ type: "text", text: `${r.verb} to ${to}.` }],
-				details: { to, message },
+				// Card title prefers the target's human title (uniform with agent_stop).
+				details: { to, message, title: registry.lookup(to)?.title },
 			};
 		},
 
 		...createToolView<Record<string, unknown>, Record<string, unknown>>({
 			name: "agent_send",
-			title: (ctx) => {
-				const to = String(
-					(ctx.result?.data as { to?: string } | undefined)?.to ?? (ctx.args as { to?: unknown })?.to ?? "",
-				);
-				return to.slice(0, 60);
-			},
+			title: (ctx) =>
+				String(
+					// The target's human title (uniform with agent_stop); the id is
+					// the fallback when the target is gone or unknown (@parent).
+					(ctx.result?.data as { title?: string } | undefined)?.title ??
+						(ctx.result?.data as { to?: string } | undefined)?.to ??
+						(ctx.args as { to?: unknown })?.to ??
+						"",
+				).slice(0, 60),
 			tail: (ctx) => {
 				if (ctx.status === "error") return "failed";
 				if (ctx.status === "processing") return "sending\u2026";
