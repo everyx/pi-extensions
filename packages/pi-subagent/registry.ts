@@ -22,6 +22,7 @@
 
 import type { WidgetResult } from "@everyx/pi-ui/widget.js";
 import type { AgentCompletion } from "./agent-process.js";
+import { type AgentMessage, type RouteDecision, routeMessage } from "./protocol.js";
 
 /** Narrow agent surface the registry needs — AgentProcess satisfies it. */
 export interface RegisteredAgent {
@@ -29,6 +30,10 @@ export interface RegisteredAgent {
 	readonly title: string;
 	readonly model?: string;
 	readonly thinking?: string;
+	/** Resident after completion (idle) — explicit opt-in; complete() keeps it. */
+	readonly persistent?: boolean;
+	/** Deliver one in-tree message to this agent (AgentProcess.sendMessage). */
+	sendMessage?: (text: string) => Promise<boolean>;
 	stoppedByControl: boolean;
 	stop(): Promise<void>;
 }
@@ -46,17 +51,21 @@ export interface AgentRegistryDeps {
 	notify: (agent: RegisteredAgent, completion: AgentCompletion) => Promise<void> | void;
 	/** Lazy widget access — null in non-TUI modes. */
 	getWidget?: () => WidgetSurface | null;
+	/** This process is itself a child agent (routes "@parent"/uplinks to the parent). */
+	hasParent?: boolean;
 }
 
 export class AgentRegistry {
 	private readonly agents = new Map<string, RegisteredAgent>();
 	private readonly notify: AgentRegistryDeps["notify"];
 	private readonly getWidget: NonNullable<AgentRegistryDeps["getWidget"]>;
+	private readonly hasParent: boolean;
 	private idCounter = 0;
 
 	constructor(deps: AgentRegistryDeps) {
 		this.notify = deps.notify;
 		this.getWidget = deps.getWidget ?? (() => null);
+		this.hasParent = deps.hasParent ?? false;
 	}
 
 	/**
@@ -84,15 +93,38 @@ export class AgentRegistry {
 	 * Completion policy + cleanup, single choke point. Notifies unless the
 	 * stop was user-controlled; always removes the bookkeeping and stops the
 	 * child (idempotent — safe for never-registered spawn failures and for
-	 * completions arriving after stopAndRemove).
+	 * completions arriving after stopAndRemove). A persistent agent that
+	 * completed stays registered (idle, process resident) — agent_stop
+	 * removes it later.
 	 */
 	async complete(agent: RegisteredAgent, completion: AgentCompletion): Promise<void> {
+		const notify = () => (agent.stoppedByControl ? Promise.resolve() : this.notify(agent, completion));
+		if (agent.persistent && completion.status === "completed") {
+			await notify();
+			return; // resident — no remove, no stop
+		}
 		try {
-			if (!agent.stoppedByControl) await this.notify(agent, completion);
+			await notify();
 		} finally {
 			this.remove(agent.agentId, completion.status === "completed" ? "done" : completion.status);
 			await agent.stop().catch(() => {});
 		}
+	}
+
+	/**
+	 * Route one in-tree message against my direct children (pure; the caller
+	 * — agent_send execute or the inbound-message handler — acts on the
+	 * decision: deliver / inject the parent LLM / forward up / error).
+	 */
+	route(msg: AgentMessage): RouteDecision {
+		return routeMessage(msg, [...this.agents.keys()], this.hasParent);
+	}
+
+	/** Deliver a message to a direct child (rpc prompt + steer behavior). */
+	async deliver(childId: string, text: string): Promise<boolean> {
+		const agent = this.agents.get(childId);
+		if (!agent?.sendMessage) return false;
+		return agent.sendMessage(text);
 	}
 
 	/** AgentControl.stop path: graceful stop + removal (no notification).
