@@ -1,6 +1,5 @@
 /**
- * Tests for locale inference + engine priority + URL building
- * (search/locale.ts).
+ * Tests for engine priority + URL building (search/locale.ts).
  */
 
 import assert from "node:assert/strict";

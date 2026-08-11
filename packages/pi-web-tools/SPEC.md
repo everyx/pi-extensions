@@ -51,7 +51,7 @@ web_fetch(url: string) → { title, markdown }
 
 ## 通道架构
 
-三个通道，LLM 不感知（通道 = 用户配置 + 运行时可用性自动判定，静默降级）：
+两个通道，LLM 感知传统引擎（`engine` 枚举即事实——见[配置](#配置)）；api 组内部（exa/tavily/parallel）不感知（key 驱动 + auto 内部路由）：
 
 | 通道 | 组成 | 成本模型 | 能力 |
 |---|---|---|---|

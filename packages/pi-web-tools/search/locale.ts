@@ -1,16 +1,19 @@
 /**
- * pi-web-tools — locale inference and engine priority (SPEC: 本地化).
+ * pi-web-tools — engine priority within the enabled set (SPEC: 本地化).
  *
- * Language grouping drives the default engine order for the bsk channel:
- *   中文 → bing > baidu > google
- *   俄语 → yandex > google > bing
- *   其他 → google > bing
- * Pure, unit-testable.
+ * Ordering for the bsk engine when auto-routing with a locale: the
+ * localization-specialist first, then google as the global fallback.
+ * Applied to the *enabled* set only (defaults: zh → bing,google;
+ * ru → yandex,google; everything else → google). Engines outside a
+ * default set (e.g. baidu) take their priority position here only when
+ * explicitly enabled via PI_WEB_TOOLS_ENGINES. Locale itself is explicit
+ * (LLM-passed, never inferred from the query). Pure, unit-testable.
  */
 
 import type { EngineId } from "../types.js";
 
-/** BCP-47 → language-group engine priority. First group match wins (order matters). */
+/** BCP-47 → language-group engine priority, first group match wins (order
+ * matters). Applied within the enabled engine set — see file header. */
 export function enginePriorityForLocale(locale?: string): EngineId[] {
 	const lang = primaryLanguage(locale);
 	if (lang === "zh") return ["bing", "baidu", "google"];

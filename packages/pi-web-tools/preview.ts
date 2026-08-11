@@ -20,11 +20,11 @@ import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { engineDomain } from "./search/locale.js";
 
 /** Meta label for the channel a search went through. Browser engines are
- * labeled by the domain actually navigated (via yandex.com — from
- * engineDomain, the single source of truth); API channels by name (via exa). */
-function viaLabel(channel?: string, engine?: string): string | undefined {
+ * labeled by the domain actually navigated (via cn.bing.com — from
+ * engineDomain + the call's locale); API channels by name (via exa). */
+function viaLabel(channel?: string, engine?: string, locale?: string): string | undefined {
 	if (!channel) return undefined;
-	if (channel === "browser" && engine) return `via ${engineDomain(engine as EngineId)}`;
+	if (channel === "bsk" && engine) return `via ${engineDomain(engine as EngineId, locale)}`;
 	return `via ${channel}`;
 }
 
@@ -41,12 +41,13 @@ const searchView = createToolView<Record<string, unknown>, unknown>({
 		const d = (ctx.result?.data ?? {}) as {
 			channel?: string;
 			engine?: string;
+			locale?: string;
 			count?: number;
 			startedAt?: number;
 			endedAt?: number;
 		};
 		return [
-			viaLabel(d.channel, d.engine),
+			viaLabel(d.channel, d.engine, d.locale),
 			// A failed search reports no result count — it's 0 by definition.
 			ctx.status !== "error" && d.count != null ? `${d.count} results` : undefined,
 			durationMeta(ctx.status, d.startedAt, d.endedAt),
@@ -372,7 +373,7 @@ const pathB: LifecyclePath = {
 				{
 					kind: "search",
 					args: { query: "nonexistent query", engine: "yandex" },
-					details: { query: "nonexistent query", channel: "browser", engine: "yandex" },
+					details: { query: "nonexistent query", channel: "bsk", engine: "yandex" },
 					isPartial: true,
 				},
 			],
@@ -388,7 +389,7 @@ const pathB: LifecyclePath = {
 					details: {
 						error: "yandex returned no usable results (captcha wall).",
 						data: {
-							channel: "browser",
+							channel: "bsk",
 							engine: "yandex",
 							count: 0,
 							startedAt: 1_752_000_000_000,

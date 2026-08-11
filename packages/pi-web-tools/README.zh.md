@@ -2,7 +2,7 @@
 
 Pi 的 Web 原语——`web_search` + `web_fetch`。
 
-- **`web_search`** — 搜索互联网。优先免费 search API（Exa / Tavily / Parallel），其次真实浏览器搜索（Google / Bing / 百度，经 BrowserSkill），最后模型 grounding。自动按语言选择本地引擎；显式指定引擎时可用完整搜索操作符语法。
+- **`web_search`** — 搜索互联网。优先免费 search API（Exa / Tavily / Parallel），其次真实浏览器搜索（Google / Bing / 百度 / Yandex，经 BrowserSkill）。引擎默认集跟随系统语言（如中文系统补 Bing，走 cn.bing.com）；要本地化结果时显式传 `locale`；显式指定引擎时可用完整搜索操作符语法。
 - **`web_fetch`** — 抓取 URL 为 Markdown（LLM / token friendly）；BrowserSkill 可用时使用真实浏览器 UA。
 
 两个原语，别无冗余——无内容存储、无 curator、无 PDF/视频提取。
@@ -30,7 +30,7 @@ pi install npm:@everyx/pi-web-tools
 | `EXA_API_KEY` | 启用 Exa search API 通道。 |
 | `TAVILY_API_KEY` | 启用 Tavily search API 通道。 |
 | `PARALLEL_API_KEY` | 启用 Parallel search API 通道。 |
-| `PI_WEB_TOOLS_CHANNELS` | 可选通道顺序覆盖（search-api → browser → grounding）。 |
+| `PI_WEB_TOOLS_ENGINES` | 可选启用集：`exa,tavily,parallel,google,bing,baidu,yandex`。未设置 = 按系统语言默认（google 全语言；zh 补 bing，ru 补 yandex）。 |
 
 真实浏览器通道使用 [BrowserSkill](https://github.com/Tencent/BrowserSkill)（`bsk` CLI），需另行安装。
 
