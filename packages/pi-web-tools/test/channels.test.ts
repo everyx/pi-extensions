@@ -1,5 +1,6 @@
 /**
- * Tests for channel capability matrix + routing (search/channels.ts).
+ * Tests for channel capability matrix + routing + enabled-set resolution
+ * (search/channels.ts).
  *
  * Pure functions — no network, no process spawning.
  */
@@ -7,11 +8,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+	API_CHANNELS,
 	channelCapabilities,
 	DEFAULT_CHANNEL_ORDER,
+	defaultEnginesFor,
+	ENGINE_IDS,
 	orderedCandidates,
-	parseChannelOrder,
+	parseEnginesConfig,
 	requestedCapabilities,
+	resolveApiChannels,
+	resolveEngines,
 	route,
 	satisfies,
 } from "../search/channels.js";
@@ -32,14 +38,6 @@ describe("channelCapabilities", () => {
 	});
 	it("bsk is the full-capability channel", () => {
 		assert.deepEqual(channelCapabilities("bsk"), { domains: true, recency: true, locale: true, operators: true });
-	});
-	it("grounding supports nothing structured", () => {
-		assert.deepEqual(channelCapabilities("grounding"), {
-			domains: false,
-			recency: false,
-			locale: false,
-			operators: false,
-		});
 	});
 });
 
@@ -62,16 +60,51 @@ describe("requestedCapabilities", () => {
 	});
 });
 
+describe("enabled set (PI_WEB_TOOLS_ENGINES)", () => {
+	it("parses api channels and engines, dropping unknowns and dups", () => {
+		assert.deepEqual(parseEnginesConfig("exa,tavily,google,bing,exa,foo"), {
+			api: ["exa", "tavily"],
+			engines: ["google", "bing"],
+		});
+	});
+	it("config may name only engines or only api channels", () => {
+		assert.deepEqual(parseEnginesConfig("baidu"), { api: [], engines: ["baidu"] });
+		assert.deepEqual(parseEnginesConfig("parallel"), { api: ["parallel"], engines: [] });
+	});
+	it("empty/undefined → undefined (caller uses defaults)", () => {
+		assert.equal(parseEnginesConfig(undefined), undefined);
+		assert.equal(parseEnginesConfig(""), undefined);
+		assert.equal(parseEnginesConfig("foo,bar"), undefined);
+	});
+	it("default engines: one localization-specialist + google per language", () => {
+		assert.deepEqual(defaultEnginesFor("zh"), ["bing", "google"]); // baidu not default
+		assert.deepEqual(defaultEnginesFor("ru"), ["yandex", "google"]);
+		assert.deepEqual(defaultEnginesFor("en"), ["google", "bing"]);
+		assert.deepEqual(defaultEnginesFor("ja"), ["google", "bing"]);
+	});
+	it("resolveEngines: config wins, else the system-locale default", () => {
+		assert.deepEqual(resolveEngines({ engines: ["baidu"] }, "en-US"), ["baidu"]);
+		assert.deepEqual(resolveEngines(undefined, "zh-CN"), ["bing", "google"]);
+		assert.deepEqual(resolveEngines(undefined, "ru-RU"), ["yandex", "google"]);
+		assert.deepEqual(resolveEngines(undefined, "en-US"), ["google", "bing"]);
+	});
+	it("resolveApiChannels: config wins, else all", () => {
+		assert.deepEqual(resolveApiChannels({ api: ["tavily"] }), ["tavily"]);
+		assert.deepEqual(resolveApiChannels(undefined), [...API_CHANNELS]);
+	});
+	it("engine ids and api channels are disjoint", () => {
+		assert.equal(
+			ENGINE_IDS.some((e) => (API_CHANNELS as string[]).includes(e)),
+			false,
+		);
+	});
+});
+
 describe("route", () => {
-	const all = ["exa", "tavily", "parallel", "bsk", "grounding"] as const;
+	const all = ["exa", "tavily", "parallel", "bsk"] as const;
 
 	it("plain query routes to the cheapest available API channel (exa first)", () => {
 		assert.deepEqual(route({ query: "q" }, [...all]), { channel: "exa" });
-	});
-
-	it("respects the configured channel order", () => {
-		assert.deepEqual(route({ query: "q" }, [...all], ["tavily", "exa"]), { channel: "tavily" });
-		assert.deepEqual(route({ query: "q" }, [...all], ["bsk", "exa"]), { channel: "bsk", engine: "google" });
 	});
 
 	it("skips unavailable channels", () => {
@@ -90,8 +123,35 @@ describe("route", () => {
 		assert.deepEqual(result.unsatisfied, ["operators"]);
 	});
 
-	it("recency routes to a channel that supports it (grounding excluded)", () => {
-		const result = route({ query: "q", recency: "week" }, ["exa", "grounding"]);
+	it("engine gate errors when the engine is not in the enabled set", () => {
+		const result = route({ query: "q", engine: "yandex" }, [...all], undefined, undefined, ["google", "bing"]);
+		assert.ok("error" in result);
+		assert.match(result.error, /not enabled/);
+	});
+
+	it("auto bsk engine = enabled locale-priority engine", () => {
+		// zh-CN priority bing > baidu > google, enabled set {bing, google} → bing.
+		assert.deepEqual(route({ query: "q", locale: "zh-CN" }, ["bsk"], undefined, undefined, ["bing", "google"]), {
+			channel: "bsk",
+			engine: "bing",
+		});
+		// no locale → google (SPEC: 两者都无 → google).
+		assert.deepEqual(route({ query: "q" }, ["bsk"], undefined, undefined, ["bing", "google"]), {
+			channel: "bsk",
+			engine: "google",
+		});
+	});
+
+	it("auto bsk falls back to the first enabled engine when the priority is not enabled", () => {
+		// zh-CN priority [bing, baidu, google] ∩ enabled [baidu] → baidu.
+		assert.deepEqual(route({ query: "q", locale: "zh-CN" }, ["bsk"], undefined, undefined, ["baidu"]), {
+			channel: "bsk",
+			engine: "baidu",
+		});
+	});
+
+	it("recency routes to a channel that supports it", () => {
+		const result = route({ query: "q", recency: "week" }, ["exa", "tavily"]);
 		assert.ok("channel" in result);
 		assert.equal(result.channel, "exa");
 	});
@@ -105,40 +165,18 @@ describe("route", () => {
 		});
 	});
 
-	it("grounding-only with structured capability → explicit error", () => {
-		const result = route({ query: "q", recency: "day" }, ["grounding"]);
-		assert.ok("error" in result);
-		assert.deepEqual(result.unsatisfied, ["recency"]);
-	});
-
 	it("no available channel → explicit error naming unsatisfied capabilities", () => {
-		const result = route({ query: "q", allowed_domains: ["x.com"], recency: "year" }, ["grounding"]);
+		const result = route({ query: "q", allowed_domains: ["x.com"], recency: "year" }, []);
 		assert.ok("error" in result);
 		assert.deepEqual(result.unsatisfied, ["domains", "recency"]);
 	});
 });
 
 describe("satisfies", () => {
-	it("grounding never satisfies structured requests", () => {
-		assert.equal(satisfies("grounding", { domains: true, recency: false, locale: false, operators: false }), false);
-		assert.equal(satisfies("grounding", { domains: false, recency: false, locale: false, operators: false }), true);
-	});
-});
-
-describe("parseChannelOrder", () => {
-	it("parses and dedupes, keeping order", () => {
-		assert.deepEqual(parseChannelOrder("bsk,exa,bsk"), ["bsk", "exa"]);
-	});
-	it("rejects unknown channel names", () => {
-		assert.deepEqual(parseChannelOrder("foo,exa"), ["exa"]);
-	});
-	it("empty/undefined → undefined (use default)", () => {
-		assert.equal(parseChannelOrder(undefined), undefined);
-		assert.equal(parseChannelOrder(""), undefined);
-		assert.equal(parseChannelOrder("foo"), undefined);
-	});
-	it("default order is API-first", () => {
-		assert.deepEqual(DEFAULT_CHANNEL_ORDER, ["exa", "tavily", "parallel", "bsk", "grounding"]);
+	it("bsk satisfies everything; exa lacks locale/operators", () => {
+		const full = { domains: true, recency: true, locale: true, operators: true };
+		assert.equal(satisfies("bsk", full), true);
+		assert.equal(satisfies("exa", full), false);
 	});
 });
 
@@ -157,28 +195,14 @@ describe("route + params shapes", () => {
 		assert.equal(result.channel, "tavily"); // exa lacks locale
 	});
 
-	it("capability route to bsk carries the locale's default engine", () => {
-		// exa MCP degraded (no domains) → bsk wins, with zh-CN → bing first.
-		const mcpExa = { domains: false, recency: false, locale: false, operators: false };
-		const zh = route({ query: "q", blocked_domains: ["x.com"], locale: "zh-CN" }, ["exa", "bsk"], undefined, {
-			exa: mcpExa,
-		});
-		assert.deepEqual(zh, { channel: "bsk", engine: "bing" });
-		const en = route({ query: "q", blocked_domains: ["x.com"] }, ["exa", "bsk"], undefined, { exa: mcpExa });
-		assert.deepEqual(en, { channel: "bsk", engine: "google" });
-	});
-
 	it("runtime capability overrides apply (keyless Exa MCP has no domains)", () => {
 		const mcpExa = { domains: false, recency: false, locale: false, operators: false };
-		// With plain exa (static caps: domains ✓), the domains request routes to exa.
 		const staticResult = route({ query: "q", blocked_domains: ["x.com"] }, ["exa", "bsk"]);
 		assert.ok("channel" in staticResult);
 		assert.equal(staticResult.channel, "exa");
-		// With the MCP override, exa no longer covers domains → bsk wins.
 		const mcpResult = route({ query: "q", blocked_domains: ["x.com"] }, ["exa", "bsk"], undefined, { exa: mcpExa });
 		assert.ok("channel" in mcpResult);
 		assert.equal(mcpResult.channel, "bsk");
-		// Exa MCP only + domains request → explicit error (no silent drop).
 		const onlyMcp = route({ query: "q", blocked_domains: ["x.com"] }, ["exa"], undefined, { exa: mcpExa });
 		assert.ok("error" in onlyMcp);
 		assert.deepEqual(onlyMcp.unsatisfied, ["domains"]);
@@ -186,7 +210,7 @@ describe("route + params shapes", () => {
 });
 
 describe("orderedCandidates", () => {
-	const all = ["exa", "tavily", "parallel", "bsk", "grounding"] as const;
+	const all = ["exa", "tavily", "parallel", "bsk"] as const;
 
 	it("returns every usable channel in order", () => {
 		assert.deepEqual(orderedCandidates({ query: "q" }, [...all]), [
@@ -194,7 +218,6 @@ describe("orderedCandidates", () => {
 			{ channel: "tavily" },
 			{ channel: "parallel" },
 			{ channel: "bsk", engine: "google" },
-			{ channel: "grounding" },
 		]);
 	});
 
@@ -205,21 +228,18 @@ describe("orderedCandidates", () => {
 		]);
 	});
 
-	it("drops channels that lack requested capabilities", () => {
-		const mcpExa = { domains: false, recency: false, locale: false, operators: false };
-		const r = orderedCandidates({ query: "q", blocked_domains: ["x.com"] }, ["exa", "tavily", "bsk"], undefined, {
-			exa: mcpExa,
-		});
-		assert.deepEqual(r, [{ channel: "tavily" }, { channel: "bsk", engine: "google" }]);
+	it("bsk carries the enabled locale-priority engine", () => {
+		assert.deepEqual(
+			orderedCandidates({ query: "q", locale: "zh-CN" }, ["bsk"], undefined, undefined, ["bing", "google"]),
+			[{ channel: "bsk", engine: "bing" }],
+		);
+		assert.deepEqual(
+			orderedCandidates({ query: "q", locale: "ru-RU" }, ["bsk"], undefined, undefined, ["yandex", "google"]),
+			[{ channel: "bsk", engine: "yandex" }],
+		);
 	});
 
-	it("bsk carries the locale-group default engine", () => {
-		const r = orderedCandidates({ query: "q", locale: "zh-CN" }, ["bsk"]);
-		assert.deepEqual(r, [{ channel: "bsk", engine: "bing" }]);
-	});
-
-	it("respects the configured order", () => {
-		const r = orderedCandidates({ query: "q" }, [...all], ["bsk", "exa"]);
-		assert.deepEqual(r, [{ channel: "bsk", engine: "google" }, { channel: "exa" }]);
+	it("default order is API-first, bsk last", () => {
+		assert.deepEqual(DEFAULT_CHANNEL_ORDER, ["exa", "tavily", "parallel", "bsk"]);
 	});
 });

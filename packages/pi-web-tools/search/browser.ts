@@ -116,18 +116,33 @@ function launchCandidates(): { name: string; args: string[] }[] {
 	].map((n) => ({ name: n, args: [] }));
 }
 
-async function launchBrowser(): Promise<boolean> {
-	for (const candidate of launchCandidates()) {
+/** Try launching one candidate; resolves with the pid on success, undefined
+ * on failure (ENOENT arrives asynchronously via the 'error' event — an
+ * unhandled one would crash the process, so it must be listened for). */
+function tryLaunch(candidate: { name: string; args: string[] }): Promise<number | undefined> {
+	return new Promise((resolve) => {
+		let child: ReturnType<typeof spawn>;
 		try {
 			// Detached spawn: browsers are long-running; execFile would wait
 			// for exit and its timeout would kill the process after ~5s.
-			const child = spawn(candidate.name, candidate.args, { detached: true, stdio: "ignore" });
-			child.unref();
-			browserLaunchedByUs = true;
-			browserPid = child.pid;
-			return true;
+			child = spawn(candidate.name, candidate.args, { detached: true, stdio: "ignore" });
 		} catch {
-			// try next candidate
+			resolve(undefined);
+			return;
+		}
+		child.unref();
+		child.on("error", () => resolve(undefined)); // ENOENT etc — try next candidate
+		child.on("spawn", () => resolve(child.pid));
+	});
+}
+
+async function launchBrowser(): Promise<boolean> {
+	for (const candidate of launchCandidates()) {
+		const pid = await tryLaunch(candidate);
+		if (pid !== undefined) {
+			browserLaunchedByUs = true;
+			browserPid = pid;
+			return true;
 		}
 	}
 	return false;
@@ -214,19 +229,23 @@ async function evaluate(sessionId: string, expression: string, timeoutMs: number
 
 /** Extract search results from the page (engine-agnostic: h2/h3-wrapped titles).
  *
- * Ad results are excluded: Google marks them with data-text-ad / adurl,
- * Bing puts them in .b_ad / li[class*='ad'].
+ * Paid ads and engine-generated AI summaries are excluded (SPEC: bsk 排除广告
+ * 与 AI 总结): Google marks ads with data-text-ad / adurl, Bing puts them in
+ * .b_ad / li[class*='ad']; AI blocks carry ai-* / data-ai-* style markers
+ * (Google AI Overview, Bing AI summary, Baidu AI 搜索).
  */
 const EXTRACT_SCRIPT = String.raw`
 (() => {
 	const out = [];
 	const seen = new Set();
-	const isAd = (titleEl, a) => {
+	const isAdOrAi = (titleEl, a) => {
 		if (a && /adurl|aclk/.test(a.href)) return true;
 		for (let n = titleEl.parentElement; n && n !== document.body; n = n.parentElement) {
-			const cls = (typeof n.className === 'string' ? n.className : '') + ' ' + (n.getAttribute('data-text-ad') || '') + ' ' + (n.getAttribute('data-ad-text') || '');
+			const cls = (typeof n.className === 'string' ? n.className : '') + ' ' + (n.getAttribute('data-text-ad') || '') + ' ' + (n.getAttribute('data-ad-text') || '') + ' ' + (n.getAttribute('data-ai-tracking-id') || '');
 			const role = n.getAttribute('role') || '';
+			const id = (n.id || '') + ' ' + (n.getAttribute('data-testid') || '');
 			if (/\b(ad|ads|advertisement|sponsored|b_ad)\b/i.test(cls + role)) return true;
+			if (/(^|[\s_-])(ai-pin|ai-overview|ai-answer|ai-summary|ai-search|b_ai|ai-container)([\s_-]|$)|^b_ai_|data-ai-tracking/i.test(cls + id)) return true;
 		}
 		return false;
 	};
@@ -267,7 +286,7 @@ const EXTRACT_SCRIPT = String.raw`
 			}
 		}
 		const title = (titleEl.textContent || '').trim();
-		if (!title || !href.startsWith('http') || seen.has(href) || isAd(titleEl, a)) return;
+		if (!title || !href.startsWith('http') || seen.has(href) || isAdOrAi(titleEl, a)) return;
 		// Skip the engine's own pages (local packs / "more results").
 		if (/google\.com\/search|bing\.com\/search|baidu\.com\/s|yandex\.com\/search/.test(href)) return;
 		seen.add(href);

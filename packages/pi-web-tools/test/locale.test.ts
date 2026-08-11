@@ -74,20 +74,25 @@ describe("engineSearchUrl", () => {
 		assert.equal(url, "https://www.google.com/search?q={q}");
 		assert.deepEqual(localeParams, { gl: "CN", hl: "zh-CN", lr: "lang_zh", tbs: "qdr:w" });
 	});
-	it("bing eats BCP-47 directly via mkt", () => {
+	it("bing eats BCP-47 directly via mkt; zh-CN serves from cn.bing.com", () => {
 		const { url, localeParams } = engineSearchUrl("bing", "zh-CN");
-		assert.equal(url, "https://www.bing.com/search?q={q}");
+		assert.equal(url, "https://cn.bing.com/search?q={q}");
 		assert.deepEqual(localeParams, { mkt: "zh-CN" });
+		// zh-TW is NOT the mainland data source → international bing.com.
+		const tw = engineSearchUrl("bing", "zh-TW");
+		assert.equal(tw.url, "https://www.bing.com/search?q={q}");
 	});
 	it("baidu is natively Chinese, no locale params", () => {
 		const { url, localeParams } = engineSearchUrl("baidu", "zh-CN");
 		assert.equal(url, "https://www.baidu.com/s?wd={q}");
 		assert.equal(localeParams, undefined);
 	});
-	it("yandex sets lr=213 for Russian", () => {
+	it("yandex sets lr=213 for Russian and serves from yandex.ru", () => {
 		const { url, localeParams } = engineSearchUrl("yandex", "ru-RU");
-		assert.equal(url, "https://yandex.com/search/?text={q}");
+		assert.equal(url, "https://yandex.ru/search/?text={q}");
 		assert.deepEqual(localeParams, { lr: "213" });
+		const intl = engineSearchUrl("yandex", "en-US");
+		assert.equal(intl.url, "https://yandex.com/search/?text={q}");
 	});
 	it("no locale → no locale params", () => {
 		const { localeParams } = engineSearchUrl("google");

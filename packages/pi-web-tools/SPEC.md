@@ -25,15 +25,16 @@ web_search(
   recency?: "day" | "week" | "month" | "year",
   allowed_domains?: string[],             // 只在这些域内搜（跨通道翻译）
   blocked_domains?: string[],             // 排除这些域（跨通道翻译）
-  locale?: string,                        // BCP-47，如 "zh-CN"；默认自动推断
-  engine?: "auto" | "google" | "bing" | "baidu" | "yandex",  // 默认 auto
+  locale?: string,                        // BCP-47（zh-CN / ru-RU）；要本地化结果时显式传
+  engine?: "auto" | <启用集传统引擎>,       // 枚举动态生成（SPEC: 枚举即事实）
 )
-→ { results: [{ title, url, snippet }], total }
+→ { results: [{ title, url, snippet }] }
 ```
 
-- **无 count / 无分页**：结果量由通道自然返回；`total` 透明告知截断（LLM 见 `total > 返回数` 即知被截断，需要更多时换 query 重搜）。
+- **无 count / 无分页**：结果量由通道自然返回（固定请求 5 条，内部常量）；无 `total`（通道不报告总数，不编造）。
 - **snippet 取通道自带描述**，不 AI 生成。
 - **引擎回声**：实际引擎/通道只进 `details`（UI 卡片可见），LLM 零感知。
+- **locale 显式传，工具不推断**：query 语言检测是语义判断、边界易误判（与"不自动检测操作符"同构）——LLM 对自己的搜索意图最清楚，不传 = 全局结果（引擎默认）。
 
 ### `web_fetch`
 
@@ -54,11 +55,12 @@ web_fetch(url: string) → { title, markdown }
 
 | 通道 | 组成 | 成本模型 | 能力 |
 |---|---|---|---|
-| **search API** | Exa（MCP 零配置 + API key 双模）、Tavily、Parallel；provider 插件化（新增 = 新文件） | 免费额度优先 | 基础搜索（自然语言 query） |
-| **真实浏览器（bsk）** | 驱动 google / bing / baidu | 本地免费 | 本地化、登录态、**完整引擎操作符** |
-| **模型 grounding** | OpenAI 订阅内免费 / Gemini 5k 次每月免费 / Anthropic 默认禁用（$10/1k） | 按厂商订阅态动态判定 | 基础搜索（自然语言） |
+| **search API** | Exa（MCP 零配置 + API key 双模）、Tavily、Parallel（key 驱动，插件化 = 新文件） | 免费额度优先 | 基础搜索（自然语言 query） |
+| **真实浏览器（bsk）** | 驱动 google / bing / baidu / yandex | 本地免费 | 本地化、登录态、**完整引擎操作符** |
 
-**fallback 链**：免费 search API → bsk 真实浏览器 → grounding。顺序可被用户配置覆盖。
+**fallback 链**：免费 search API → bsk 真实浏览器。api 组在 auto 下优先（成本优先）；bsk 的引擎选择见[本地化](#本地化locale)与[启用集](#配置)。
+
+**bsk 结果提取**：排除付费广告（adurl/data-text-ad/b_ad 等）与**引擎生成的 AI 总结**（Google AI Overview、Bing AI summary、百度 AI 搜索——ai-*/data-ai-* 标记）——结果列表只留真实来源条目。
 
 ## 操作符设计（engine 门控）
 
@@ -72,34 +74,33 @@ LLM 对搜索操作符有先验知识（训练语料含 `site:` / `filetype:` / 
 
 ## 本地化（locale）
 
-- **自动推断**：query 语言检测 + 用户系统 locale/时区 → 复合推断。
-- **显式覆盖**：`locale` 参数（BCP-47，如 "zh-CN" 同时编码语言 + 地区）。
-- **引擎优先级按语言分组**（默认 bsk 通道的选择顺序）：
+- **显式传**：`locale` 参数（BCP-47，如 "zh-CN" 同时编码语言 + 地区）——工具不做语言推断；不传 = 全局结果。
+- **域名级落地**（数据源隔离，如 bing.com 国际与 cn.bing.com 中国大陆是隔离服务）：
+
+| 调用 | 落点 |
+|---|---|
+| `bing` + zh-CN | **cn.bing.com**（中国大陆数据源） |
+| `bing` + zh-TW/HK 或其他 | bing.com（国际版） |
+| `yandex` + ru | **yandex.ru** |
+| `yandex` + 其他 | yandex.com |
+| `baidu` | baidu.com（天然中文） |
+
+- **参数级落地**：google 用 `gl=CN&hl=zh-CN&lr=lang_zh-CN`；bing 用 `mkt=zh-CN`（直接吃 BCP-47）；yandex 用 `lr=213` 等原生参数。
+- **引擎优先级按语言分组**（auto 下 bsk 通道的选择顺序，在启用集内取）：
 
 | 语言 | 引擎优先级 |
 |---|---|
-| 中文 | bing（中文版）> baidu > google |
+| 中文 | bing > baidu > google |
 | 俄语 | yandex > google > bing |
 | 其他（含韩语/日语） | google > bing |
 
 > 判据：当地使用量最大 + 实际可用性（bsk 反爬/质量）。韩国 Naver（63%）与日本 Yahoo（6.6%，底层即 Google）因单市场价值低、维护成本高而不支持，Google/Bing 兜底即可。
 
-- **locale 落地**：google 用 `gl=CN&hl=zh-CN&lr=lang_zh-CN`；bing 用 `mkt=zh-CN`（直接吃 BCP-47）；baidu 天然中文无需设置；yandex 用 `lr=213` 等原生参数。
 - **API 通道不支持 locale** → 自动 fallback 到 bsk 真实浏览器执行对应本地化搜索。
 
 ## 人机验证（captcha）处理
 
-真实浏览器通道的已知风险：
-
-```
-google 触发人机验证
-  → 自动换引擎：同 locale 按语言优先级轮换（中文：bing → baidu → google；俄语：yandex → google → bing；其他：google → bing）
-  → 全部引擎都被拦 → bsk human-in-loop 兜底（弹窗请用户接管）
-  → 或返回错误（用户配置层决定是否允许 human-in-loop）
-```
-
-- 换引擎**不换 locale**（保持搜索意图）。
-- 静默轮换，细节进 details（"via bing (google captcha)"）。
+真实浏览器通道的已知风险：引擎触发人机验证 → 检测到 captcha 特征（`captcha / not a robot / automated requests`）→ **如实报错**（含引擎名），不自动换引擎、无 human-in-loop（bsk 无此 API）——换引擎由 LLM 决定（改传 engine / locale 重试）。
 
 ## 错误处理与诊断
 
@@ -181,14 +182,25 @@ UA 来源优先级：
 ## 配置
 
 - API key 环境变量：`EXA_API_KEY` / `TAVILY_API_KEY` / `PARALLEL_API_KEY`（与 pi-web 生态同名对齐）。
-- 通道序覆盖（可选）：`PI_WEB_TOOLS_CHANNELS`。
-- 本地化无环境变量（纯自动 + `locale` 参数覆盖）。
+- **启用集**：`PI_WEB_TOOLS_ENGINES`（可选）——逗号分隔的 `exa,tavily,parallel,google,bing,baidu,yandex`，统一控制 api 组与 bsk 引擎；未设置（或值全无效）→ 按**系统 locale** 的默认集：
+
+| 系统语言 | 默认启用集 |
+|---|---|
+| zh | bing, google（bing 落 cn.bing.com） |
+| ru | yandex, google（yandex 落 yandex.ru） |
+| 其他 | google, bing |
+
+  api 组在默认集内按 **key 驱动**（有 key 即启用）。每语言组 = 一个本地化主力 + google 通用兜底；baidu / 俄语 bing 需显式配置才会启用。
+- **枚举即事实**：engine 枚举在启动时按启用集动态生成——LLM 看到的枚举就是实际可用的引擎，无死选项；显式指定未启用引擎 → 报错（配置指引进 details）。
+- 配置/系统语言变更需重启 pi 生效（启动时静态解析一次）。
 
 ## 不在此范围
 
-- **count / 分页参数**：结果量通道自然返回 + `total` 透明。
-- **provider 参数**：通道选择对 LLM 隐藏（用户配置层）。
+- **count / 分页参数**：结果量通道自然返回（固定 5 条）。
+- **provider 参数**：api 组内部通道（exa/tavily/parallel）对 LLM 隐藏（key 驱动 + auto 内部路由；用户配置层决定启用）。
 - **操作符参数化 / 自动检测**：操作符归 query，engine 门控。
+- **模型 grounding**：曾有的"当前模型自答 + 引用"通道已移除（自问自答、成本不透明、snippet 非独立来源）；如需再评估。
+- **locale 自动推断**：语言检测是语义判断，工具不猜——LLM 显式传。
 - **独立 fetch 缓存 / storage**（pi-web 的 get_search_content 类机制）。
 - **curator 浏览器交互 / cookie 借用 / GitHub clone / PDF 提取 / 视频理解**。
 - **SSRF 防护**：fetch 是原语，与 bash curl 等价，安全责任在使用方（不为防误用加机制）。

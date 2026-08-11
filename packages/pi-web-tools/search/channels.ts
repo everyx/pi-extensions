@@ -17,25 +17,71 @@ export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapabilities> = {
 	tavily: { domains: true, recency: true, locale: true, operators: true }, // site:/布尔/引号
 	parallel: { domains: true, recency: true, locale: false, operators: false },
 	bsk: { domains: true, recency: true, locale: true, operators: true }, // 真实引擎全操作符
-	grounding: { domains: false, recency: false, locale: false, operators: false },
 };
 
 /**
  * Free-API-first fallback order for `engine: "auto"` (SPEC: fallback 链).
- * The default order; overridable via PI_WEB_TOOLS_CHANNELS.
+ * The default order; the enabled set (PI_WEB_TOOLS_ENGINES) filters it at
+ * startup. api channels are key-gated at call time.
  */
-export const DEFAULT_CHANNEL_ORDER: ChannelId[] = ["exa", "tavily", "parallel", "bsk", "grounding"];
+export const DEFAULT_CHANNEL_ORDER: ChannelId[] = ["exa", "tavily", "parallel", "bsk"];
 
-/** Parse the PI_WEB_TOOLS_CHANNELS override ("api,bsk,grounding" → channel ids). */
-export function parseChannelOrder(raw?: string): ChannelId[] | undefined {
+/** The api channel group (SPEC: agent 搜索引擎 — key-gated, inside auto). */
+export const API_CHANNELS: ChannelId[] = ["exa", "tavily", "parallel"];
+
+/** The traditional-engine ids (bsk channel). */
+export const ENGINE_IDS: EngineId[] = ["google", "bing", "baidu", "yandex"];
+
+// ── enabled set (PI_WEB_TOOLS_ENGINES) ──────────────────────────
+
+/**
+ * Parse PI_WEB_TOOLS_ENGINES ("exa,tavily,google,bing" → api + engines
+ * subsets). Unknown names are dropped; order is preserved. undefined when
+ * unset/empty → caller falls back to defaults.
+ */
+export function parseEnginesConfig(raw?: string): { api: ChannelId[]; engines: EngineId[] } | undefined {
 	if (!raw) return undefined;
-	const order = raw
+	const parts = raw
 		.split(",")
 		.map((s) => s.trim().toLowerCase())
-		.filter((s): s is ChannelId => (DEFAULT_CHANNEL_ORDER as string[]).includes(s));
-	if (order.length === 0) return undefined;
-	// Keep the subset that names real channels, preserving the given order.
-	return [...new Set(order)];
+		.filter(Boolean);
+	if (parts.length === 0) return undefined;
+	const api = [...new Set(parts.filter((s): s is ChannelId => (API_CHANNELS as string[]).includes(s)))];
+	const engines = [...new Set(parts.filter((s): s is EngineId => (ENGINE_IDS as string[]).includes(s)))];
+	// Nothing recognizable → treat as unset (fall back to defaults) rather
+	// than disabling everything on a typo.
+	if (api.length === 0 && engines.length === 0) return undefined;
+	return { api, engines };
+}
+
+/**
+ * Default engine set for a language (SPEC: 系统 locale 决定启用集). Each
+ * group = one localization-specialist + google as the generic fallback.
+ * baidu / bing-russian are deliberately absent — they only come in via an
+ * explicit PI_WEB_TOOLS_ENGINES.
+ */
+export function defaultEnginesFor(language: string): EngineId[] {
+	if (language === "zh") return ["bing", "google"];
+	if (language === "ru") return ["yandex", "google"];
+	return ["google", "bing"];
+}
+
+/** Resolve the bsk engine set: config wins, else the system-locale default. */
+export function resolveEngines(config: { engines: EngineId[] } | undefined, systemLocale: string): EngineId[] {
+	if (config) return config.engines;
+	return defaultEnginesFor(primaryLanguageOf(systemLocale));
+}
+
+/** Resolve the api channel set: config wins (excludes unlisted), else all. */
+export function resolveApiChannels(config: { api: ChannelId[] } | undefined): ChannelId[] {
+	if (config) return config.api;
+	return [...API_CHANNELS];
+}
+
+function primaryLanguageOf(locale: string): string {
+	const tag = locale.trim().toLowerCase();
+	const sep = tag.search(/[-_]/);
+	return (sep >= 0 ? tag.slice(0, sep) : tag).trim();
 }
 
 export function channelCapabilities(channel: ChannelId): ChannelCapabilities {
@@ -83,16 +129,20 @@ export interface RouteFailure {
  * Route a search request to a channel.
  *
  * - `engine` != auto → bsk with that engine (operator gate). Errors if bsk is
- *   not among `available`.
+ *   not among `available`, or the engine is not in the enabled set.
  * - otherwise → first available channel (in `order`) whose capabilities
  *   cover the requested ones. Explicit error when none does (no silent
  *   capability drop).
+ *
+ * `engines` = the enabled bsk engine set (SPEC: 启用集); the bsk engine is
+ * the locale-priority engine that is enabled (no locale → google).
  */
 export function route(
 	params: WebSearchParams,
 	available: ChannelId[],
 	order: ChannelId[] = DEFAULT_CHANNEL_ORDER,
 	capabilities?: Partial<Record<ChannelId, ChannelCapabilities>>,
+	engines?: EngineId[],
 ): RouteResult | RouteFailure {
 	const requested = requestedCapabilities(params);
 
@@ -103,16 +153,22 @@ export function route(
 				unsatisfied: ["operators"],
 			};
 		}
+		if (engines && !engines.includes(params.engine)) {
+			return {
+				error: `engine "${params.engine}" is not enabled (set PI_WEB_TOOLS_ENGINES to include it).`,
+				unsatisfied: ["operators"],
+			};
+		}
 		return { channel: "bsk", engine: params.engine };
 	}
 
 	for (const channel of order) {
 		if (!available.includes(channel)) continue;
 		if (capabilitiesCover(channel, requested, capabilities)) {
-			// bsk needs an engine even on the capability path — use the
-			// locale's top-priority engine (SPEC: 引擎优先级按语言分组).
+			// bsk needs an engine even on the capability path — the locale's
+			// top-priority engine that is enabled (SPEC: 引擎优先级按语言分组).
 			if (channel === "bsk") {
-				return { channel, engine: enginePriorityForLocale(params.locale)[0] };
+				return { channel, engine: pickEngine(params.locale, engines) };
 			}
 			return { channel };
 		}
@@ -125,6 +181,17 @@ export function route(
 		error: `No available channel supports the requested capabilities: ${unsatisfied.join(", ")}.`,
 		unsatisfied,
 	};
+}
+
+/** The bsk engine for a request: locale priority ∩ enabled set (no locale → google). */
+function pickEngine(locale: string | undefined, engines?: EngineId[]): EngineId {
+	const priority = enginePriorityForLocale(locale);
+	if (engines && engines.length > 0) {
+		const hit = priority.find((e) => engines.includes(e));
+		if (hit) return hit;
+		return engines[0];
+	}
+	return priority[0];
 }
 
 function capabilitiesCover(
@@ -153,16 +220,17 @@ export function satisfies(
 /**
  * Ordered list of usable channels for a request: every available channel in
  * `order` whose capabilities cover the request. bsk entries carry the
- * locale-group default engine (SPEC: 引擎优先级按语言分组).
+ * enabled locale-priority engine (SPEC: 引擎优先级按语言分组).
  */
 export function orderedCandidates(
 	params: WebSearchParams,
 	available: ChannelId[],
 	order: ChannelId[] = DEFAULT_CHANNEL_ORDER,
 	capabilities?: Partial<Record<ChannelId, ChannelCapabilities>>,
+	engines?: EngineId[],
 ): Array<{ channel: ChannelId; engine?: EngineId }> {
 	const requested = requestedCapabilities(params);
 	return order
 		.filter((c) => available.includes(c) && satisfies(c, requested, capabilities))
-		.map((c) => (c === "bsk" ? { channel: c, engine: enginePriorityForLocale(params.locale)[0] } : { channel: c }));
+		.map((c) => (c === "bsk" ? { channel: c, engine: pickEngine(params.locale, engines) } : { channel: c }));
 }

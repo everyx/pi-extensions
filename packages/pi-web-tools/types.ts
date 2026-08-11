@@ -21,7 +21,7 @@ export interface WebSearchResult {
 }
 
 /** Channels. "bsk" is the real-browser channel (BrowserSkill CLI). */
-export type ChannelId = "exa" | "tavily" | "parallel" | "bsk" | "grounding";
+export type ChannelId = "exa" | "tavily" | "parallel" | "bsk";
 
 /** Real-browser search engines (bsk channel). */
 export type EngineId = "google" | "bing" | "baidu" | "yandex";

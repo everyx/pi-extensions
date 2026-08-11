@@ -34,22 +34,39 @@ export interface EngineUrl {
 	localeParams?: Record<string, string>;
 }
 
-/** Real navigation domain for a browser engine (single source of truth —
- * the via meta label and the actual search URL both come from here, so a
- * domain change (e.g. bing.cn) shows up in both places). */
-export function engineDomain(engine: EngineId): string {
-	// Bare domain (no www) — the identity used for the via label; the search
-	// URL prepends www. where the engine actually serves from it.
+/** Real navigation host for a browser engine + locale (single source of
+ * truth for the search URL). bing is served from cn.bing.com for zh-CN
+ * (separate CN data source); yandex from yandex.ru for Russian. */
+export function engineHost(engine: EngineId, locale?: string): string {
+	switch (engine) {
+		case "google":
+			return "www.google.com";
+		case "bing":
+			return isZhCn(locale) ? "cn.bing.com" : "www.bing.com";
+		case "baidu":
+			return "www.baidu.com";
+		case "yandex":
+			return primaryLanguage(locale) === "ru" ? "yandex.ru" : "yandex.com";
+	}
+}
+
+/** Bare domain identity for the via label (mirrors engineHost's locale split). */
+export function engineDomain(engine: EngineId, locale?: string): string {
 	switch (engine) {
 		case "google":
 			return "google.com";
 		case "bing":
-			return "bing.com";
+			return isZhCn(locale) ? "cn.bing.com" : "bing.com";
 		case "baidu":
 			return "baidu.com";
 		case "yandex":
-			return "yandex.com";
+			return primaryLanguage(locale) === "ru" ? "yandex.ru" : "yandex.com";
 	}
+}
+
+/** True for the zh-CN locale (mainland data source — cn.bing.com). */
+function isZhCn(locale?: string): boolean {
+	return primaryLanguage(locale) === "zh" && countryFromLocale(locale) === "CN";
 }
 
 /** Build a search URL for an engine + locale + optional recency. */
@@ -65,21 +82,21 @@ export function engineSearchUrl(engine: EngineId, locale?: string, recency?: str
 				params.lr = `lang_${lang}`;
 			}
 			if (recency) params.tbs = recency;
-			return { url: `https://www.${engineDomain("google")}/search?q={q}`, localeParams: params };
+			return { url: `https://${engineHost("google")}/search?q={q}`, localeParams: params };
 		}
 		case "bing": {
 			const params: Record<string, string> = {};
 			if (locale) params.mkt = normalizedLocale(locale); // Bing eats BCP-47 directly
 			if (recency) params.filters = recencyToBingFilters(recency);
-			return { url: `https://www.${engineDomain("bing")}/search?q={q}`, localeParams: params };
+			return { url: `https://${engineHost("bing", locale)}/search?q={q}`, localeParams: params };
 		}
 		case "baidu":
 			// Baidu is natively Chinese; no locale params needed.
-			return { url: `https://www.${engineDomain("baidu")}/s?wd={q}` };
+			return { url: `https://${engineHost("baidu")}/s?wd={q}` };
 		case "yandex": {
 			const params: Record<string, string> = {};
 			if (lang === "ru") params.lr = "213"; // Moscow region for Russian
-			return { url: `https://${engineDomain("yandex")}/search/?text={q}`, localeParams: params };
+			return { url: `https://${engineHost("yandex", locale)}/search/?text={q}`, localeParams: params };
 		}
 	}
 }

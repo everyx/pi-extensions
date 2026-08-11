@@ -1,30 +1,32 @@
 /**
  * pi-web-tools — extension entry: registers web_search + web_fetch.
  *
- * Channels (SPEC 通道架构): free search APIs (Exa/Tavily/Parallel) →
- * real browser (bsk) → model grounding. User-config order override via
- * PI_WEB_TOOLS_CHANNELS. LLM sees only results or a terse error; engine
- * echo and diagnostics live in details (UI-visible).
+ * Channels (SPEC 通道架构): free search APIs (Exa/Tavily/Parallel, key-gated)
+ * → real browser (bsk). The enabled set — which api channels and which
+ * traditional engines are usable — is resolved once at startup from
+ * PI_WEB_TOOLS_ENGINES (or the system locale's default set) and mirrored
+ * into the engine enum (SPEC: 枚举即事实). LLM sees only results or a terse
+ * error; engine echo and diagnostics live in details (UI-visible).
  */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { engineDomain } from "./search/locale.js";
 
 /** Meta label for the channel a search went through. Browser engines are
- * labeled by the domain actually navigated (via yandex.com — from
- * engineDomain, the single source of truth); API channels by name (via exa). */
-function viaLabel(channel?: string, engine?: string): string | undefined {
+ * labeled by the domain actually navigated (via cn.bing.com — from
+ * engineDomain + the call's locale); api channels by name (via exa). */
+function viaLabel(channel?: string, engine?: string, locale?: string): string | undefined {
 	if (!channel) return undefined;
-	if (channel === "browser" && engine) return `via ${engineDomain(engine as EngineId)}`;
+	if (channel === "bsk" && engine) return `via ${engineDomain(engine as EngineId, locale)}`;
 	return `via ${channel}`;
 }
 
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { webFetch } from "./fetch/fetch.js";
-import { WebFetchParamsSchema, WebSearchParamsSchema } from "./schema.js";
+import { buildWebSearchSchema, WebFetchParamsSchema } from "./schema.js";
 import { exaApiKey, isExaAvailable, searchWithExa } from "./search/api/exa.js";
 import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.js";
 import { isTavilyAvailable, searchWithTavily } from "./search/api/tavily.js";
@@ -32,14 +34,27 @@ import { searchWithBsk } from "./search/browser.js";
 import {
 	DEFAULT_CHANNEL_ORDER,
 	orderedCandidates,
-	parseChannelOrder,
+	parseEnginesConfig,
 	requestedCapabilities,
+	resolveApiChannels,
+	resolveEngines,
 	route,
 } from "./search/channels.js";
-import { type GroundingEndpoint, groundingEndpointFor, searchWithGrounding } from "./search/grounding.js";
 import type { ChannelCapabilities, ChannelId, EngineId, SearchResultItem, WebSearchParams } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+
+// ── Enabled set (resolved once at startup — SPEC: 启动时静态定) ────
+
+/** The enabled api channels + bsk engines. Config wins; else system-locale
+ * defaults. Mirrored into the engine enum so the LLM only sees usable
+ * engines (SPEC: 枚举即事实). */
+const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+const enginesConfig = parseEnginesConfig(process.env.PI_WEB_TOOLS_ENGINES);
+const ENABLED = {
+	api: resolveApiChannels(enginesConfig),
+	engines: resolveEngines(enginesConfig, systemLocale),
+};
 
 // ── Channel availability ─────────────────────────────────────────
 
@@ -52,24 +67,13 @@ async function isBskAvailable(): Promise<boolean> {
 	}
 }
 
-async function isGroundingAvailable(
-	ctx: ExtensionContext,
-): Promise<{ available: boolean; endpoint?: GroundingEndpoint; apiKey?: string }> {
-	const model = ctx.model;
-	if (!model) return { available: false };
-	const endpoint = groundingEndpointFor(model.provider, model.baseUrl, model.id);
-	if (!endpoint) return { available: false };
-	const apiKey = await ctx.modelRegistry.getApiKeyForProvider(model.provider);
-	if (!apiKey) return { available: false };
-	return { available: true, endpoint, apiKey };
-}
-
 async function detectAvailableChannels(
-	ctx: ExtensionContext,
+	enabled: { api: ChannelId[]; engines: EngineId[] } = ENABLED,
 ): Promise<{ available: ChannelId[]; capabilities: Partial<Record<ChannelId, ChannelCapabilities>> }> {
 	const channels: ChannelId[] = [];
 	const capabilities: Partial<Record<ChannelId, ChannelCapabilities>> = {};
-	if (isExaAvailable()) {
+	// api channels: enabled set ∩ key availability (SPEC: api 组 key 驱动).
+	if (enabled.api.includes("exa") && isExaAvailable()) {
 		channels.push("exa");
 		// Keyless Exa goes through MCP, which exposes only query + numResults
 		// (researched) — no domains/recency/locale. With a key (REST) it's full.
@@ -77,11 +81,10 @@ async function detectAvailableChannels(
 			capabilities.exa = { domains: false, recency: false, locale: false, operators: false };
 		}
 	}
-	if (isTavilyAvailable()) channels.push("tavily");
-	if (isParallelAvailable()) channels.push("parallel");
-	if (await isBskAvailable()) channels.push("bsk");
-	const grounding = await isGroundingAvailable(ctx);
-	if (grounding.available) channels.push("grounding");
+	if (enabled.api.includes("tavily") && isTavilyAvailable()) channels.push("tavily");
+	if (enabled.api.includes("parallel") && isParallelAvailable()) channels.push("parallel");
+	// bsk: only when at least one engine is enabled (SPEC: 启用集非空才有 bsk).
+	if (enabled.engines.length > 0 && (await isBskAvailable())) channels.push("bsk");
 	return { available: channels, capabilities };
 }
 
@@ -101,6 +104,7 @@ function formatResults(result: SearchResultItem[]): string {
 function finalizeResult(
 	result: SearchResultItem[],
 	candidate: { channel: ChannelId; engine?: EngineId },
+	params: WebSearchParams,
 	startedAt: number,
 ): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: boolean } {
 	return {
@@ -110,6 +114,7 @@ function finalizeResult(
 				results: result,
 				channel: candidate.channel,
 				...(candidate.engine ? { engine: candidate.engine } : {}),
+				...(params.locale ? { locale: params.locale } : {}),
 				count: result.length,
 				startedAt,
 				endedAt: Date.now(),
@@ -123,7 +128,6 @@ function finalizeResult(
 
 async function executeSearch(
 	params: WebSearchParams,
-	ctx: ExtensionContext,
 	signal: AbortSignal | undefined,
 	onUpdate:
 		| ((update: { content: { type: "text"; text: string }[]; details: Record<string, unknown> }) => void)
@@ -142,12 +146,12 @@ async function executeSearch(
 		};
 	}
 
-	const { available, capabilities } = await detectAvailableChannels(ctx);
-	const order = parseChannelOrder(process.env.PI_WEB_TOOLS_CHANNELS) ?? DEFAULT_CHANNEL_ORDER;
+	const { available, capabilities } = await detectAvailableChannels();
+	const order = DEFAULT_CHANNEL_ORDER;
 
 	// Explicit engine: honor the intent — no auto-fallback on failure.
 	if (params.engine && params.engine !== "auto") {
-		const routed = route(params, available, order, capabilities);
+		const routed = route(params, available, order, capabilities, ENABLED.engines);
 		if ("error" in routed) {
 			return {
 				content: [{ type: "text", text: routed.error }],
@@ -162,8 +166,8 @@ async function executeSearch(
 			details: { query: params.query, channel: routed.channel, engine: routed.engine },
 		});
 		try {
-			const result = await runChannel(routed.channel, params, routed.engine, ctx, signal);
-			return finalizeResult(result, { channel: routed.channel, engine: routed.engine }, startedAt);
+			const result = await runChannel(routed.channel, params, routed.engine, signal);
+			return finalizeResult(result, { channel: routed.channel, engine: routed.engine }, params, startedAt);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return {
@@ -183,7 +187,7 @@ async function executeSearch(
 
 	// engine auto: try candidates in order; on failure fall through to the
 	// next usable channel (SPEC: 静默降级). All failures → terse error.
-	const candidates = orderedCandidates(params, available, order, capabilities);
+	const candidates = orderedCandidates(params, available, order, capabilities, ENABLED.engines);
 	if (candidates.length === 0) {
 		const requested = requestedCapabilities(params);
 		const unsatisfied = Object.entries(requested)
@@ -206,8 +210,8 @@ async function executeSearch(
 			details: { query: params.query, channel: candidate.channel, engine: candidate.engine },
 		});
 		try {
-			const result = await runChannel(candidate.channel, params, candidate.engine, ctx, signal);
-			return finalizeResult(result, candidate, startedAt);
+			const result = await runChannel(candidate.channel, params, candidate.engine, signal);
+			return finalizeResult(result, candidate, params, startedAt);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			failures.push({ channel: candidate.channel, error: message });
@@ -229,7 +233,6 @@ async function runChannel(
 	channel: ChannelId,
 	params: WebSearchParams,
 	engine: "google" | "bing" | "baidu" | "yandex" | undefined,
-	ctx: ExtensionContext,
 	signal: AbortSignal | undefined,
 ): Promise<SearchResultItem[]> {
 	switch (channel) {
@@ -242,13 +245,6 @@ async function runChannel(
 		case "bsk":
 			if (!engine) throw new Error("internal error: bsk channel requires an engine");
 			return searchWithBsk(params, engine, { signal });
-		case "grounding": {
-			const grounding = await isGroundingAvailable(ctx);
-			if (!grounding.available || !grounding.endpoint || !grounding.apiKey) {
-				throw new Error("grounding channel became unavailable.");
-			}
-			return searchWithGrounding(params, grounding.endpoint, grounding.apiKey, { signal });
-		}
 	}
 }
 
@@ -306,8 +302,9 @@ export default function (pi: ExtensionAPI) {
 			"Use web_search for anything that requires current or external information.",
 			"Re-query with a different query when results are insufficient or you need different coverage.",
 			"Use engine with operator syntax when you need site:, filetype:, intitle: filters; otherwise let auto pick the cheapest channel.",
+			"Pass locale (BCP-47) when you want results localized to a language/region — e.g. zh-CN for Chinese results, ru-RU for Russian. Omit for global results.",
 		],
-		parameters: WebSearchParamsSchema,
+		parameters: buildWebSearchSchema(ENABLED.engines),
 		...createToolView<Record<string, unknown>, unknown>({
 			name: "web_search",
 			title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? "").slice(0, 60),
@@ -316,12 +313,13 @@ export default function (pi: ExtensionAPI) {
 				const d = (ctx.result?.data ?? {}) as {
 					channel?: string;
 					engine?: string;
+					locale?: string;
 					count?: number;
 					startedAt?: number;
 					endedAt?: number;
 				};
 				return [
-					viaLabel(d.channel, d.engine),
+					viaLabel(d.channel, d.engine, d.locale),
 					ctx.status !== "error" && d.count != null ? `${d.count} results` : undefined,
 					durationMeta(ctx.status, d.startedAt, d.endedAt),
 				].filter(Boolean) as string[];
@@ -333,8 +331,8 @@ export default function (pi: ExtensionAPI) {
 				},
 			},
 		}),
-		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
-			return executeSearch(raw as WebSearchParams, ctx, signal, onUpdate);
+		async execute(_toolCallId, raw, signal, onUpdate) {
+			return executeSearch(raw as WebSearchParams, signal, onUpdate);
 		},
 	});
 
