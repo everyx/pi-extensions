@@ -149,7 +149,8 @@ const SpawnParamsSchema = Type.Object({
 		Type.String({
 			description:
 				'Model for the sub-agent — provider/modelId or fuzzy name (e.g. "haiku", "sonnet"). ' +
-				"Omit to inherit your current model.",
+				"Omit to inherit your current model — don't switch the model unless the task " +
+				"explicitly requires it.",
 		}),
 	),
 	thinking: Type.Optional(
