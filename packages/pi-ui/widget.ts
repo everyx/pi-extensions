@@ -11,10 +11,10 @@
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import { formatDuration, Spinner, safeTitle } from "./spinner.js";
+import { formatDuration, SPINNER_TICK_MS, Spinner, safeTitle } from "./spinner.js";
+import { type TickerHandle, ticker } from "./ticker.js";
 
 const WIDGET_KEY = "pi-ui-status";
-const TICK_MS = 500;
 const EXCERPT_INDENT = "    ";
 
 export type WidgetStatus = "running" | "stopped" | "done" | "failed";
@@ -98,7 +98,7 @@ function styleRow(row: WidgetRow, theme: Theme): string {
 export class StatusWidget {
 	private readonly ui: ExtensionUIContext;
 	private readonly rows = new Map<string, { item: WidgetItem; spinner: Spinner }>();
-	private interval: ReturnType<typeof setInterval> | undefined;
+	private animation: TickerHandle | undefined;
 	private registered = false;
 	private tui: { requestRender(): void } | undefined;
 	private total = 0;
@@ -132,9 +132,9 @@ export class StatusWidget {
 	}
 
 	dispose(): void {
-		if (this.interval) {
-			clearInterval(this.interval);
-			this.interval = undefined;
+		if (this.animation) {
+			this.animation.unsubscribe();
+			this.animation = undefined;
 		}
 		this.rows.clear();
 		// An empty widget ends its lifetime — the progress meta starts fresh
@@ -154,9 +154,11 @@ export class StatusWidget {
 	// ── Internal ───────────────────────────────────────────
 
 	private ensureRunning(): void {
-		if (this.interval) return;
+		if (this.animation) return;
 		this.registerWidget();
-		this.interval = setInterval(() => this.tick(), TICK_MS);
+		// One shared clock for all animated surfaces: redraws run at the
+		// spinner cadence via the unified ticker, not a widget-local timer.
+		this.animation = ticker.subscribe(() => this.tick(), SPINNER_TICK_MS);
 	}
 
 	private tick(): void {

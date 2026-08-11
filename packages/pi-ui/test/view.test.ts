@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { dataCard } from "../card.js";
+import { ticker } from "../ticker.js";
 import { createToolView } from "../view.js";
 
 initTheme("light");
@@ -45,11 +46,23 @@ function lines(c: { render(w: number): string[] }, w = 100): string[] {
 
 describe("createToolView — header ownership while running", () => {
 	it("renderCall renders the header line while processing", () => {
-		const out = lines(view.renderCall({ query: "q1" }, theme, ctx({ isPartial: true })));
+		const st = {};
+		const c = ctx({ isPartial: true, state: st });
+		const out = lines(view.renderCall({ query: "q1" }, theme, c));
 		assert.ok(out.length >= 1, "call renders a header line");
 		assert.match(out[0] ?? "", /probe/);
 		assert.match(out[0] ?? "", /q1/);
 		assert.match(out[0] ?? "", /running/);
+		// The processing render starts a clock-driver — end it with a
+		// terminal render so the test leaves no subscription behind.
+		lines(
+			view.renderResult(
+				{ content: [], details: { data: { title: "t", lines: [] } } },
+				{ expanded: false, isPartial: false },
+				theme,
+				ctx({ isPartial: false, state: st }),
+			),
+		);
 	});
 
 	it("renderResult renders a bare body (no header) while processing — call owns the header", () => {
@@ -151,5 +164,57 @@ describe("createToolView — header ownership while running", () => {
 			expanded.some((l) => l.includes("line 16")),
 			"expanded shows the last row",
 		);
+	});
+});
+
+describe("createToolView — clock-driven animation while processing", () => {
+	const terminal = (st: Record<string, unknown>) =>
+		lines(
+			view.renderResult(
+				{ content: [], details: { data: { title: "t", lines: [] } } },
+				{ expanded: false, isPartial: false },
+				theme,
+				ctx({ isPartial: false, state: st }),
+			),
+		);
+
+	it("drives invalidate on the spinner cadence while processing", async () => {
+		let invalidated = 0;
+		const st = {};
+		lines(
+			view.renderCall({ query: "q1" }, theme, ctx({ isPartial: true, state: st, invalidate: () => invalidated++ })),
+		);
+		assert.equal(invalidated, 0, "no redraw before the first tick");
+		await new Promise((r) => setTimeout(r, 300));
+		assert.ok(invalidated >= 3, `ticker drives invalidate while processing, got ${invalidated}`);
+		terminal(st); // stop the driver
+		const after = invalidated;
+		await new Promise((r) => setTimeout(r, 300));
+		assert.equal(invalidated, after, "no invalidate after the terminal render");
+	});
+
+	it("re-renders while processing do not double-subscribe", () => {
+		const st = {};
+		const c = ctx({ isPartial: true, state: st, invalidate: () => {} });
+		lines(view.renderCall({ query: "q1" }, theme, c));
+		assert.equal(ticker.subscriberCount, 1);
+		lines(view.renderCall({ query: "q1" }, theme, c));
+		lines(view.renderCall({ query: "q1" }, theme, c));
+		assert.equal(ticker.subscriberCount, 1, "idempotent across re-renders");
+		terminal(st);
+		assert.equal(ticker.subscriberCount, 0, "terminal render unsubscribes");
+	});
+
+	it("streaming result renders do not subscribe (bare body has no animation)", async () => {
+		const st = {};
+		lines(
+			view.renderResult(
+				{ content: [], details: { data: { title: "t", lines: ["one"] } } },
+				{ expanded: false, isPartial: true },
+				theme,
+				ctx({ isPartial: true, state: st }),
+			),
+		);
+		assert.equal(ticker.subscriberCount, 0, "bare body renders stay passive");
 	});
 });

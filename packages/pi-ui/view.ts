@@ -14,7 +14,8 @@
 
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { type CardIcon, type Component, dataCard, renderHeader, type StyledRow, textLine } from "./card.js";
-import { Spinner } from "./spinner.js";
+import { SPINNER_TICK_MS, Spinner } from "./spinner.js";
+import { ticker } from "./ticker.js";
 
 /** Structural subset of pi's ToolRenderContext (not exported at the entry). */
 /** Structural match of pi's ToolRenderContext (not exported at the entry). */
@@ -102,6 +103,44 @@ function spinnerFor(state: RenderContext["state"] | undefined): Spinner | undefi
 	const sp = (state?.spinner as Spinner | undefined) ?? new Spinner();
 	if (state) state.spinner = sp;
 	return sp;
+}
+
+/** One live clock-driver for a processing card (rides the render state). */
+interface AnimationHandle {
+	alive: boolean;
+	unsubscribe(): void;
+}
+
+/** Start clock-driven redraws for a processing card: the ticker drives
+ * invalidate at the spinner cadence, so the header spinner and the live
+ * Elapsed meta animate on their own clock, decoupled from body content
+ * streaming. Idempotent — re-renders while processing keep one driver. */
+function startAnimation(rc: RenderContext, st: Record<string, unknown>): void {
+	if (st.animation) return;
+	const handle: AnimationHandle = { alive: true, unsubscribe: () => {} };
+	handle.unsubscribe = ticker.subscribe(() => {
+		// Self-healing: once the terminal render unsubscribed (or the handle
+		// was replaced), stop this dead driver instead of invalidating — a
+		// mid-execution destroy must never leak a ticking timer.
+		if (!handle.alive || st.animation !== handle) {
+			if (st.animation === handle) st.animation = undefined;
+			handle.alive = false;
+			handle.unsubscribe();
+			return;
+		}
+		rc.invalidate();
+	}, SPINNER_TICK_MS).unsubscribe;
+	st.animation = handle;
+}
+
+/** Stop the clock-driver (terminal render — idempotent). */
+function stopAnimation(st: Record<string, unknown> | undefined): void {
+	if (!st) return;
+	const handle = st.animation as AnimationHandle | undefined;
+	if (!handle) return;
+	st.animation = undefined;
+	handle.alive = false;
+	handle.unsubscribe();
 }
 
 function iconForStatus(status: CardStatus, spinner: Spinner | undefined): CardIcon {
@@ -215,6 +254,10 @@ export function createToolView<Args, Data>(
 				const st = rc.state as Record<string, unknown> | undefined;
 				const startedAt = (st?.startedAt as number | undefined) ?? Date.now();
 				if (st) st.startedAt = startedAt;
+				// Clock-driven animation: while the call is processing, the ticker
+				// invalidates this component at the spinner cadence so header
+				// spinner + Elapsed meta stay smooth regardless of body stream rate.
+				if (st) startAnimation(rc, st);
 				// Merge the last streamed result data (if any) so the header can
 				// react to activity (e.g. the running… tail) before the next
 				// result render.
@@ -235,7 +278,9 @@ export function createToolView<Args, Data>(
 					),
 				);
 			}
-			// Completed: the result renderer owns the surface.
+			// Completed: the result renderer owns the surface. Stop any
+			// clock-driver this call started while processing.
+			stopAnimation(rc.state as Record<string, unknown> | undefined);
 			return textLine("");
 		},
 		renderResult(result: AgentToolResult<Record<string, unknown>>, options, theme, context) {
@@ -265,6 +310,9 @@ export function createToolView<Args, Data>(
 					spinnerFor(rc.state),
 				);
 			}
+			// Terminal status: the clock-driver (if any) is done — the header
+			// shows a static ✓/✗/■ and the Elapsed meta freezes as Took.
+			stopAnimation(st);
 			return renderCardFrom(
 				status,
 				rc.args as Args,

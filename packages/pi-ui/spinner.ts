@@ -6,8 +6,10 @@
  * surfaces across extensions.
  */
 
-/** Spinner frame interval (80ms — matches Pi's native loader cadence). */
-const SPINNER_TICK_MS = 80;
+/** Spinner frame interval (80ms — matches Pi's native loader cadence).
+ * Single source for animation cadence: the ticker and every animated
+ * component subscribe with this — no magic numbers elsewhere. */
+export const SPINNER_TICK_MS = 80;
 
 /** Spinner frames (one Braille frame per tick). */
 export const SPINNER = [

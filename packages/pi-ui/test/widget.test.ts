@@ -125,3 +125,51 @@ describe("StatusWidget progress meta", () => {
 		w.dispose();
 	});
 });
+
+describe("StatusWidget — shared-ticker animation", () => {
+	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+	it("redraws on the unified ticker while a row runs", async () => {
+		let renders = 0;
+		let widgetFactory: unknown;
+		const ui = {
+			setWidget: (_key: unknown, wf: unknown) => {
+				widgetFactory = wf;
+			},
+		} as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		w.add(item("a"));
+		// The pi host calls the widget factory with the tui handle — capture
+		// requestRender through it, like the real runtime does.
+		(widgetFactory as (tui: unknown, th: unknown) => { render(): string[] })({ requestRender: () => renders++ }, theme);
+		assert.equal(renders, 0, "no redraw before the first tick");
+		await sleep(300);
+		assert.ok(renders >= 2, `ticker drives widget redraws, got ${renders}`);
+		w.dispose();
+		const after = renders;
+		await sleep(300);
+		assert.equal(renders, after, "no redraws after dispose");
+	});
+
+	it("one row gone does not stop the clock; empty does", async () => {
+		let renders = 0;
+		let widgetFactory: unknown;
+		const ui = {
+			setWidget: (_key: unknown, wf: unknown) => {
+				widgetFactory = wf;
+			},
+		} as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		w.add(item("a"));
+		(widgetFactory as (tui: unknown, th: unknown) => { render(): string[] })({ requestRender: () => renders++ }, theme);
+		w.add(item("b"));
+		await sleep(200);
+		w.remove("a", "done");
+		await sleep(200);
+		assert.ok(renders >= 2, "still animating with one row left");
+		w.remove("b", "done"); // empty → dispose
+		const after = renders;
+		await sleep(200);
+		assert.equal(renders, after, "clock stops when the widget empties");
+	});
+});
