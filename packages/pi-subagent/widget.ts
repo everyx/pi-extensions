@@ -47,6 +47,11 @@ export class AgentWidget {
 		this.widget.updateStatus(agentId, status);
 	}
 
+	/** Update one row's live working output (activity excerpt). */
+	updateActivity(agentId: string, activity: AgentActivity | undefined): void {
+		this.widget.updateRows(agentId, activityToRows(activity));
+	}
+
 	/** Clear everything (session shutdown). */
 	dispose(): void {
 		this.widget.dispose();

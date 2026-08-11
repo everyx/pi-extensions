@@ -130,11 +130,11 @@ describe("StatusWidget progress meta", () => {
 describe("StatusWidget — idle rows (persistent agents)", () => {
 	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-	it("renders an idle row with a muted marker and (idle) meta", () => {
+	it("renders an idle row with a pause marker and no meta", () => {
 		const lines = renderWidgetItemLine({ id: "a", title: "stay", startedAt: 0, status: "idle" }, theme, new Spinner());
 		assert.ok(lines[0]);
-		assert.match(lines[0] ?? "", /\.\.\.|\u2026/);
-		assert.match(lines[0] ?? "", /\(idle\)/);
+		assert.match(lines[0] ?? "", /\u23f8/); // ⏸ pause marker
+		assert.ok(!(lines[0] ?? "").includes("("), "no meta tail — the icon carries the state");
 	});
 
 	it("updateStatus flips a row between running and idle in place", () => {
@@ -144,11 +144,25 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		w.add(item("a"));
 		w.updateStatus("a", "idle");
 		assert.ok(
-			lines().some((l) => l.includes("(idle)")),
-			"row shows idle after the flip",
+			lines().some((l) => l.includes("\u23f8")),
+			"row shows the pause marker after the flip",
 		);
 		w.updateStatus("a", "running");
-		assert.ok(!lines().some((l) => l.includes("(idle)")), "row shows running again");
+		assert.ok(!lines().some((l) => l.includes("\u23f8")), "row shows running again");
+		w.dispose();
+	});
+
+	it("updateRows refreshes the activity excerpt in place", () => {
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		const lines = capture(ui);
+		w.add(item("a"));
+		assert.ok(!lines().some((l) => l.includes("bash:")), "no excerpt yet");
+		w.updateRows("a", [{ style: "tool", content: "bash: sleep 20" }]);
+		assert.ok(
+			lines().some((l) => l.includes("bash: sleep 20")),
+			"live excerpt shows",
+		);
 		w.dispose();
 	});
 

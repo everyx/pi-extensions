@@ -484,7 +484,11 @@ export default function (pi: ExtensionAPI) {
 				// A wake finished — the widget row flips back to idle.
 				onIdle: () => registry.markIdle(agentId),
 				onDelta: (delta) => {
-					if (params.run_in_background) return;
+					if (params.run_in_background) {
+						// Live widget excerpt: the latest streamed text tail.
+						widget?.updateActivity(agent.agentId, agent.getLatestActivity() ?? undefined);
+						return;
+					}
 					streamed += delta;
 					onUpdate?.({
 						content: [{ type: "text", text: streamed }],
@@ -492,7 +496,11 @@ export default function (pi: ExtensionAPI) {
 					});
 				},
 				onActivityChange: (activity) => {
-					if (params.run_in_background) return;
+					if (params.run_in_background) {
+						// Live widget excerpt for thinking/tool transitions.
+						widget?.updateActivity(agent.agentId, activity);
+						return;
+					}
 					if (activity.kind === "text") return; // covered by onDelta
 					onUpdate?.({ content: [{ type: "text", text: streamed }], details: liveDetails(activity) });
 				},
