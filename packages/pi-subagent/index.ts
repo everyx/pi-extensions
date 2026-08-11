@@ -818,7 +818,7 @@ export default function (pi: ExtensionAPI) {
 
 		...createToolView<Record<string, unknown>, Record<string, unknown>>({
 			name: "agent_stop",
-			title: (ctx) => titleFrom(ctx, "agent_id"),
+			title: (ctx) => titleFrom(ctx, "agentId"),
 			tail: (ctx) => {
 				if (ctx.status === "error") return "stop failed";
 				if (ctx.status === "processing") return "stopping\u2026";

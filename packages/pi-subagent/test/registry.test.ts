@@ -294,6 +294,29 @@ describe("AgentRegistry — in-tree routing", () => {
 		registry.register(plain);
 		assert.equal(await registry.deliver("a2", "hi"), false);
 	});
+
+	it("deliver reaches a descendant via the direct-child prefix (error feedback path)", async () => {
+		const { registry } = makeRegistry(null);
+		const a1 = new FakeAgent("a1");
+		registry.register(a1);
+		// The root registry only holds direct children; a descendant path
+		// ("a1/a1") is delivered to the direct child, whose own layer routes on.
+		assert.equal(await registry.deliver("a1/a1", "[pi-subagent] agent_send to X failed: no such agent"), true);
+		assert.deepEqual(a1.delivered, ["[pi-subagent] agent_send to X failed: no such agent"]);
+	});
+
+	it("a throwing notification still leaves the persistent agent resident (idle)", async () => {
+		const agent = new FakeAgent("a1", "stay", true);
+		const { registry, widget } = makeRegistry();
+		(registry as unknown as { notify: (a: unknown, c: unknown) => Promise<void> }).notify = async () => {
+			throw new Error("boom");
+		};
+		registry.register(agent);
+		await registry.complete(agent, completion());
+		assert.equal(agent.stopCalls, 0, "resident survives a notification failure");
+		assert.equal(registry.lookup("a1"), agent);
+		assert.deepEqual(widget?.statuses, [{ id: "a1", status: "idle" }]);
+	});
 });
 
 describe("AgentRegistry — stop / shutdown", () => {

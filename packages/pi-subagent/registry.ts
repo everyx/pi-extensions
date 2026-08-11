@@ -103,11 +103,12 @@ export class AgentRegistry {
 		const notify = () => (agent.stoppedByControl ? Promise.resolve() : this.notify(agent, completion));
 		if (agent.persistent && completion.status === "completed") {
 			try {
-				await notify();
+				// A failed notification must never kill a resident agent — the
+				// idle row stays (addressable), the agent stays up.
+				await Promise.resolve(notify()).catch(() => {});
 			} finally {
 				// Resident — no remove, no stop. The widget row flips to idle so
-				// the agent stays addressable (agent_stop removes it later),
-				// even if the notification itself failed.
+				// the agent stays addressable (agent_stop removes it later).
 				this.getWidget()?.setStatus?.(agent.agentId, "idle");
 			}
 			return;
@@ -130,7 +131,14 @@ export class AgentRegistry {
 	}
 
 	/** Deliver a message to a direct child (rpc prompt + steer behavior). */
-	async deliver(childId: string, text: string): Promise<boolean> {
+	/**
+	 * Deliver a message to an agent by id — exact for a direct child, or via
+	 * the direct-child prefix for a descendant path ("a1/a1" → "a1", whose
+	 * own layer routes the rest). Returns false when no child matches.
+	 */
+	async deliver(target: string, text: string): Promise<boolean> {
+		const childId = [...this.agents.keys()].find((c) => target === c || target.startsWith(`${c}/`));
+		if (!childId) return false;
 		const agent = this.agents.get(childId);
 		if (!agent?.sendMessage) return false;
 		const ok = await agent.sendMessage(text);

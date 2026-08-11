@@ -111,7 +111,7 @@ session: /path/...jsonl
   ‖ 检查 CI 配置
 ```
 
-- 仅跟踪后台 agent（前台已 inline 流式，不重复）
+- 仅跟踪后台 agent 与 persistent 前台 agent（前台非 persistent 已 inline 流式，不重复；persistent 前台完成后驻留 idle，进 widget 保持可寻址）
 - 非 persistent 完成/停止立即移除——完成结果由通知卡承担；**persistent 完成后保留 idle 行**（可寻址性可见，‖ 标记，不参与进度计数，可被 agent_stop 移除）
 - 标题后显示生命周期进度 `已结束/累计`（如 `1/3`）；含失败/停止时为 `(1+2)/3`
   （成功+异常，异常数 error 色）——行空 widget 消失，计数随下次任务批重置

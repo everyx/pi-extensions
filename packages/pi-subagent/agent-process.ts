@@ -206,7 +206,7 @@ export class AgentProcess {
 			}));
 		if (!response.success) return false;
 		// Woke an idle persistent agent — activity resumes.
-		if (this.status === "completed" || this.status === "failed") this.status = "running";
+		if (this.status === "completed") this.status = "running";
 		return true;
 	}
 
