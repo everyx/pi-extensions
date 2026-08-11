@@ -45,6 +45,8 @@ export function renderNotification(
 	if (d.usage?.durationMs != null) metaParts.push(`Took ${formatDuration(d.usage.durationMs)}`);
 	if (d.usage?.tokens != null) metaParts.push(`${formatTokens(d.usage.tokens)} tokens`);
 	if (d.usage?.toolUses != null) metaParts.push(`${d.usage.toolUses} tool use${d.usage.toolUses === 1 ? "" : "s"}`);
+	// Persistent agent completed: resident (idle) — muted marker in the meta.
+	if (d.idle) metaParts.push("idle");
 
 	const body: CardBody = {};
 	const result = d.result?.trim();
@@ -54,7 +56,7 @@ export function renderNotification(
 
 	return renderNotificationCard(
 		{
-			header: { icon, name: "Agent", title: d.title, tail: status, meta: metaParts },
+			header: { icon, name: "agent_spawn", title: d.title, tail: status, meta: metaParts },
 			body,
 			footer: d.sessionPath,
 			expanded,

@@ -17,7 +17,7 @@ import { type TickerHandle, ticker } from "./ticker.js";
 const WIDGET_KEY = "pi-ui-status";
 const EXCERPT_INDENT = "    ";
 
-export type WidgetStatus = "running" | "stopped" | "done" | "failed";
+export type WidgetStatus = "running" | "idle" | "stopped" | "done" | "failed";
 
 /** How a tracked item ended — feeds the lifetime progress meta (`1/3`). */
 export type WidgetResult = "done" | "failed" | "stopped";
@@ -53,21 +53,29 @@ interface WidgetRender {
 
 /** Render one item's status line + activity rows (colors live here). */
 export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Spinner): string[] {
-	const elapsed = formatDuration(Date.now() - item.startedAt);
 	const label = safeTitle(item.title, 40);
 
 	let status: string;
+	let meta: string;
 	if (item.status === "running") {
 		status = theme.fg("accent", spinner.current());
+		meta = `(${formatDuration(Date.now() - item.startedAt)})`;
 	} else if (item.status === "failed") {
 		status = theme.fg("error", "\u2717");
+		meta = "(failed)";
 	} else if (item.status === "stopped") {
 		status = theme.fg("warning", "\u25a0");
+		meta = "(stopped)";
+	} else if (item.status === "idle") {
+		// Resident persistent agent: muted marker, no elapsed — zero-token wait.
+		status = theme.fg("muted", "\u2026");
+		meta = "(idle)";
 	} else {
 		status = theme.fg("success", "\u2713");
+		meta = "(done)";
 	}
 
-	const line = ` ${status} ${theme.fg("bashMode", label)} ${theme.fg("muted", `(${elapsed})`)}`;
+	const line = ` ${status} ${theme.fg("bashMode", label)} ${theme.fg("muted", meta)}`;
 	const rows = (item.rows ?? []).map((r) => `${EXCERPT_INDENT}${styleRow(r, theme)}`);
 	return [line, ...rows];
 }
@@ -121,6 +129,17 @@ export class StatusWidget {
 		this.ensureRunning();
 	}
 
+	/**
+	 * Update one row's status in place (e.g. idle ⇄ running for a persistent
+	 * agent woken by a message) without changing the lifetime counters.
+	 */
+	updateStatus(id: string, status: WidgetStatus): void {
+		const row = this.rows.get(id);
+		if (!row) return;
+		row.item = { ...row.item, status };
+		this.tui?.requestRender();
+	}
+
 	remove(id: string, result?: WidgetResult): void {
 		if (!this.rows.delete(id)) return;
 		this.countResult(result);
@@ -163,7 +182,9 @@ export class StatusWidget {
 
 	private tick(): void {
 		for (const [id, row] of this.rows) {
-			if (row.item.status !== "running") {
+			// Terminal statuses end the row's lifetime (folded into the counters).
+			// idle rows stay — a persistent agent remains addressable until stopped.
+			if (row.item.status === "done" || row.item.status === "failed" || row.item.status === "stopped") {
 				this.rows.delete(id);
 				this.countResult(statusToResult(row.item.status));
 			}

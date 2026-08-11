@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { StatusWidget, type WidgetItem } from "../widget.js";
+import { Spinner } from "../spinner.js";
+import { renderWidgetItemLine, StatusWidget, type WidgetItem } from "../widget.js";
 
 /** Captures the widget's render function through a mock ui.setWidget. */
 function capture(ui: { setWidget: ExtensionUIContext["setWidget"] }) {
@@ -122,6 +123,49 @@ describe("StatusWidget progress meta", () => {
 		const lines = capture(ui);
 		w.add(item("a"));
 		assert.ok(!lines().some((l) => l.includes("/")));
+		w.dispose();
+	});
+});
+
+describe("StatusWidget — idle rows (persistent agents)", () => {
+	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+	it("renders an idle row with a muted marker and (idle) meta", () => {
+		const lines = renderWidgetItemLine({ id: "a", title: "stay", startedAt: 0, status: "idle" }, theme, new Spinner());
+		assert.ok(lines[0]);
+		assert.match(lines[0] ?? "", /\.\.\.|\u2026/);
+		assert.match(lines[0] ?? "", /\(idle\)/);
+	});
+
+	it("updateStatus flips a row between running and idle in place", () => {
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		const lines = capture(ui);
+		w.add(item("a"));
+		w.updateStatus("a", "idle");
+		assert.ok(
+			lines().some((l) => l.includes("(idle)")),
+			"row shows idle after the flip",
+		);
+		w.updateStatus("a", "running");
+		assert.ok(!lines().some((l) => l.includes("(idle)")), "row shows running again");
+		w.dispose();
+	});
+
+	it("the ticker keeps idle rows alive (only terminal statuses are cleaned)", async () => {
+		let renders = 0;
+		let widgetFactory: unknown;
+		const ui = {
+			setWidget: (_key: unknown, wf: unknown) => {
+				widgetFactory = wf;
+			},
+		} as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		w.add(item("a"));
+		(widgetFactory as (tui: unknown, th: unknown) => { render(): string[] })({ requestRender: () => renders++ }, theme);
+		w.updateStatus("a", "idle");
+		await sleep(200);
+		assert.ok(renders > 0, "idle row still ticks (kept alive)");
 		w.dispose();
 	});
 });

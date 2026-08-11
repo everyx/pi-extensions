@@ -43,6 +43,8 @@ export interface WidgetSurface {
 	add(agent: RegisteredAgent): void;
 	/** `result` feeds the widget's lifetime progress meta; undefined = unknown. */
 	remove(agentId: string, result?: WidgetResult): void;
+	/** In-place status update (idle ⇄ running for persistent agents). */
+	setStatus?(agentId: string, status: "idle" | "running"): void;
 	dispose(): void;
 }
 
@@ -101,7 +103,10 @@ export class AgentRegistry {
 		const notify = () => (agent.stoppedByControl ? Promise.resolve() : this.notify(agent, completion));
 		if (agent.persistent && completion.status === "completed") {
 			await notify();
-			return; // resident — no remove, no stop
+			// Resident — no remove, no stop. The widget row flips to idle so the
+			// agent stays addressable (agent_stop removes it later).
+			this.getWidget()?.setStatus?.(agent.agentId, "idle");
+			return;
 		}
 		try {
 			await notify();
@@ -124,7 +129,11 @@ export class AgentRegistry {
 	async deliver(childId: string, text: string): Promise<boolean> {
 		const agent = this.agents.get(childId);
 		if (!agent?.sendMessage) return false;
-		return agent.sendMessage(text);
+		const ok = await agent.sendMessage(text);
+		// A delivered message woke an idle persistent agent — the widget row
+		// flips back to running (spinner resumes). Harmless for running rows.
+		if (ok) this.getWidget()?.setStatus?.(childId, "running");
+		return ok;
 	}
 
 	/** AgentControl.stop path: graceful stop + removal (no notification).

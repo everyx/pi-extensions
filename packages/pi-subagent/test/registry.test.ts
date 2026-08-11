@@ -50,12 +50,16 @@ class FakeWidget implements WidgetSurface {
 	added: string[] = [];
 	removed: string[] = [];
 	disposed = false;
+	statuses: Array<{ id: string; status: string }> = [];
 
 	add(agent: RegisteredAgent): void {
 		this.added.push(agent.agentId);
 	}
 	remove(agentId: string): void {
 		this.removed.push(agentId);
+	}
+	setStatus(agentId: string, status: "idle" | "running"): void {
+		this.statuses.push({ id: agentId, status });
 	}
 	dispose(): void {
 		this.disposed = true;
@@ -212,6 +216,22 @@ describe("AgentRegistry — persistent (idle) completion", () => {
 		assert.equal(registry.lookup("a1"), undefined);
 		assert.deepEqual(widget?.removed, ["a1"]);
 	});
+
+	it("flips the widget row to idle on persistent completion", async () => {
+		const { registry, widget } = makeRegistry();
+		const agent = new FakeAgent("a1", "stay", true);
+		registry.register(agent);
+		await registry.complete(agent, completion());
+		assert.deepEqual(widget?.statuses, [{ id: "a1", status: "idle" }]);
+	});
+
+	it("does not flip idle for non-persistent completion", async () => {
+		const { registry, widget } = makeRegistry();
+		const agent = new FakeAgent("a1");
+		registry.register(agent);
+		await registry.complete(agent, completion());
+		assert.deepEqual(widget?.statuses, []);
+	});
 });
 
 describe("AgentRegistry — in-tree routing", () => {
@@ -247,6 +267,16 @@ describe("AgentRegistry — in-tree routing", () => {
 		registry.register(agent);
 		assert.equal(await registry.deliver("a2", "[from ] hi"), true);
 		assert.deepEqual(agent.delivered, ["[from ] hi"]);
+	});
+
+	it("delivery flips the widget row to running (woke an idle agent)", async () => {
+		const { registry, widget } = makeRegistry();
+		const agent = new FakeAgent("a2", "stay", true);
+		registry.register(agent);
+		await registry.complete(agent, completion());
+		if (widget) widget.statuses.length = 0; // reset the idle flip
+		assert.equal(await registry.deliver("a2", "continue"), true);
+		assert.deepEqual(widget?.statuses, [{ id: "a2", status: "running" }]);
 	});
 
 	it("deliver returns false for unknown or un-deliverable agents", async () => {
