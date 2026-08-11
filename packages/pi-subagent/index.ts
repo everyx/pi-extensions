@@ -97,6 +97,7 @@ function widgetSurface(): WidgetSurface | null {
 	return {
 		add: (agent) => w.add(agent as AgentProcess),
 		remove: (agentId, result) => w.remove(agentId, result),
+		setStatus: (agentId, status) => w.setStatus(agentId, status),
 		dispose: () => w.dispose(),
 	};
 }

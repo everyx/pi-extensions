@@ -65,7 +65,7 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(ok, 120).includes('✓ Agent "research db schema"'), "completed icon");
+	assert.ok(renderText(ok, 120).includes('✓ agent_spawn "research db schema"'), "completed icon");
 
 	const failed = renderNotification(
 		{
@@ -80,7 +80,7 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(failed, 120).includes('✗ Agent "research db schema" failed'), "failed icon + word");
+	assert.ok(renderText(failed, 120).includes('✗ agent_spawn "research db schema" failed'), "failed icon + word");
 
 	const stopped = renderNotification(
 		{
@@ -94,7 +94,7 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(stopped, 120).includes('■ Agent "slow query probe" stopped'), "stopped icon + word");
+	assert.ok(renderText(stopped, 120).includes('■ agent_spawn "slow query probe" stopped'), "stopped icon + word");
 });
 test("safeTitle flattens newlines and neutralizes embedded quotes", () => {
 	assert.equal(safeTitle('research "db" schema'), "research 'db' schema");
