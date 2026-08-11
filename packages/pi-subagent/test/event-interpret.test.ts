@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type AgentEvent, interpretEvent } from "../event-interpret.js";
+import { type AgentEvent, interpretEvent, MSG_STATUS_KEY } from "../event-interpret.js";
 
 function expect(raw: Record<string, unknown>): AgentEvent[] {
 	return interpretEvent({ type: "x", ...raw });
@@ -153,6 +153,70 @@ describe("interpretEvent — agent_end", () => {
 			messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "429 Rate limited" }],
 		};
 		assert.deepEqual(interpretEvent(raw), []);
+	});
+});
+
+describe("interpretEvent — extension_ui_request (in-tree messages)", () => {
+	it("parses an agent_send payload under the reserved status key", () => {
+		assert.deepEqual(
+			interpretEvent({
+				type: "extension_ui_request",
+				id: "u1",
+				method: "setStatus",
+				statusKey: MSG_STATUS_KEY,
+				statusText: JSON.stringify({ to: "@parent", from: "a2", message: "need help" }),
+			}),
+			[{ type: "agent_msg", message: { to: "@parent", from: "a2", message: "need help" } }],
+		);
+	});
+
+	it("defaults from to empty when omitted (sender is the root session)", () => {
+		const [ev] = interpretEvent({
+			type: "extension_ui_request",
+			method: "setStatus",
+			statusKey: MSG_STATUS_KEY,
+			statusText: JSON.stringify({ to: "a1/a1-1", message: "hi" }),
+		});
+		assert.equal(ev?.type, "agent_msg");
+		if (ev?.type === "agent_msg") assert.equal(ev.message.from, "");
+	});
+
+	it("ignores non-message extension_ui_request (not our key)", () => {
+		assert.deepEqual(
+			interpretEvent({ type: "extension_ui_request", method: "setStatus", statusKey: "other", statusText: "x" }),
+			[],
+		);
+		assert.deepEqual(interpretEvent({ type: "extension_ui_request", method: "notify", message: "x" }), []);
+	});
+
+	it("ignores malformed payloads (broken JSON / missing fields)", () => {
+		assert.deepEqual(
+			interpretEvent({
+				type: "extension_ui_request",
+				method: "setStatus",
+				statusKey: MSG_STATUS_KEY,
+				statusText: "{oops",
+			}),
+			[],
+		);
+		assert.deepEqual(
+			interpretEvent({
+				type: "extension_ui_request",
+				method: "setStatus",
+				statusKey: MSG_STATUS_KEY,
+				statusText: "42",
+			}),
+			[],
+		);
+		assert.deepEqual(
+			interpretEvent({
+				type: "extension_ui_request",
+				method: "setStatus",
+				statusKey: MSG_STATUS_KEY,
+				statusText: JSON.stringify({ message: "no to" }),
+			}),
+			[],
+		);
 	});
 });
 

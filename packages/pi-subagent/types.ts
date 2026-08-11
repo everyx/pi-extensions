@@ -64,6 +64,8 @@ export interface NotificationDetails {
 	thinking?: string;
 	/** Final output — rendered as the card body (never enters LLM context). */
 	result?: string;
+	/** persistent agent: completed but stays resident — the card shows an idle marker. */
+	idle?: boolean;
 	usage?: {
 		tokens?: number | null;
 		toolUses?: number | null;

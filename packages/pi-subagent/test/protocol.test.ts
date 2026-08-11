@@ -4,12 +4,18 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseLine, serializeCommand } from "../protocol.js";
+import { formatFrom, formatTo, parseLine, routeMessage, serializeCommand } from "../protocol.js";
 
 describe("serializeCommand", () => {
 	it("serializes a prompt command as a single LF-terminated line", () => {
 		const line = serializeCommand({ type: "prompt", message: "do the thing" });
 		assert.equal(line, '{"type":"prompt","message":"do the thing"}\n');
+	});
+
+	it("serializes a prompt with streamingBehavior (in-tree delivery)", () => {
+		const line = serializeCommand({ type: "prompt", message: "m", streamingBehavior: "steer" });
+		const parsed = JSON.parse(line);
+		assert.equal(parsed.streamingBehavior, "steer");
 	});
 
 	it("serializes a steer command with message", () => {
@@ -107,5 +113,59 @@ describe("parseLine — garbage", () => {
 	it("ignores trailing whitespace on a line", () => {
 		const parsed = parseLine('{"type":"agent_settled"}  \r');
 		assert.equal(parsed?.kind, "event");
+	});
+});
+
+describe("routeMessage — in-tree routing (per-hop, O(1))", () => {
+	const msg = (to: string, from = "a1") => ({ to, from, message: "hello" });
+
+	it("@parent routes to the parent when one exists", () => {
+		assert.deepEqual(routeMessage(msg("@parent"), ["a2"], true), { kind: "parent", message: msg("@parent") });
+	});
+
+	it("@parent errors at the root session (no parent)", () => {
+		const d = routeMessage(msg("@parent", ""), ["a1"], false);
+		assert.equal(d.kind, "error");
+	});
+
+	it("exact direct-child id delivers to that child", () => {
+		assert.deepEqual(routeMessage(msg("a2"), ["a2", "a3"], false), {
+			kind: "child",
+			childId: "a2",
+			message: msg("a2"),
+		});
+	});
+
+	it("descendant path delivers via the direct child prefix", () => {
+		const d = routeMessage(msg("a2/a2-1"), ["a2"], false);
+		assert.deepEqual(d, { kind: "child", childId: "a2", message: msg("a2/a2-1") });
+	});
+
+	it("a child whose id is a prefix of another does not shadow (slash boundary)", () => {
+		// "a21" must not match child "a2" — only "a2/..." does.
+		const d = routeMessage(msg("a21"), ["a2"], false);
+		assert.equal(d.kind, "error");
+	});
+
+	it("unknown target uplinks when a parent exists", () => {
+		assert.deepEqual(routeMessage(msg("zzz"), ["a2"], true), { kind: "uplink", message: msg("zzz") });
+	});
+
+	it("unknown target errors at the root (no parent, no child)", () => {
+		const d = routeMessage(msg("zzz", ""), ["a2"], false);
+		assert.equal(d.kind, "error");
+		if (d.kind === "error") assert.match(d.reason, /zzz/);
+	});
+});
+
+describe("formatFrom / formatTo — LLM-visible markers", () => {
+	it("formatFrom prefixes the sender id (empty for root)", () => {
+		assert.equal(formatFrom("a1"), "[from a1] ");
+		assert.equal(formatFrom(""), "");
+	});
+
+	it("formatTo hints cross-generation forwarding only", () => {
+		assert.equal(formatTo("a2", "a2"), ""); // direct child — no hint
+		assert.equal(formatTo("a2/a2-1", "a2"), "[to a2/a2-1] ");
 	});
 });

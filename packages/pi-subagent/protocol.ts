@@ -20,6 +20,10 @@
 export interface RpcCommandPrompt {
 	type: "prompt";
 	message: string;
+	/** When the child is streaming, queue instead of erroring
+	 *  ("steer" = delivered after the current turn; "followUp" = after
+	 *  everything settles). Omitted → idle starts a new turn, streaming errors. */
+	streamingBehavior?: "steer" | "followUp";
 }
 
 export interface RpcCommandSteer {
@@ -75,6 +79,59 @@ export type RpcResponse = RpcResponseSuccess | RpcResponseError;
 export type RpcEvent = { type: string } & Record<string, unknown>;
 
 export type ParsedLine = { kind: "response"; response: RpcResponse } | { kind: "event"; event: RpcEvent };
+
+// ─── In-tree messaging (agent_send) ────────────────────────
+
+/** One agent_send payload — flows child→parent over the event stream
+ * (extension_ui_request) and parent→child as an rpc prompt. */
+export interface AgentMessage {
+	/** Routing target: "@parent" or a tree-path id ("a2", "a1/a1-1"). */
+	to: string;
+	/** Sender's tree-path id ("" for the root session). */
+	from: string;
+	/** Message text (LLM-visible content). */
+	message: string;
+}
+
+/** Routing decision for one message at one process. */
+export type RouteDecision =
+	| { kind: "parent"; message: AgentMessage }
+	| { kind: "child"; childId: string; message: AgentMessage }
+	| { kind: "uplink"; message: AgentMessage }
+	| { kind: "error"; reason: string };
+
+/**
+ * Route one message against the local view: my direct children (the only
+ * reachable agents) and whether I have a parent. Pure — per-hop O(1),
+ * no global registry, no shared state.
+ *
+ *   "@parent"                → deliver to my parent's LLM (error at root)
+ *   my direct child / desc.  → deliver to that child (descendants via its LLM)
+ *   anything else            → uplink (my parent may know it); error at root
+ */
+export function routeMessage(message: AgentMessage, childIds: readonly string[], hasParent: boolean): RouteDecision {
+	if (message.to === "@parent") {
+		return hasParent ? { kind: "parent", message } : { kind: "error", reason: "root session has no parent" };
+	}
+	for (const child of childIds) {
+		if (message.to === child || message.to.startsWith(`${child}/`)) {
+			return { kind: "child", childId: child, message };
+		}
+	}
+	return hasParent ? { kind: "uplink", message } : { kind: "error", reason: `no such agent: ${message.to}` };
+}
+
+/** LLM-visible sender prefix: "[from a1] " (root session: ""). */
+export function formatFrom(from: string): string {
+	return from ? `[from ${from}] ` : "";
+}
+
+/** LLM-visible routing hint for cross-generation deliveries (the message
+ *  must be forwarded by the receiving agent's LLM): "[to a1/a1-1] ".
+ *  Empty when the message is for the receiving agent itself. */
+export function formatTo(to: string, receiver: string): string {
+	return to === receiver ? "" : `[to ${to}] `;
+}
 
 // ─── Pure helpers ──────────────────────────────────────────
 
