@@ -13,7 +13,7 @@
  *
  * Token limits: none. A timeoutMs (if set) triggers a hard abort → graceful
  *   settle within the grace window → hard-stop if it never settles. Otherwise
- *   the child runs until it finishes or is stopped via AgentControl.
+ *   the child runs until it finishes or is stopped via agent_stop.
  */
 
 import { type AgentActivity, interpretEvent } from "./event-interpret.js";
@@ -65,6 +65,8 @@ export interface AgentProcessOptions {
 	onActivityChange?: (activity: AgentActivity) => void;
 	/** In-tree message received from this child (extension_ui_request under the reserved key). */
 	onMessage?: (message: AgentMessage) => void;
+	/** A woken persistent agent settled back to idle (widget row flip). */
+	onIdle?: () => void;
 	/** Resident after completion (idle, zero token) — explicit opt-in, default off. */
 	persistent?: boolean;
 	/** Extra child environment (identity injection: PI_SUBAGENT_AGENT_ID / PI_SUBAGENT_PARENT). */
@@ -94,7 +96,7 @@ export class AgentProcess {
 
 	status: AgentStatus = "queued";
 
-	/** True when stop() was called via AgentControl (deliberate user action → no notification). */
+	/** True when stop() was called via agent_stop (deliberate user action → no notification). */
 	stoppedByControl = false;
 
 	private readonly client: RpcClient;
@@ -130,6 +132,7 @@ export class AgentProcess {
 		this.onDelta = options.onDelta;
 		this.onActivityChange = options.onActivityChange;
 		this.onMessage = options.onMessage;
+		this.onIdle = options.onIdle;
 
 		const args: string[] = [];
 		if (options.model) args.push("--model", options.model);
@@ -178,11 +181,6 @@ export class AgentProcess {
 
 		this.status = "running";
 		return { ok: true };
-	}
-
-	/** Inject a redirecting message; delivered after the current turn settles. */
-	async steer(message: string): Promise<void> {
-		await this.client.sendCommand({ type: "steer", message });
 	}
 
 	/** Hard-interrupt the current turn. */
@@ -267,7 +265,7 @@ export class AgentProcess {
 
 		this.done = true;
 		if (this.status === "stopped") {
-			// Already stopped externally (AgentControl.stop) — keep it.
+			// Already stopped externally (agent_stop) — keep it.
 		} else if (this.hardAborted) {
 			this.status = "stopped";
 		} else if (this.agentError) {
@@ -305,7 +303,7 @@ export class AgentProcess {
 	/**
 	 * Graceful stop: stdin EOF → pi rpc shutdown(). If the child doesn't
 	 * exit within STOP_GRACE_MS, SIGTERM as a fallback. Flags the stop as
-	 * user-controlled (AgentControl.stop / cancel) — suppresses notifications.
+	 * user-controlled (agent_stop / cancel) — suppresses notifications.
 	 */
 	async stop(): Promise<void> {
 		if (this.done) {
@@ -347,6 +345,7 @@ export class AgentProcess {
 	private readonly onDelta: ((delta: string) => void) | undefined;
 	private readonly onActivityChange: ((activity: AgentActivity) => void) | undefined;
 	private readonly onMessage: ((message: AgentMessage) => void) | undefined;
+	private readonly onIdle: (() => void) | undefined;
 
 	private onEvent(event: RpcEvent): void {
 		// Raw protocol shapes are interpreted in event-interpret.ts — the only
@@ -361,7 +360,10 @@ export class AgentProcess {
 					this.settle();
 					// Persistent agent woke by sendMessage finished its turn —
 					// back to idle (completed) so the widget shows it as such.
-					if (this.done && this.persistent && this.status === "running") this.status = "completed";
+					if (this.done && this.persistent && this.status === "running") {
+						this.status = "completed";
+						this.onIdle?.();
+					}
 					break;
 				case "thinking":
 					// Collapse consecutive thinking deltas into one marker.

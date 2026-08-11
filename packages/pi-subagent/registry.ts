@@ -4,7 +4,7 @@
  * Owns the set of running background agents and the "what happens when an
  * agent finishes" policy — bookkeeping that used to live inline in index.ts
  * tool executes (registry map + widget row + child process kept in sync in
- * three call sites: Agent.execute, AgentControl.execute, session_shutdown).
+ * three call sites: agent_spawn.execute, agent_stop.execute, session_shutdown).
  *
  * The registry depends on narrow seams — a notify callback and a widget
  * surface — so the completion policy is unit-testable without a pi API or a
@@ -12,7 +12,7 @@
  * the TUI widget via WidgetSurface.
  *
  * Policy (mirroring the previous inline wiring):
- *   - AgentControl.stop is a deliberate user action → no notification (B6).
+ *   - agent_stop is a deliberate user action → no notification (B6).
  *   - Timeout/hard-stop completions still notify with status "stopped" (B5).
  *   - Every terminal path cleans up exactly once (remove is idempotent).
  * Ordering note: the original wiring stopped the child *before* notifying on
@@ -72,7 +72,7 @@ export class AgentRegistry {
 
 	/**
 	 * Sequential short id (a1, a2, …) — the LLM-facing agent reference for
-	 * this session (AgentControl targets, notification JSON). Sequential
+	 * this session (agent_stop targets, notification JSON). Sequential
 	 * beats random here: short, trivially copy-safe for the model, and the
 	 * only uniqueness domain is this session's live set.
 	 */
@@ -102,10 +102,14 @@ export class AgentRegistry {
 	async complete(agent: RegisteredAgent, completion: AgentCompletion): Promise<void> {
 		const notify = () => (agent.stoppedByControl ? Promise.resolve() : this.notify(agent, completion));
 		if (agent.persistent && completion.status === "completed") {
-			await notify();
-			// Resident — no remove, no stop. The widget row flips to idle so the
-			// agent stays addressable (agent_stop removes it later).
-			this.getWidget()?.setStatus?.(agent.agentId, "idle");
+			try {
+				await notify();
+			} finally {
+				// Resident — no remove, no stop. The widget row flips to idle so
+				// the agent stays addressable (agent_stop removes it later),
+				// even if the notification itself failed.
+				this.getWidget()?.setStatus?.(agent.agentId, "idle");
+			}
 			return;
 		}
 		try {
@@ -136,10 +140,15 @@ export class AgentRegistry {
 		return ok;
 	}
 
-	/** AgentControl.stop path: graceful stop + removal (no notification).
+	/** Flip a persistent agent's widget row back to idle (wake finished). */
+	markIdle(agentId: string): void {
+		this.getWidget()?.setStatus?.(agentId, "idle");
+	}
+
+	/** agent_stop path: graceful stop + removal (no notification).
 	 *  Returns whether an agent was actually stopped (false when it finished
 	 *  between lookup and removal). A rejecting stop() propagates — the
-	 *  caller (AgentControl.execute) surfaces it as a tool error, matching
+	 *  caller (agent_stop.execute) surfaces it as a tool error, matching
 	 *  the original wiring. */
 	async stopAndRemove(agentId: string): Promise<boolean> {
 		const agent = this.agents.get(agentId);

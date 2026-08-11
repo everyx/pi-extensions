@@ -175,7 +175,7 @@ describe("interpretEvent — extension_ui_request (in-tree messages)", () => {
 			type: "extension_ui_request",
 			method: "setStatus",
 			statusKey: MSG_STATUS_KEY,
-			statusText: JSON.stringify({ to: "a1/a1-1", message: "hi" }),
+			statusText: JSON.stringify({ to: "a1/a1", message: "hi" }),
 		});
 		assert.equal(ev?.type, "agent_msg");
 		if (ev?.type === "agent_msg") assert.equal(ev.message.from, "");
