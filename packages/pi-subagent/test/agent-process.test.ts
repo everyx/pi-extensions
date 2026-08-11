@@ -22,6 +22,8 @@ class FakeClient {
 	isClosed = false;
 	/** argv captured at construction (--model/--tools/--session-dir). */
 	args: string[] = [];
+	/** env captured at construction (identity injection). */
+	env: NodeJS.ProcessEnv | undefined;
 
 	private onEvent?: (event: { type: string }) => void;
 	private onExit?: () => void;
@@ -46,6 +48,7 @@ class FakeClient {
 		this.onEvent = options.onEvent;
 		this.onExit = options.onExit;
 		this.args = options.args;
+		this.env = options.env;
 	}
 
 	async sendCommand(command: { type: string; message?: string }) {
@@ -519,6 +522,71 @@ describe("AgentProcess — latest activity", () => {
 			{ kind: "tool", name: "read", args: "a.ts", id: "call_2" },
 			{ kind: "text", text: "y" },
 		]);
+	});
+});
+
+describe("AgentProcess — persistent / in-tree messages", () => {
+	it("persistent flags through to the process", () => {
+		const { agent } = makeAgent({ cwd: "/tmp", persistent: true });
+		assert.equal(agent.persistent, true);
+		const { agent: plain } = makeAgent({ cwd: "/tmp" });
+		assert.equal(plain.persistent, false);
+	});
+
+	it("sendMessage delivers a prompt with streamingBehavior steer (unified delivery)", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		const ok = await agent.sendMessage("[from ] focus on errors");
+		assert.equal(ok, true);
+		const last = fake.commands[fake.commands.length - 1];
+		assert.equal(last?.type, "prompt");
+		assert.equal((last as { streamingBehavior?: string })?.streamingBehavior, "steer");
+		assert.equal((last as { message?: string })?.message, "[from ] focus on errors");
+	});
+
+	it("sendMessage returns false on a failed preflight", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp" });
+		fake.promptOk = false;
+		assert.equal(await agent.sendMessage("hi"), false);
+	});
+
+	it("sendMessage wakes an idle persistent agent back to running", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true });
+		await agent.spawnAndSend("do it");
+		const done = agent.waitForCompletion();
+		fake.emitSettled();
+		await done; // → completed, process kept (persistent)
+		assert.equal(agent.status, "completed");
+		assert.equal(await agent.sendMessage("continue"), true);
+		assert.equal(agent.status, "running");
+	});
+
+	it("a settle after wake returns the persistent agent to completed (idle)", async () => {
+		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true });
+		await agent.spawnAndSend("do it");
+		const done = agent.waitForCompletion();
+		fake.emitSettled();
+		await done;
+		await agent.sendMessage("continue");
+		fake.emitSettled();
+		assert.equal(agent.status, "completed");
+	});
+
+	it("in-tree messages from the child fire onMessage", () => {
+		const received: Array<{ to: string; from: string; message: string }> = [];
+		const { agent, fake } = makeAgent({ cwd: "/tmp", onMessage: (m) => received.push(m) });
+		fake.emitEvent({
+			type: "extension_ui_request",
+			method: "setStatus",
+			statusKey: "pi-subagent-msg",
+			statusText: JSON.stringify({ to: "@parent", from: "a1", message: "need help" }),
+		} as never);
+		assert.deepEqual(received, [{ to: "@parent", from: "a1", message: "need help" }]);
+	});
+
+	it("identity env is passed to the child", () => {
+		const { fake } = makeAgent({ cwd: "/tmp", env: { PI_SUBAGENT_AGENT_ID: "a1", PI_SUBAGENT_PARENT: "" } });
+		assert.ok(fake.env);
+		assert.equal(fake.env.PI_SUBAGENT_AGENT_ID, "a1");
 	});
 });
 

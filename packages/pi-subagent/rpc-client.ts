@@ -25,6 +25,8 @@ export interface RpcClientOptions {
 	/** pi argv after `--mode rpc` (e.g. --model, --tools, --name). */
 	args: string[];
 	cwd: string;
+	/** Extra environment for the child (identity injection, e.g. PI_SUBAGENT_AGENT_ID). */
+	env?: NodeJS.ProcessEnv;
 	/** Test seam: executable to spawn (default "pi"). When set, `args` are used verbatim (no --mode rpc). */
 	command?: string;
 	onEvent?: (event: RpcEvent) => void;
@@ -73,6 +75,7 @@ export class RpcClient {
 		const argv = options.command === undefined ? ["--mode", "rpc", ...options.args] : options.args;
 		const proc = spawn(options.command ?? "pi", argv, {
 			cwd: options.cwd,
+			env: { ...process.env, ...options.env },
 			stdio: ["pipe", "pipe", "pipe"],
 			// Own process group (Unix): lets kill(-pid, …) signal the whole
 			// tree — without this, a SIGTERM to the pi child would orphan its
