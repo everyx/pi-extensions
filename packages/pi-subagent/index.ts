@@ -822,7 +822,7 @@ export default function (pi: ExtensionAPI) {
 			"Send a message to another agent. `to` is the agent id agent_spawn gave you (a spawn " +
 			'result or completion notification carries it), or "@parent" to message the session ' +
 			"that spawned you. Messages wake idle persistent agents and queue on running ones — " +
-			"delivery is a prompt into the target's context.",
+			"the message lands in the target's context.",
 		promptSnippet: "Send a message to a sub-agent or your parent",
 		promptGuidelines: [
 			"Send follow-up instructions to a persistent agent with agent_send — its context is intact and it wakes to handle the message.",
