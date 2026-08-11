@@ -1,22 +1,24 @@
 /**
- * pi-subagent — spawn isolated sub‑agent pi instances.
+ * pi-subagent — spawn isolated sub‑agent pi instances + in-tree messaging.
  *
- * Architecture (issue #10):
- *   index.ts          — tool registration (Agent / AgentControl) + schemas + notification delivery
- *   protocol.ts       — pure JSONL protocol layer (tested)
+ * Architecture (issue #10/#13):
+ *   index.ts          — tool registration (agent_spawn / agent_stop / agent_send) + routing glue
+ *   protocol.ts       — pure JSONL protocol layer + in-tree routing (tested)
  *   rpc-client.ts     — stateful thin JSONL client (spawn + transport)
  *   event-interpret.ts— raw RpcEvent → AgentEvent adapter (pure, tested)
  *   agent-process.ts  — AgentProcess: one resident `pi --mode rpc` child, semantic API
- *   registry.ts       — AgentRegistry: running-agent lifecycle + completion policy (tested)
+ *   registry.ts       — AgentRegistry: lifecycle + completion policy + routing (tested)
  *   model.ts          — model-spec → ResolvedModel (testable)
  *   render.ts         — TUI rendering + notification card renderer
  *   widget.ts         — Agents status widget
  *
  * Every sub‑agent is a resident `pi --mode rpc` child with a persisted
- * session. Foreground Agent calls block until completion; background calls
- * return an agent_id immediately and deliver a completion notification
+ * session. Foreground agent_spawn calls block until completion; background
+ * calls return an agent_id immediately and deliver a completion notification
  * (`customType: "subagent-notification"`, deliverAs "followUp") carrying the
- * final output. AgentControl steers or stops a running background agent.
+ * final output. agent_send messages flow along tree edges (parent↔child);
+ * persistent agents stay resident (idle, zero token) and can be woken by a
+ * message.
  */
 
 import * as os from "node:os";
@@ -27,8 +29,9 @@ import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
-import type { AgentActivity } from "./event-interpret.js";
+import { type AgentActivity, MSG_STATUS_KEY } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
+import { type AgentMessage, formatFrom, formatTo } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
 import type { NotificationDetails } from "./types.js";
@@ -57,10 +60,29 @@ function resolveSubagentSessionDir(): string {
 
 const SUBAGENT_SESSION_DIR = resolveSubagentSessionDir();
 
+// ─── In-tree identity ──────────────────────────────────────
+
+/** This process's tree-path id ("" = root session). Injected by the parent at spawn. */
+const MY_AGENT_ID = process.env.PI_SUBAGENT_AGENT_ID ?? "";
+/** I am a child agent when an identity was injected (root children get "a1"…). */
+const HAS_PARENT = MY_AGENT_ID !== "";
+
 /** TUI-only background-agent status widget (created lazily, tui mode only). */
 let widget: AgentWidget | null = null;
 
+/**
+ * Lazily-captured UI handle for the uplink channel (extension_ui_request /
+ * setStatus under the reserved key). Tool executes refresh it every call —
+ * a sub-agent that spawned children has run its own execute first, so the
+ * ref is always warm before any inbound message needs to forward up.
+ */
+let uiRef: { setStatus(key: string, text: string | undefined): void } | undefined;
+
 function ensureWidget(ctx: { mode: string; ui: unknown }): AgentWidget | null {
+	// Refresh the uplink handle on every execute — rpc-mode children need it
+	// too (their execute ctx.mode is "rpc", but ui.setStatus still emits the
+	// extension_ui_request event stream the parent consumes).
+	uiRef = ctx.ui as { setStatus(key: string, text: string | undefined): void };
 	if (widget) return widget;
 	if (ctx.mode !== "tui") return null;
 	// biome-ignore lint/suspicious/noExplicitAny: ExtensionUIContext shape from pi
@@ -81,8 +103,8 @@ function widgetSurface(): WidgetSurface | null {
 
 // ─── Tool parameter schemas ──────────────────────────────────
 
-/** Agent tool params (schema static shape). */
-interface AgentParams {
+/** agent_spawn tool params (schema static shape). */
+interface SpawnParams {
 	prompt: string;
 	title: string;
 	model?: string;
@@ -90,17 +112,21 @@ interface AgentParams {
 	tools?: string[];
 	run_in_background?: boolean;
 	timeoutMs?: number;
+	persistent?: boolean;
 }
 
-/** AgentControl tool params (schema static shape). */
-interface AgentControlParams {
-	action: string;
+/** agent_stop tool params. */
+interface StopParams {
 	agent_id: string;
-	title?: string;
-	message?: string;
 }
 
-const AgentParamsSchema = Type.Object({
+/** agent_send tool params. */
+interface SendParams {
+	to: string;
+	message: string;
+}
+
+const SpawnParamsSchema = Type.Object({
 	prompt: Type.String({
 		description: "The task for the sub-agent (self-contained: it starts with zero context).",
 	}),
@@ -147,19 +173,27 @@ const AgentParamsSchema = Type.Object({
 				"stopped and the call reports stopped.",
 		}),
 	),
-});
-
-const AgentControlParamsSchema = Type.Object({
-	agent_id: Type.String({ description: "The agent ID to control." }),
-	action: StringEnum(["steer", "stop"], {
-		description: '"steer" — inject a redirecting message into a running agent. "stop" — terminate it.',
-	}),
-	message: Type.Optional(
-		Type.String({
+	persistent: Type.Optional(
+		Type.Boolean({
 			description:
-				'Required when action is "steer". The message injected as a user message into ' + "the agent's conversation.",
+				"If true, keep the agent resident after it completes (idle, zero token) so you can " +
+				"send it follow-up messages later — the process stays alive until you stop it. " +
+				"Default false (the agent exits when done).",
 		}),
 	),
+});
+
+const StopParamsSchema = Type.Object({
+	agent_id: Type.String({ description: "The agent ID to stop." }),
+});
+
+const SendParamsSchema = Type.Object({
+	to: Type.String({
+		description:
+			'Message target: a tree-path agent id ("a2", "a1/a1-1") or "@parent" (the session ' +
+			"that spawned you — only available inside a sub-agent).",
+	}),
+	message: Type.String({ description: "The message text." }),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -201,6 +235,66 @@ function spawnErrorResult(
 	};
 }
 
+/**
+ * Route one in-tree message through the tree (per-hop O(1) against my
+ * direct children). Shared by the agent_send tool (outbound: the caller
+ * gets a synchronous result) and the inbound handler (child→parent: no
+ * return path, so errors are delivered back to the sender as messages).
+ *
+ *   direct child / descendant → rpc prompt + steer (wakes idle, queues on running)
+ *   "@parent" (outbound)      → fire up; the parent injects it into its LLM
+ *   "@parent" (inbound)       → my child addressed me — inject into my session
+ *   unknown → uplink; root errors, notifying the sender on the inbound path
+ */
+async function handleMessage(
+	pi: ExtensionAPI,
+	registry: AgentRegistry,
+	msg: AgentMessage,
+	outbound: boolean,
+): Promise<{ ok: boolean; verb?: string; error?: string }> {
+	const d = registry.route(msg);
+	switch (d.kind) {
+		case "child": {
+			// Deliver to a direct child (or a descendant via its LLM — the
+			// [to …] hint tells the receiver to forward).
+			const text = `${formatFrom(d.message.from)}${formatTo(d.message.to, d.childId)}${d.message.message}`;
+			const ok = await registry.deliver(d.childId, text);
+			return ok ? { ok: true, verb: "delivered" } : { ok: false, error: `delivery to ${d.childId} failed` };
+		}
+		case "parent": {
+			if (outbound) {
+				// I am addressing my own parent — send it up; the parent's
+				// extension injects it into its LLM session.
+				uiRef?.setStatus(MSG_STATUS_KEY, JSON.stringify(d.message));
+				return { ok: true, verb: "delivered" };
+			}
+			// My child addressed "@parent" (= me): inject into my session.
+			pi.sendMessage(
+				{
+					customType: "subagent-message",
+					content: `${formatFrom(d.message.from)}${d.message.message}`,
+					display: true,
+					details: { from: d.message.from, message: d.message.message },
+				},
+				{ deliverAs: "steer", triggerTurn: true },
+			);
+			return { ok: true, verb: "delivered" };
+		}
+		case "uplink": {
+			// Cannot route here — my parent may know the target; forward up.
+			uiRef?.setStatus(MSG_STATUS_KEY, JSON.stringify(d.message));
+			return { ok: true, verb: "forwarded" };
+		}
+		case "error": {
+			if (!outbound && msg.from) {
+				// Inbound path, no return channel: tell the sender (best-effort).
+				void registry.deliver(msg.from, `[pi-subagent] agent_send to ${msg.to} failed: ${d.reason}`);
+			}
+			return { ok: false, error: d.reason };
+		}
+	}
+}
+
 /** One-shot cleanup shared by every exit path: detach the abort handler, then stop the child. */
 async function teardownAgent(agent: AgentProcess, signal: AbortSignal | undefined, onAbort: () => void): Promise<void> {
 	signal?.removeEventListener("abort", onAbort);
@@ -218,6 +312,8 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 		// Card body (never enters LLM context — verified against convertToLlm).
 		// The full output; the LLM-visible content below is capped (truncateTail).
 		result: completion.output,
+		// Persistent agent completed: resident (idle) — the card shows it.
+		idle: agent.persistent ? true : undefined,
 		usage: {
 			tokens: completion.stats.tokens || null,
 			toolUses: completion.stats.toolUses || null,
@@ -237,6 +333,8 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 				// 50KB, bash parity) — the full text lives in details.result (card
 				// body, never enters LLM context) and the session file.
 				result: truncateForContext(completion.output),
+				// Persistent agents stay resident (idle) — sendable later.
+				idle: agent.persistent ? true : undefined,
 				// Resume entry point: sub-agent sessions live outside `pi -r`;
 				// attach with `pi --session <path>`.
 				session_path: completion.sessionPath ?? null,
@@ -255,25 +353,37 @@ export default function (pi: ExtensionAPI) {
 	// normally (bash gets its error background by throwing instead) — see
 	// agent-core executePreparedToolCall. Re-attach it for our tools by
 	// marking every error path in `details.error`; the handler restores
-	// isError so failed Agent/AgentControl calls render with toolErrorBg
-	// like bash, while keeping the details (status line) intact.
+	// isError so failed calls render with toolErrorBg like bash, while
+	// keeping the details (status line) intact.
 	pi.on("tool_result", async (event) => {
-		if (event.toolName !== "Agent" && event.toolName !== "AgentControl") return undefined;
+		if (event.toolName !== "agent_spawn" && event.toolName !== "agent_stop" && event.toolName !== "agent_send") {
+			return undefined;
+		}
 		const details = event.details as { error?: unknown } | undefined;
 		if (!details || details.error === undefined) return undefined;
 		return { isError: true };
 	});
 
-	// One registry per session: owns the running-agent bookkeeping and the
-	// completion policy (notify unless user-stopped; cleanup on every path).
+	// One registry per session: owns the running-agent bookkeeping, the
+	// completion policy (notify unless user-stopped; cleanup on every path),
+	// and the in-tree routing (direct children only — per-hop O(1)).
 	const registry = new AgentRegistry({
 		notify: (agent, completion) => notifyCompletion(pi, agent, completion),
 		getWidget: () => widgetSurface(),
+		hasParent: HAS_PARENT,
 	});
-	// ── Agent ───────────────────────────────────────────
+
+	// Inbound messages (a child addresses @parent, forwards a sibling's
+	// message, or reports an unroutable target) land here from its rpc event
+	// stream and re-enter the router on this hop.
+	const onChildMessage = (msg: AgentMessage): void => {
+		void handleMessage(pi, registry, msg, false);
+	};
+
+	// ── agent_spawn ────────────────────────────────────
 	pi.registerTool({
-		name: "Agent",
-		label: "Agent",
+		name: "agent_spawn",
+		label: "Agent Spawn",
 		description:
 			"Spawn an isolated sub-agent that works in its own context window. " +
 			"The sub-agent starts with zero context from this conversation, so the prompt " +
@@ -283,18 +393,21 @@ export default function (pi: ExtensionAPI) {
 			"Foreground (run_in_background: false): blocks until the sub-agent finishes and returns " +
 			"its final output directly. Background (run_in_background: true): returns an agent_id " +
 			"immediately; the completion notification carries its result (status + agent_id + final " +
-			"output), and you can intervene with AgentControl while it runs.",
+			"output), and you can intervene with agent_stop / agent_send while it runs. " +
+			"persistent: true keeps the agent resident (idle) after completion — message it later " +
+			"to continue the same context.",
 		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
 		promptGuidelines: [
-			"Use Agent when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
-			"Use Agent for independent parallel work: several foreground calls already run in parallel. Reserve run_in_background: true for when you need to keep working or reply to the user while the sub-agent runs.",
-			"Write Agent prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
-			"Never poll a background Agent — its completion notification carries the result.",
+			"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
+			"Use agent_spawn for independent parallel work: several foreground calls already run in parallel. Reserve run_in_background: true for when you need to keep working or reply to the user while the sub-agent runs.",
+			"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
+			"Never poll a background agent — its completion notification carries the result.",
+			"Keep a persistent agent for follow-ups: spawn once with persistent: true, then agent_send it new instructions — the context stays alive (idle until woken).",
 		],
-		parameters: AgentParamsSchema,
+		parameters: SpawnParamsSchema,
 
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
-			const params = raw as AgentParams;
+			const params = raw as SpawnParams;
 			const task = params.prompt?.trim();
 			if (!task) {
 				return {
@@ -333,8 +446,12 @@ export default function (pi: ExtensionAPI) {
 				activity,
 				events: agent.getEvents(),
 			});
+			// Tree-path id: "a1" at the root session, "a1/a1-1" nested (the
+			// parent injects its own id as the path prefix). The registry keys
+			// by this full path so routing prefix-matches across hops.
+			const agentId = HAS_PARENT ? `${MY_AGENT_ID}/${registry.nextAgentId()}` : registry.nextAgentId();
 			const agent = new AgentProcess({
-				agentId: registry.nextAgentId(),
+				agentId,
 				cwd: ctx.cwd,
 				model: resolved.model,
 				thinking: params.thinking ?? pi.getThinkingLevel(),
@@ -342,6 +459,16 @@ export default function (pi: ExtensionAPI) {
 				title: params.title,
 				sessionDir: SUBAGENT_SESSION_DIR,
 				timeoutMs: params.timeoutMs,
+				// Resident after completion (idle, zero token) — explicit opt-in.
+				persistent: params.persistent,
+				// Identity + parent reference for in-tree messaging; the child
+				// extension only enables agent_send when PI_SUBAGENT_AGENT_ID is set.
+				env: {
+					PI_SUBAGENT_AGENT_ID: agentId,
+					PI_SUBAGENT_PARENT: MY_AGENT_ID,
+				},
+				// Child→parent messages re-enter the router on this hop.
+				onMessage: onChildMessage,
 				onDelta: (delta) => {
 					if (params.run_in_background) return;
 					streamed += delta;
@@ -499,7 +626,7 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		...createToolView<Record<string, unknown>, Record<string, unknown>>({
-			name: "Agent",
+			name: "agent_spawn",
 			title: (ctx) => {
 				const d = ctx.result?.data as { title?: string; task?: string } | undefined;
 				return String((ctx.args as { title?: unknown }).title ?? d?.title ?? d?.task ?? "").slice(0, 60);
@@ -571,179 +698,154 @@ export default function (pi: ExtensionAPI) {
 		}),
 	});
 
-	// ── AgentControl ────────────────────────────────────
+	// ── agent_stop ───────────────────────────────────────
 	pi.registerTool({
-		name: "AgentControl",
-		label: "Control Agent",
+		name: "agent_stop",
+		label: "Stop Agent",
 		description:
-			"Intervene in a running sub-agent. steer: inject a message into its conversation to " +
-			"redirect its work mid-run; it is delivered after the agent's current turn settles. " +
-			"stop: terminate a running sub-agent immediately, discarding further work. Only works " +
-			"on agents that are currently running.",
-		promptSnippet: "Steer or stop a running sub-agent",
+			"Terminate a sub-agent: a running agent discards its work; a persistent (idle) " +
+			"agent exits and is removed from the tree. The completion notification is " +
+			"suppressed for deliberate stops.",
+		promptSnippet: "Stop a running or idle sub-agent",
 		promptGuidelines: [
-			'Use AgentControl with action "stop" when a background agent is consuming tokens on a wrong path — stop it and respawn with a corrected prompt.',
+			"Use agent_stop when a background agent is consuming tokens on a wrong path — stop it and respawn with a corrected prompt.",
+			"Stop a persistent agent when you no longer need it — an idle agent still holds a resident process until stopped.",
 		],
-		parameters: AgentControlParamsSchema,
+		parameters: StopParamsSchema,
 
 		async execute(_toolCallId, raw, _signal, onUpdate) {
-			const params = raw as AgentControlParams;
-			// The registry stores full AgentProcess objects — the narrow
-			// RegisteredAgent surface is the seam; steer needs the whole child.
-			const agent = registry.lookup(params.agent_id) as AgentProcess | undefined;
+			const params = raw as StopParams;
+			const agent = registry.lookup(params.agent_id);
 
 			if (!agent) {
 				return {
-					content: [{ type: "text", text: `Agent ${params.agent_id} not found or already finished.` }],
-					details: {
-						action: params.action,
-						error: `agent ${params.agent_id} not found or already finished`,
-					},
+					content: [{ type: "text", text: `agent ${params.agent_id} not found or already finished.` }],
+					details: { error: `agent ${params.agent_id} not found or already finished` },
 					isError: true,
 				};
 			}
 
-			// Runtime validation (schema union may be downgraded by some providers).
-			if (params.action !== "steer" && params.action !== "stop") {
-				return {
-					content: [{ type: "text", text: 'action must be "steer" or "stop".' }],
-					details: { error: 'action must be "steer" or "stop".' },
-					isError: true,
-				};
-			}
-
-			if (params.action === "stop") {
-				// Partial update first — drives the `⠋ Agent <title> stopping…`
-				// spinner line while the child is being stopped.
-				onUpdate?.({
-					content: [{ type: "text", text: `Stopping ${agent.title}\u2026` }],
-					details: { action: "stop", title: agent.title },
-				});
-				try {
-					const stopped = await registry.stopAndRemove(params.agent_id);
-					if (!stopped) {
-						// Finished between lookup and removal (rare) — don't claim
-						// a stop that never happened.
-						const message = `Agent ${params.agent_id} already finished.`;
-						return {
-							content: [{ type: "text", text: message }],
-							details: {
-								agentId: params.agent_id,
-								action: "stop",
-								title: agent.title,
-								error: message,
-							},
-							isError: true,
-						};
-					}
-					return {
-						content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
-						details: { agentId: params.agent_id, action: "stop", title: agent.title },
-					};
-				} catch (err) {
-					// Child died mid-stop (e.g. write-after-end): surface it as a
-					// proper status line, not a bare thrown error.
-					const message = err instanceof Error ? err.message : String(err);
+			// Partial update first — drives the `⠋ agent_stop <title> stopping…`
+			// spinner line while the child is being stopped.
+			onUpdate?.({
+				content: [{ type: "text", text: `Stopping ${agent.title}\u2026` }],
+				details: { title: agent.title },
+			});
+			try {
+				const stopped = await registry.stopAndRemove(params.agent_id);
+				if (!stopped) {
+					// Finished between lookup and removal (rare) — don't claim
+					// a stop that never happened.
+					const message = `agent ${params.agent_id} already finished.`;
 					return {
 						content: [{ type: "text", text: message }],
-						details: { agentId: params.agent_id, action: "stop", title: agent.title, error: message },
+						details: { agentId: params.agent_id, title: agent.title, error: message },
 						isError: true,
 					};
 				}
-			}
-
-			// steer
-			const message = params.message?.trim();
-			if (!message) {
 				return {
-					content: [{ type: "text", text: '`message` is required when action is "steer".' }],
-					details: {
-						action: "steer",
-						title: agent.title,
-						error: '`message` is required when action is "steer".',
-					},
-					isError: true,
+					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
+					details: { agentId: params.agent_id, title: agent.title },
 				};
-			}
-			if (agent.status !== "running") {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Agent ${params.agent_id} is not running (status: ${agent.status}).`,
-						},
-					],
-					details: {
-						action: "steer",
-						title: agent.title,
-						error: `not running (status: ${agent.status})`,
-					},
-					isError: true,
-				};
-			}
-
-			let steerError: string | null = null;
-			try {
-				await agent.steer(message);
 			} catch (err) {
-				// Child died between lookup and steer (write-after-end): surface
-				// it as a status line, not a bare thrown error. Note: a .catch()
-				// callback's return value would be swallowed — the tool result
-				// must come from an explicit return after the try.
-				steerError = err instanceof Error ? err.message : String(err);
-			}
-			if (steerError) {
+				// Child died mid-stop (e.g. write-after-end): surface it as a
+				// proper status line, not a bare thrown error.
+				const message = err instanceof Error ? err.message : String(err);
 				return {
-					content: [{ type: "text", text: steerError }],
-					details: { action: "steer", title: agent.title, error: steerError },
+					content: [{ type: "text", text: message }],
+					details: { agentId: params.agent_id, title: agent.title, error: message },
 					isError: true,
 				};
 			}
-			if (agent.status !== "running") {
-				// The child settled or died while the steer was in flight — the
-				// completion notification (if any) carries the real outcome.
-				return {
-					content: [{ type: "text", text: `Agent ${params.agent_id} finished before the steer arrived.` }],
-					details: {
-						action: "steer",
-						title: agent.title,
-						error: `finished before the steer arrived (status: ${agent.status})`,
-					},
-					isError: true,
-				};
-			}
-			return {
-				// Steer confirmation stays minimal: the full message already lives in the
-				// child's conversation and on the card (details.message) — echoing it
-				// here would double its tokens for no new information.
-				content: [{ type: "text", text: `Steered agent ${params.agent_id}.` }],
-				details: { action: "steer", title: agent.title, message },
-			};
 		},
 
 		...createToolView<Record<string, unknown>, Record<string, unknown>>({
-			name: "AgentControl",
+			name: "agent_stop",
 			title: (ctx) =>
 				String(
-					// The task title the user sees on every other card (SPEC: the
-					// AgentControl card reads `Agent "research db schema" steered`) —
-					// agent_id is only a fallback when no title is available.
+					// The task title the user sees on every other card — agent_id
+					// is only a fallback when no title is available.
 					(ctx.result?.data as { title?: string } | undefined)?.title ??
 						(ctx.args as { agent_id?: unknown } | undefined)?.agent_id ??
 						"",
 				).slice(0, 60),
 			tail: (ctx) => {
-				const action = String(
-					(ctx.args as { action?: unknown } | undefined)?.action ??
-						(ctx.result?.data as { action?: string } | undefined)?.action ??
-						"",
-				);
-				const verb = action === "steer" ? "steer" : action === "stop" ? "stop" : "control";
-				if (ctx.status === "error") return `${verb} failed`;
-				if (ctx.status === "processing") return verb === "stop" ? "stopping\u2026" : `${verb}ing\u2026`;
-				if (ctx.status === "stop") return "stopped";
-				return verb === "stop" ? "stopped" : verb === "steer" ? "steered" : "controlled";
+				if (ctx.status === "error") return "stop failed";
+				if (ctx.status === "processing") return "stopping\u2026";
+				return "stopped";
 			},
+		}),
+	});
+
+	// ── agent_send ──────────────────────────────────────
+	pi.registerTool({
+		name: "agent_send",
+		label: "Send Message",
+		description:
+			"Send a message to another agent in the tree. Target a direct child by its agent id " +
+			'("a2", or the full tree path "a1/a1-1" — the intermediate parent forwards it), ' +
+			'or "@parent" to message the session that spawned you (only inside a sub-agent). ' +
+			"Messages wake idle persistent agents and queue on running ones — delivery is a " +
+			"prompt into the target's context.",
+		promptSnippet: "Send a message to a sub-agent or your parent",
+		promptGuidelines: [
+			"Send follow-up instructions to a persistent agent with agent_send — its context is intact and it wakes to handle the message.",
+			"A sub-agent blocked on missing information should agent_send @parent a concise question; the parent replies the same way.",
+			"Message ids are the ones you got from agent_spawn (the notification carries agent_id).",
+		],
+		parameters: SendParamsSchema,
+
+		async execute(_toolCallId, raw, _signal, onUpdate) {
+			const params = raw as SendParams;
+			const to = params.to?.trim();
+			const message = params.message?.trim();
+			if (!to) {
+				return {
+					content: [{ type: "text", text: "`to` is required." }],
+					details: { error: "`to` is required." },
+					isError: true,
+				};
+			}
+			if (!message) {
+				return {
+					content: [{ type: "text", text: "`message` is required." }],
+					details: { error: "`message` is required." },
+					isError: true,
+				};
+			}
+
+			onUpdate?.({
+				content: [{ type: "text", text: `Sending to ${to}\u2026` }],
+				details: { to },
+			});
+			const r = await handleMessage(pi, registry, { to, from: MY_AGENT_ID, message }, true);
+			if (!r.ok) {
+				return {
+					content: [{ type: "text", text: r.error ?? "delivery failed" }],
+					details: { to, error: r.error },
+					isError: true,
+				};
+			}
+			return {
+				content: [{ type: "text", text: `${r.verb} to ${to}.` }],
+				details: { to, message },
+			};
+		},
+
+		...createToolView<Record<string, unknown>, Record<string, unknown>>({
+			name: "agent_send",
+			title: (ctx) => {
+				const to = String(
+					(ctx.result?.data as { to?: string } | undefined)?.to ?? (ctx.args as { to?: unknown })?.to ?? "",
+				);
+				return to.slice(0, 60);
+			},
+			tail: (ctx) => {
+				if (ctx.status === "error") return "failed";
+				if (ctx.status === "processing") return "sending\u2026";
+				return "delivered";
+			},
+			// The message body shows on the card (folded at 5 rows like bash).
 			body: { text: (ctx) => (ctx.result?.data as { message?: string } | undefined)?.message ?? "" },
 		}),
 	});

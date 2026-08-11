@@ -573,7 +573,7 @@ describe("AgentProcess — persistent / in-tree messages", () => {
 
 	it("in-tree messages from the child fire onMessage", () => {
 		const received: Array<{ to: string; from: string; message: string }> = [];
-		const { agent, fake } = makeAgent({ cwd: "/tmp", onMessage: (m) => received.push(m) });
+		const { fake } = makeAgent({ cwd: "/tmp", onMessage: (m) => received.push(m) });
 		fake.emitEvent({
 			type: "extension_ui_request",
 			method: "setStatus",
