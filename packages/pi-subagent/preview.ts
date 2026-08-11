@@ -61,7 +61,7 @@ interface SubagentDetails {
 // ── Views (same templates as index.ts) ─────────────────────────
 
 const agentView = createToolView<Record<string, unknown>, Record<string, unknown>>({
-	name: "Agent",
+	name: "agent_spawn",
 	title: (ctx) => {
 		const d = ctx.result?.data as { title?: string; task?: string } | undefined;
 		return String((ctx.args as { title?: unknown } | undefined)?.title ?? d?.title ?? d?.task ?? "").slice(0, 60);
@@ -120,25 +120,31 @@ const agentView = createToolView<Record<string, unknown>, Record<string, unknown
 	},
 });
 
-const agentControlView = createToolView<Record<string, unknown>, Record<string, unknown>>({
-	name: "AgentControl",
+const agentStopView = createToolView<Record<string, unknown>, Record<string, unknown>>({
+	name: "agent_stop",
 	title: (ctx) =>
 		String(
-			(ctx.args as { agent_id?: unknown } | undefined)?.agent_id ??
-				(ctx.result?.data as { title?: string } | undefined)?.title ??
+			(ctx.result?.data as { title?: string } | undefined)?.title ??
+				(ctx.args as { agent_id?: unknown } | undefined)?.agent_id ??
 				"",
 		).slice(0, 60),
 	tail: (ctx) => {
-		const action = String(
-			(ctx.args as { action?: unknown } | undefined)?.action ??
-				(ctx.result?.data as { action?: string } | undefined)?.action ??
-				"",
-		);
-		const verb = action === "steer" ? "steer" : action === "stop" ? "stop" : "control";
-		if (ctx.status === "error") return `${verb} failed`;
-		if (ctx.status === "processing") return verb === "stop" ? "stopping\u2026" : `${verb}ing\u2026`;
-		if (ctx.status === "stop") return "stopped";
-		return verb === "stop" ? "stopped" : verb === "steer" ? "steered" : "controlled";
+		if (ctx.status === "error") return "stop failed";
+		if (ctx.status === "processing") return "stopping\u2026";
+		return "stopped";
+	},
+});
+
+const agentSendView = createToolView<Record<string, unknown>, Record<string, unknown>>({
+	name: "agent_send",
+	title: (ctx) =>
+		String(
+			(ctx.result?.data as { to?: string } | undefined)?.to ?? (ctx.args as { to?: unknown } | undefined)?.to ?? "",
+		).slice(0, 60),
+	tail: (ctx) => {
+		if (ctx.status === "error") return "failed";
+		if (ctx.status === "processing") return "sending\u2026";
+		return "delivered";
 	},
 	body: { text: (ctx) => (ctx.result?.data as { message?: string } | undefined)?.message ?? "" },
 });
@@ -173,8 +179,8 @@ function renderLines(component: unknown, width = 100): string[] {
 }
 
 /**
- * Simulate pi's framework tool shell (tool-execution.js): for renderShell
- * "default" tools (Agent/AgentControl are default), the framework wraps both
+ * Simulate pi's framework tool shell (tool-execution.js):
+ * for renderShell "default" tools (agent_spawn/agent_stop/agent_send are default), the framework wraps both
  * the call renderer (header) and the result renderer in one Box(1,1) whose
  * background follows state (pending while running, success/error on
  * completion) — covering the header AND the body.
@@ -287,8 +293,8 @@ type StreamCard =
 	  }
 	| {
 			kind: "control";
-			args: { agent_id: string; action: string; message?: string };
-			details: { action: string; title?: string; message?: string; error?: string; status?: string };
+			args: { agent_id?: string; to?: string; message?: string };
+			details: { to?: string; message?: string; title?: string; error?: string; status?: string };
 			isPartial: boolean;
 			isError?: boolean;
 			expanded?: boolean;
@@ -302,6 +308,7 @@ type StreamCard =
 				model?: string;
 				thinking?: string;
 				result?: string;
+				idle?: boolean;
 				usage?: { durationMs?: number; tokens?: number; toolUses?: number };
 				sessionPath?: string;
 				sessionId?: string;
@@ -315,6 +322,8 @@ interface WidgetAgent {
 	/** Offset (ms) behind the round start — elapsed grows from here. */
 	startedOffset?: number;
 	activity?: AgentActivity;
+	/** Persistent agent completed → idle row (muted, zero-token wait). */
+	idle?: boolean;
 	/** This phase the agent leaves the widget — `result` feeds the progress meta. */
 	removed?: WidgetResult;
 }
@@ -381,13 +390,15 @@ function renderPathCard(card: StreamCard, w: number): string[] {
 						],
 						w,
 					);
-		case "control":
+		case "control": {
+			// agent_stop (agent_id) vs agent_send (to) — same shell, different view.
+			const isSend = "to" in (card.args as { to?: string });
 			return card.isPartial
 				? toolShell(
 						"toolPendingBg",
 						[
-							agentControlView.renderCall(card.args as never, theme, pendingContext(card.args)),
-							agentControlView.renderResult(
+							(isSend ? agentSendView : agentStopView).renderCall(card.args as never, theme, pendingContext(card.args)),
+							(isSend ? agentSendView : agentStopView).renderResult(
 								{ content: [], details: card.details } as never,
 								{ expanded: false, isPartial: true },
 								theme,
@@ -399,8 +410,12 @@ function renderPathCard(card: StreamCard, w: number): string[] {
 				: toolShell(
 						card.isError ? "toolErrorBg" : "toolSuccessBg",
 						[
-							agentControlView.renderCall(card.args as never, theme, doneContext(card.args, card.isError)),
-							agentControlView.renderResult(
+							(isSend ? agentSendView : agentStopView).renderCall(
+								card.args as never,
+								theme,
+								doneContext(card.args, card.isError),
+							),
+							(isSend ? agentSendView : agentStopView).renderResult(
 								{ content: [], details: card.details } as never,
 								{ expanded: card.expanded ?? false, isPartial: false },
 								theme,
@@ -409,6 +424,7 @@ function renderPathCard(card: StreamCard, w: number): string[] {
 						],
 						w,
 					);
+		}
 		case "notification":
 			return renderLines(renderNotification({ details: card.details }, { expanded: false }, theme), w);
 	}
@@ -448,12 +464,12 @@ const widgetUi = {
 	},
 } as never;
 const widget = new AgentWidget(widgetUi as never);
-const fakeAgent = (agentId: string, title: string, startedAt: number, activity: unknown) =>
+const fakeAgent = (agentId: string, title: string, startedAt: number, activity: unknown, idle = false) =>
 	({
 		agentId,
 		title,
 		startedAt,
-		status: "running",
+		status: idle ? "idle" : "running",
 		getLatestActivity: () => activity,
 	}) as unknown as AgentProcess;
 const widgetState = new Map<string, { startedAt: number }>();
@@ -474,11 +490,17 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 		}
 	}
 	for (const a of agents ?? []) {
-		if (a.removed || widgetState.has(a.id) || a.title == null) continue;
+		if (a.removed) continue;
+		if (widgetState.has(a.id)) {
+			// Status flips for persistent agents (idle ⇄ running on wake/stop).
+			widget.setStatus(a.id, a.idle ? "idle" : "running");
+			continue;
+		}
+		if (a.title == null) continue;
 		// startedAt per round: elapsed grows from the agent's own start.
 		const started = Date.now() - (a.startedOffset ?? 0);
 		widgetState.set(a.id, { startedAt: started });
-		widget.add(fakeAgent(a.id, a.title, started, a.activity));
+		widget.add(fakeAgent(a.id, a.title, started, a.activity, a.idle));
 	}
 }
 
@@ -487,10 +509,10 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 const p = params;
 const bgArgs: AgentParams = { ...p, run_in_background: true };
 
-// Path A — background: three concurrent agents spawn, work, get steered,
+// Path A — background: three concurrent agents spawn, work, get messaged,
 // stopped, and complete; the widget tracks them at the bottom.
 const pathA: LifecyclePath = {
-	title: "A · background agents — 3 spawn → working → steer → stop → notify (widget pinned at bottom)",
+	title: "A · background agents — 3 spawn → working → message → stop → notify (widget pinned at bottom)",
 	phases: [
 		{
 			name: "spawn a1",
@@ -614,7 +636,7 @@ const pathA: LifecyclePath = {
 			status: "working",
 		},
 		{
-			name: "steer a2",
+			name: "send a2",
 			ticks: 20,
 			stream: [
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
@@ -632,8 +654,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
-					details: { action: "steer", title: "慢查询排查" },
+					args: { to: "a2", message: "优先看 orders 表索引" },
+					details: { to: "a2", title: "慢查询排查" },
 					isPartial: true,
 				},
 			],
@@ -642,10 +664,10 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
-			status: "steer",
+			status: "send",
 		},
 		{
-			name: "steered",
+			name: "sent",
 			ticks: 19,
 			stream: [
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
@@ -663,9 +685,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					args: { to: "a2", message: "优先看 orders 表索引" },
 					details: {
-						action: "steer",
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
@@ -677,7 +698,7 @@ const pathA: LifecyclePath = {
 				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
-			status: "steer",
+			status: "send",
 		},
 		{
 			name: "stop a3",
@@ -698,9 +719,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					args: { to: "a2", message: "优先看 orders 表索引" },
 					details: {
-						action: "steer",
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
@@ -708,8 +728,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3", action: "stop" },
-					details: { action: "stop", title: "审计 reports 表" },
+					args: { agent_id: "a3" },
+					details: { title: "审计 reports 表" },
 					isPartial: true,
 				},
 			],
@@ -739,9 +759,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					args: { to: "a2", message: "优先看 orders 表索引" },
 					details: {
-						action: "steer",
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
@@ -749,8 +768,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3", action: "stop" },
-					details: { action: "stop", title: "审计 reports 表" },
+					args: { agent_id: "a3" },
+					details: { title: "审计 reports 表" },
 					isPartial: false,
 				},
 			],
@@ -780,9 +799,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					args: { to: "a2", message: "优先看 orders 表索引" },
 					details: {
-						action: "steer",
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
@@ -790,8 +808,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3", action: "stop" },
-					details: { action: "stop", title: "审计 reports 表" },
+					args: { agent_id: "a3" },
+					details: { title: "审计 reports 表" },
 					isPartial: false,
 				},
 				{
@@ -834,9 +852,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a2", action: "steer", message: "优先看 orders 表索引" },
+					args: { to: "a2", message: "优先看 orders 表索引" },
 					details: {
-						action: "steer",
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
@@ -844,8 +861,8 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3", action: "stop" },
-					details: { action: "stop", title: "审计 reports 表" },
+					args: { agent_id: "a3" },
+					details: { title: "审计 reports 表" },
 					isPartial: false,
 				},
 				{
@@ -1042,7 +1059,123 @@ const pathD: LifecyclePath = {
 	height: 0,
 };
 
-const sections: LifecyclePath[] = [pathA, pathB, pathC, pathD];
+// Path E — persistent agent: spawns background, completes to idle (widget row
+// stays, notification carries the idle marker), wakes on a message, stopped.
+const pathE: LifecyclePath = {
+	title: "E · persistent agent — spawn → idle (resident) → message wakes → stopped",
+	phases: [
+		{
+			name: "starting",
+			ticks: 20,
+			stream: [{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: true }],
+		},
+		{
+			name: "started",
+			status: "working",
+			ticks: 20,
+			stream: [
+				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "notification",
+					details: {
+						status: "completed",
+						agent_id: "a1",
+						title: "检查 CI 配置",
+						result: "Found 5 issues, all flaky tests traced to shared setup.",
+						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
+						idle: true,
+					},
+				},
+			],
+			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, idle: true }],
+		},
+		{
+			name: "message wakes",
+			ticks: 20,
+			stream: [
+				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "notification",
+					details: {
+						status: "completed",
+						agent_id: "a1",
+						title: "检查 CI 配置",
+						result: "Found 5 issues, all flaky tests traced to shared setup.",
+						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
+						idle: true,
+					},
+				},
+				{
+					kind: "control",
+					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					isPartial: true,
+				},
+			],
+			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+		},
+		{
+			name: "delivered",
+			status: "send",
+			ticks: 19,
+			stream: [
+				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "notification",
+					details: {
+						status: "completed",
+						agent_id: "a1",
+						title: "检查 CI 配置",
+						result: "Found 5 issues, all flaky tests traced to shared setup.",
+						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
+						idle: true,
+					},
+				},
+				{
+					kind: "control",
+					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "a1", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					isPartial: false,
+				},
+			],
+			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+		},
+		{
+			name: "stop",
+			ticks: 20,
+			stream: [
+				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "control",
+					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "a1", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					isPartial: false,
+				},
+				{ kind: "control", args: { agent_id: "a1" }, details: { title: "检查 CI 配置" }, isPartial: true },
+			],
+			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+		},
+		{
+			name: "stopped",
+			status: "stop",
+			ticks: 19,
+			stream: [
+				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{
+					kind: "control",
+					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "a1", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					isPartial: false,
+				},
+				{ kind: "control", args: { agent_id: "a1" }, details: { title: "检查 CI 配置" }, isPartial: false },
+			],
+		},
+	],
+	pauseTicks: 30,
+	height: 0,
+};
+
+const sections: LifecyclePath[] = [pathA, pathB, pathC, pathD, pathE];
 
 // ── Live loop ────────────────────────────────────────────────
 

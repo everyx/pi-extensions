@@ -32,7 +32,14 @@ export class AgentWidget {
 			id: agent.agentId,
 			title: agent.title,
 			startedAt: agent.startedAt,
-			status: agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done",
+			status:
+				agent.status === "running"
+					? "running"
+					: (agent as { status: string }).status === "idle"
+						? "idle"
+						: agent.status === "stopped"
+							? "stopped"
+							: "done",
 			rows: activityToRows(agent.getLatestActivity() ?? undefined),
 		});
 	}
