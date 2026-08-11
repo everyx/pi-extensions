@@ -12,6 +12,7 @@
  */
 
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { clipTail } from "@everyx/pi-ui/spinner.js";
 import type { WidgetResult, WidgetRow, WidgetStatus } from "@everyx/pi-ui/widget.js";
 import { StatusWidget } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
@@ -33,7 +34,7 @@ export class AgentWidget {
 			title: agent.title,
 			startedAt: agent.startedAt,
 			status: agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done",
-			rows: activityToRows(agent.getLatestActivity() ?? undefined),
+			rows: activityToRows(agent.getLatestActivity()),
 		});
 	}
 
@@ -58,10 +59,12 @@ export class AgentWidget {
 	}
 }
 
-/** Map the latest activity to structured widget rows (data, not formatted). */
+/** Map the latest activity to structured widget rows (data, not formatted).
+ *  The widget row is an *excerpt*: long streamed text is clipped to a tail
+ *  so the excerpt stays bounded however long the agent runs. */
 function activityToRows(activity: AgentActivity | undefined): WidgetRow[] {
 	if (!activity) return [];
 	if (activity.kind === "thinking") return [{ style: "thinking", content: "Thinking..." }];
 	if (activity.kind === "tool") return [{ style: "tool", content: `${activity.name}: ${activity.args}` }];
-	return [{ style: "text", content: activity.text }];
+	return [{ style: "text", content: clipTail(activity.text, 80) }];
 }

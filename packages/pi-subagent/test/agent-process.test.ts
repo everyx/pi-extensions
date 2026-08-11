@@ -405,9 +405,9 @@ describe("AgentProcess — latest activity", () => {
 		assert.deepEqual(agent.getLatestActivity(), { kind: "tool", name: "custom_tool", args: '{"foo":1}' });
 	});
 
-	it("returns null before any message_update", async () => {
+	it("returns undefined before any message_update", async () => {
 		const { agent } = makeAgent({ cwd: "/tmp" });
-		assert.equal(agent.getLatestActivity(), null);
+		assert.equal(agent.getLatestActivity(), undefined);
 	});
 
 	it("fires onActivityChange for thinking and tool transitions", async () => {
