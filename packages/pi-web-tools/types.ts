@@ -67,5 +67,7 @@ export interface ChannelSearchContext {
 export interface WebFetchResult {
 	title: string;
 	markdown: string;
+	/** /tmp path of the full text when markdown was truncated; the LLM can read it. */
+	outputPath?: string;
 	error?: string;
 }

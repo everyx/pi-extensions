@@ -268,7 +268,11 @@ async function executeFetch(
 			isError: true,
 		};
 	}
-	const text = result.title ? `${result.title}\n\n${result.markdown}` : result.markdown;
+	let text = result.title ? `${result.title}\n\n${result.markdown}` : result.markdown;
+	// Truncated content: inline marker with the full-output path (one field,
+	// self-describing) — the LLM reads the preview and knows the rest is a
+	// read away.
+	if (result.outputPath) text += `\n\n(output truncated — full output: ${result.outputPath})`;
 	return {
 		content: [{ type: "text", text }],
 		details: { data: { title: result.title, markdown: result.markdown, startedAt, endedAt: Date.now() } },
@@ -293,11 +297,10 @@ export default function (pi: ExtensionAPI) {
 		label: "Search the Web",
 		description:
 			"Search the web and return a list of results (title, url, snippet). " +
-			"Use for anything outside your local machine: current facts, docs, code, people, prices. " +
-			"Each result carries the source text; re-query with a different query when you need more or different results. " +
-			"Set engine to google/bing/baidu/yandex to search with that real browser engine and use " +
-			'its native operator syntax (site:, filetype:, intitle:, -exclude, "exact", OR). ' +
-			"allowed_domains/blocked_domains work on every channel.",
+			"Each result carries the source text. engine: auto picks the best engine; " +
+			"google/bing/baidu/yandex search with that engine and enable its native operator " +
+			'syntax (site:, filetype:, intitle:, -exclude, "exact", OR). ' +
+			"allowed_domains/blocked_domains work for every engine.",
 		promptSnippet: "Search the web",
 		promptGuidelines: [
 			"Use web_search for anything that requires current or external information.",
