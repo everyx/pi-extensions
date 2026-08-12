@@ -65,8 +65,8 @@ export interface AgentProcessOptions {
 	onActivityChange?: (activity: AgentActivity) => void;
 	/** In-tree message received from this child (extension_ui_request under the reserved key). */
 	onMessage?: (message: AgentMessage) => void;
-	/** A woken persistent agent settled back to idle (widget row flip). */
-	onIdle?: () => void;
+	/** A woken persistent agent settled: "completed" → idle, "failed" → report + clean up. */
+	onIdle?: (outcome: "completed" | "failed") => void;
 	/** Resident after completion (idle, zero token) — explicit opt-in, default off. */
 	persistent?: boolean;
 	/** Extra child environment (identity injection: PI_SUBAGENT_AGENT_ID / PI_SUBAGENT_PARENT). */
@@ -345,7 +345,7 @@ export class AgentProcess {
 	private readonly onDelta: ((delta: string) => void) | undefined;
 	private readonly onActivityChange: ((activity: AgentActivity) => void) | undefined;
 	private readonly onMessage: ((message: AgentMessage) => void) | undefined;
-	private readonly onIdle: (() => void) | undefined;
+	private readonly onIdle: ((outcome: "completed" | "failed") => void) | undefined;
 
 	private onEvent(event: RpcEvent): void {
 		// Raw protocol shapes are interpreted in event-interpret.ts — the only
@@ -358,11 +358,12 @@ export class AgentProcess {
 			switch (ev.type) {
 				case "settled":
 					this.settle();
-					// Persistent agent woke by sendMessage finished its turn —
-					// back to idle (completed) so the widget shows it as such.
+					// Persistent agent woke by sendMessage finished its follow-up
+					// turn — completed goes back to idle; a model error is reported
+					// honestly (never disguised as idle).
 					if (this.done && this.persistent && this.status === "running") {
-						this.status = "completed";
-						this.onIdle?.();
+						this.status = this.agentError ? "failed" : "completed";
+						this.onIdle?.(this.agentError ? "failed" : "completed");
 					}
 					break;
 				case "thinking":
