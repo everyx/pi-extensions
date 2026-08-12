@@ -438,7 +438,7 @@ const pathA: LifecyclePath = {
 			name: "a1 started",
 			ticks: 19,
 			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false }],
-			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 			status: "working",
 		},
 		{
@@ -453,7 +453,7 @@ const pathA: LifecyclePath = {
 					isPartial: true,
 				},
 			],
-			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 			status: "spawn",
 		},
 		{
@@ -469,8 +469,8 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
 			status: "working",
 		},
@@ -493,8 +493,8 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
 			status: "spawn",
 		},
@@ -517,9 +517,9 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "working",
 		},
@@ -542,9 +542,9 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "working",
 		},
@@ -567,15 +567,15 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a2", message: "优先看 orders 表索引" },
-					details: { to: "a2", title: "慢查询排查" },
+					args: { to: "zoe", message: "优先看 orders 表索引" },
+					details: { to: "zoe", title: "慢查询排查" },
 					isPartial: true,
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "send",
 		},
@@ -598,7 +598,7 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a2", message: "优先看 orders 表索引" },
+					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
@@ -607,9 +607,9 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "send",
 		},
@@ -632,7 +632,7 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a2", message: "优先看 orders 表索引" },
+					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
@@ -641,15 +641,15 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3" },
+					args: { agent_id: "kai" },
 					details: { title: "审计 reports 表" },
 					isPartial: true,
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "a3", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "stop",
 		},
@@ -672,7 +672,7 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a2", message: "优先看 orders 表索引" },
+					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
@@ -681,15 +681,15 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3" },
+					args: { agent_id: "kai" },
 					details: { title: "审计 reports 表" },
 					isPartial: false,
 				},
 			],
 			widget: [
-				{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "a3", removed: "stopped" },
+				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", removed: "stopped" },
 			],
 			status: "stop",
 		},
@@ -712,7 +712,7 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a2", message: "优先看 orders 表索引" },
+					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
@@ -721,7 +721,7 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3" },
+					args: { agent_id: "kai" },
 					details: { title: "审计 reports 表" },
 					isPartial: false,
 				},
@@ -729,7 +729,7 @@ const pathA: LifecyclePath = {
 					kind: "notification",
 					details: {
 						status: "completed",
-						agent_id: "a1",
+						agent_id: "max",
 						title: "检查 CI 配置",
 						model: p.model,
 						thinking: p.thinking,
@@ -741,8 +741,8 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [
-				{ id: "a2", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "a1", removed: "done" },
+				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "max", removed: "done" },
 			],
 			status: "notify",
 		},
@@ -765,7 +765,7 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a2", message: "优先看 orders 表索引" },
+					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
 						title: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
@@ -774,7 +774,7 @@ const pathA: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { agent_id: "a3" },
+					args: { agent_id: "kai" },
 					details: { title: "审计 reports 表" },
 					isPartial: false,
 				},
@@ -782,7 +782,7 @@ const pathA: LifecyclePath = {
 					kind: "notification",
 					details: {
 						status: "completed",
-						agent_id: "a1",
+						agent_id: "max",
 						title: "检查 CI 配置",
 						model: p.model,
 						thinking: p.thinking,
@@ -796,7 +796,7 @@ const pathA: LifecyclePath = {
 					kind: "notification",
 					details: {
 						status: "completed",
-						agent_id: "a2",
+						agent_id: "zoe",
 						title: "慢查询排查",
 						model: p.model,
 						thinking: p.thinking,
@@ -807,7 +807,7 @@ const pathA: LifecyclePath = {
 					},
 				},
 			],
-			widget: [{ id: "a2", removed: "done" }],
+			widget: [{ id: "zoe", removed: "done" }],
 			status: "notify",
 		},
 	],
@@ -916,7 +916,7 @@ const pathC: LifecyclePath = {
 					kind: "notification",
 					details: {
 						status: "failed",
-						agent_id: "a1",
+						agent_id: "max",
 						title: params.title,
 						model: p.model,
 						thinking: p.thinking,
@@ -992,7 +992,7 @@ const pathE: LifecyclePath = {
 					kind: "notification",
 					details: {
 						status: "completed",
-						agent_id: "a1",
+						agent_id: "max",
 						title: "检查 CI 配置",
 						result: "Found 5 issues, all flaky tests traced to shared setup.",
 						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
@@ -1000,7 +1000,7 @@ const pathE: LifecyclePath = {
 					},
 				},
 			],
-			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, idle: true }],
+			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, idle: true }],
 		},
 		{
 			name: "message wakes",
@@ -1011,7 +1011,7 @@ const pathE: LifecyclePath = {
 					kind: "notification",
 					details: {
 						status: "completed",
-						agent_id: "a1",
+						agent_id: "max",
 						title: "检查 CI 配置",
 						result: "Found 5 issues, all flaky tests traced to shared setup.",
 						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
@@ -1020,12 +1020,12 @@ const pathE: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
-					details: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
 					isPartial: true,
 				},
 			],
-			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 		},
 		{
 			name: "delivered",
@@ -1037,7 +1037,7 @@ const pathE: LifecyclePath = {
 					kind: "notification",
 					details: {
 						status: "completed",
-						agent_id: "a1",
+						agent_id: "max",
 						title: "检查 CI 配置",
 						result: "Found 5 issues, all flaky tests traced to shared setup.",
 						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
@@ -1046,12 +1046,12 @@ const pathE: LifecyclePath = {
 				},
 				{
 					kind: "control",
-					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
-					details: { to: "a1", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "max", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
 					isPartial: false,
 				},
 			],
-			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 		},
 		{
 			name: "stop",
@@ -1060,13 +1060,13 @@ const pathE: LifecyclePath = {
 				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "control",
-					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
-					details: { to: "a1", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "max", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
 					isPartial: false,
 				},
-				{ kind: "control", args: { agent_id: "a1" }, details: { title: "检查 CI 配置" }, isPartial: true },
+				{ kind: "control", args: { agent_id: "max" }, details: { title: "检查 CI 配置" }, isPartial: true },
 			],
-			widget: [{ id: "a1", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 		},
 		{
 			name: "stopped",
@@ -1076,11 +1076,11 @@ const pathE: LifecyclePath = {
 				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "control",
-					args: { to: "a1", message: "继续：给 5 个问题各写一个修复 PR 描述" },
-					details: { to: "a1", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "max", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
 					isPartial: false,
 				},
-				{ kind: "control", args: { agent_id: "a1" }, details: { title: "检查 CI 配置" }, isPartial: false },
+				{ kind: "control", args: { agent_id: "max" }, details: { title: "检查 CI 配置" }, isPartial: false },
 			],
 		},
 	],

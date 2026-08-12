@@ -126,7 +126,7 @@ The directory lives **outside** pi's standard session tree so `pi -r` (resume) s
 
 | Param | Meaning |
 |---|---|
-| `to` | **required** — a tree path id (`"a2"`, or `"a1/a1"` for a grandchild), or `"@parent"` to message your parent session. |
+| `to` | **required** — the agent id agent_spawn gave you (a short human name like `max`), or `"@parent"` to message the session that spawned you. |
 | `message` | **required** — the message text; delivered after the target's current turn settles, or wakes an idle persistent agent. |
 
 Messages travel the parent↔child edges of the agent tree: a direct child is delivered straight down, `@parent` goes up, and cross‑level/sibling messages are forwarded through the parent LLM's context along the way.
@@ -168,7 +168,7 @@ Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
 
 A child is a full pi instance — so if you installed this extension globally, it spawns children of its own. Each level is its own process with its own context; depth multiplies startup time and token cost. You — or the model — judge when it's worth it.
 
-The tree is the address space: every child gets a tree path id (`a2`, `a1/a1`…), and `agent_send` routes along parent↔child edges. A child can also message back up with `"@parent"` — e.g. to ask a blocking question when it hits a missing decision — and the parent's reply continues its context. Cross‑level and sibling messages are forwarded through the parent LLM's context along the way; that's the tree's coordination cost.
+The mechanism is a pure point-to-point deliverer: `agent_send` delivers to a direct child by its id (a short human name like `max`), or to `"@parent"` — and errors on anything else. Routing is the LLM's job: each agent addresses only the ids it was given, hop by hop (a grandchild reaching the root goes through its parent's LLM deciding to forward with `@parent`). Information disclosure is the only limit — a parent holds the ids of the agents it spawned; nobody knows ids they were never told.
 
 ## Costs & caveats
 

@@ -19,7 +19,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 - **`agent_spawn`** — 创建隔离的子 agent（前台阻塞 / 后台异步；可选 `persistent` 常驻）。
 - **`agent_stop`** — 销毁运行中的子 agent（常驻与否都适用）。
-- **`agent_send`** — 实体间消息通信（父→子、子→父双向；树路径 / `@parent` 寻址）。
+- **`agent_send`** — 实体间点对点消息投递（直接子 / `@parent`；路由由 LLM 自行完成）。
 
 每个子 agent 是一个常驻 `pi --mode rpc` 子进程，拥有独立上下文与持久化会话。
 
@@ -83,7 +83,7 @@ session: /path/...jsonl
   agent not found
 ```
 
-- agent_send 的 `to` 可寻址子 agent（树路径 / 简短 id）或 `@parent`（父会话）
+- agent_send 的 `to` = 子 agent 的短人名 id（spawn/通知给到的）或 `@parent`（父会话）
 - 注入的消息以普通文本显示在卡片内，完整多行，超 5 行按统一折叠规则处理
 - 动画帧在同一行内切换，绝不追加新行
 - 错误保持同一形态：状态行 error 色 + dim 原因行
@@ -106,15 +106,15 @@ session: /path/...jsonl
 ### Agents 状态 widget（aboveEditor）
 
 ```
-  ● Agents 1/3
+  ● Agents (done 1/3 · 2 running · 1 idle)
   ⠋ 检查 CI 配置 (42.0s)
   ‖ 检查 CI 配置
 ```
 
 - 仅跟踪后台 agent 与 persistent 前台 agent（前台非 persistent 已 inline 流式，不重复；persistent 前台完成后驻留 idle，进 widget 保持可寻址）
 - 非 persistent 完成/停止立即移除——完成结果由通知卡承担；**persistent 完成后保留 idle 行**（可寻址性可见，‖ 标记，不参与进度计数，可被 agent_stop 移除）
-- 标题后显示生命周期进度 `已结束/累计`（如 `1/3`）；含失败/停止时为 `(1+2)/3`
-  （成功+异常，异常数 error 色）——行空 widget 消失，计数随下次任务批重置
+- 标题行 meta（外层括号 + `·` 分隔，对齐 card header）：`done n/total` 进度 + 实时分段（`n running` / `n idle`）+ 异常计数（`n failed` error 色 / `n stopped`）——行空 widget 消失，计数随下次任务批重置
+- **蜂群降级**：行数超上限（8）时自动切换——running（活跃）与 failed（异常）行优先，其余折叠为计数行 `… +N more (n running · n idle · n failed)`（对齐 Kimi swarm 两档思路）
 - 每行下方追加最新活动摘录（缩进 4 空格，实时更新）：工具调用、Thinking...、或最新正文尾部
 
 ## 实现决策
@@ -127,7 +127,7 @@ protocol.ts        — 纯函数 JSONL 协议层
 rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + 事件流 + 退出）
 event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数）
 agent-process.ts   — AgentProcess：一个常驻 rpc 子进程的语义封装
-registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 树状消息路由 + 完成策略
+registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 点对点投递 + 完成策略
 model.ts           — model spec → resolved model（纯函数）
 types.ts           — 共享协议类型（RenderEvent / SubagentDetails / NotificationDetails）
 format.ts          — 纯函数格式化工具（SPINNER / formatDuration / safeTitle / activityRow 等）
@@ -162,19 +162,12 @@ queued → running ──→ completed（通知）
 - **失败与超限都返回 isError 工具结果**，与 bash 的 `exit N` / `(cancelled)` 对齐
 - **扩展 reload 不留孤儿**：reload 时 pi 在旧扩展 runner 上派发 `session_shutdown(reason="reload")`（旧 handler 仍在活跃状态），扩展统一调 `registry.shutdown()` 优雅停掉本实例的子代理（stdin EOF）；宿主崩溃时子代理经 stdin EOF 自动退出。所有清理都绑定在**各自进程**的事件上，无跨进程共享状态，多 pi 实例互不干扰
 
-### 消息模型（树状，只允许父子边）
+### 消息模型（点对点投递，路由归 LLM）
 
-```
-主会话 (root)
-├── a1 ────── registry 持有直接子
-│   └── a1/a1（孙）
-└── a2
-```
-
-- **寻址**：树路径 id（spawn 时父传路径前缀，`a1` 的孩子 `a1/a1`）+ `@parent`（最近的父 LLM）；无目录、无全局注册表、无跨进程共享状态
-- **路由（每跳 O(1)，纯函数）**：消息目标是直接子 → 下投（rpc）；否则 → 上抛给父；root 仍找不到 → 报错回源
-- **中转经父 LLM 上下文**：跨层/兄弟消息必然进入途经父 LLM 的会话（通道即会话）——这是树状协调的固有 token 代价，KISS 接受；promptGuidelines 正向引导，不罗列不推荐场景
-- **发现机制很薄**：子知道谁 = 父 spawn prompt 告知 + 消息 from 字段（文本 `[from a1]` 前缀，rpc 投递只传字符串，文本级标注最省）
+- **id**：短人名（`max` / `zoe` / `kai`…，~200 池随机 + 进程内查重）——**无树结构**——对 LLM 只是"系统给的引用"（信息披露是唯一限制：父持有 spawn 的子 id、子知道 `@parent`）
+- **机制 = 纯投递器**：`agent_send(to)` 只投"直接子精确 id"或 `@parent`——**不认识的目标显式报错**——无自动转发、无机制层寻路
+- **路由 = LLM**：跨层/兄弟协调由每层 LLM 逐跳发起（它只寻址自己知道的 id；孙→祖 = 每跳 `@parent` 转发）——机制不做任何中间决策
+- **发现机制很薄**：子知道谁 = 父 spawn prompt 告知 + 消息 from 字段（文本 `[from max]` 前缀，rpc 投递只传字符串，文本级标注最省）
 
 ### 通道（零新端点，全复用现有基础设施）
 
@@ -188,7 +181,7 @@ queued → running ──→ completed（通知）
 - **零 socket、零文件写入、零轮询**——纯内存事件流
 - 注入语义（已实证）：父 streaming（工具 execute 挂起/LLM 跑）→ 消息排队不抢占；父空闲 → 立即起新 turn 唤醒
 - 事件天然带身份：每个 AgentProcess 持有自己的 RpcClient 连自己的子进程——收到 extension_ui_request 的 client 即消息来源，无需 id 字段
-- 身份注入：spawn 时环境变量 `PI_SUBAGENT_AGENT_ID`（树路径）、`PI_SUBAGENT_PARENT`（父身份）；子进程扩展检测到才注册 agent_send 工具与 UI 上报
+- 身份注入：spawn 时环境变量 `PI_SUBAGENT_AGENT_ID`（本 agent 人名 id）、`PI_SUBAGENT_PARENT`（父身份）；子进程扩展检测到才注册 agent_send 工具与 UI 上报
 
 ### 基石验证（2026-08-10 实证）
 
@@ -222,7 +215,7 @@ queued → running ──→ completed（通知）
 
 ### 嵌套
 
-子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。子进程扩展经环境变量获得自身身份（`PI_SUBAGENT_AGENT_ID` / `PI_SUBAGENT_PARENT`）——孙 agent 的树路径由父 spawn 时传入。
+子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。子进程扩展经环境变量获得自身身份（`PI_SUBAGENT_AGENT_ID` / `PI_SUBAGENT_PARENT`）——孙 agent 由子进程自身 registry 分配人名 id。
 
 ### 上游限制：isError 被丢弃（workaround）
 

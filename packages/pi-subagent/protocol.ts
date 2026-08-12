@@ -91,28 +91,26 @@ export interface AgentMessage {
 export type RouteDecision =
 	| { kind: "parent"; message: AgentMessage }
 	| { kind: "child"; childId: string; message: AgentMessage }
-	| { kind: "uplink"; message: AgentMessage }
 	| { kind: "error"; reason: string };
 
 /**
- * Route one message against the local view: my direct children (the only
- * reachable agents) and whether I have a parent. Pure — per-hop O(1),
- * no global registry, no shared state.
+ * Route one message against the local view — the mechanism is a pure point-
+ * to-point deliverer, routing is the LLM's job: it only ever addresses agents
+ * it knows (my direct children, or "@parent"). Anything else is an explicit
+ * error — no automatic forwarding, no mechanism-level pathfinding.
  *
- *   "@parent"                → deliver to my parent's LLM (error at root)
- *   my direct child / desc.  → deliver to that child (descendants via its LLM)
- *   anything else            → uplink (my parent may know it); error at root
+ *   "@parent"  → deliver to my parent's LLM (error at root)
+ *   a direct child → deliver to that child
+ *   anything else → error (the LLM routes via known ids, hop by hop)
  */
 export function routeMessage(message: AgentMessage, childIds: readonly string[], hasParent: boolean): RouteDecision {
 	if (message.to === "@parent") {
 		return hasParent ? { kind: "parent", message } : { kind: "error", reason: "root session has no parent" };
 	}
-	for (const child of childIds) {
-		if (message.to === child || message.to.startsWith(`${child}/`)) {
-			return { kind: "child", childId: child, message };
-		}
+	if (childIds.includes(message.to)) {
+		return { kind: "child", childId: message.to, message };
 	}
-	return hasParent ? { kind: "uplink", message } : { kind: "error", reason: `no such agent: ${message.to}` };
+	return { kind: "error", reason: `no such agent: ${message.to}` };
 }
 
 /** LLM-visible sender prefix: "[from a1] " (root session: ""). */

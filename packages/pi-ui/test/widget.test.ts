@@ -32,7 +32,7 @@ const theme = {
 const item = (id: string): WidgetItem => ({ id, title: `t${id}`, startedAt: 0, status: "running" });
 
 describe("StatusWidget progress meta", () => {
-	it("renders done/total while items run (0/2)", () => {
+	it("renders progress + live segments while items run (done 0/2 · 2 running)", () => {
 		const ui = { setWidget: () => {} } as never;
 		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
 		const lines = capture(ui);
@@ -40,7 +40,7 @@ describe("StatusWidget progress meta", () => {
 		w.add(item("b"));
 		const title = lines().find((l) => l.includes("Agents"));
 		assert.ok(title);
-		assert.match(title, /muted:0\/2/);
+		assert.match(title, /muted:\(done 0\/2 · 2 running\)/);
 		w.dispose();
 	});
 
@@ -53,7 +53,7 @@ describe("StatusWidget progress meta", () => {
 		w.remove("a", "done");
 		const title = lines().find((l) => l.includes("Agents"));
 		assert.ok(title);
-		assert.match(title, /muted:1\/2/);
+		assert.match(title, /muted:\(done 1\/2 · 1 running\)/);
 		w.dispose();
 	});
 
@@ -68,7 +68,7 @@ describe("StatusWidget progress meta", () => {
 		w.remove("b", "stopped");
 		const title = lines().find((l) => l.includes("Agents"));
 		assert.ok(title);
-		assert.match(title, /muted:\(1\+error:1\)\/3/);
+		assert.match(title, /muted:\(done 1\/3 · 1 running · 1 stopped\)/);
 		w.dispose();
 	});
 
@@ -83,7 +83,7 @@ describe("StatusWidget progress meta", () => {
 		w.remove("b", "stopped");
 		const title = lines().find((l) => l.includes("Agents"));
 		assert.ok(title);
-		assert.match(title, /muted:\(0\+error:2\)\/3/);
+		assert.match(title, /muted:\(done 0\/3 · 1 running · error:1 failed · 1 stopped\)/);
 		w.dispose();
 	});
 
@@ -96,7 +96,7 @@ describe("StatusWidget progress meta", () => {
 		w.remove("a");
 		const title = lines().find((l) => l.includes("Agents"));
 		assert.ok(title);
-		assert.match(title, /muted:0\/2/);
+		assert.match(title, /muted:\(done 0\/2 · 1 running\)/);
 		w.dispose();
 	});
 
@@ -113,7 +113,37 @@ describe("StatusWidget progress meta", () => {
 		w.add(item("b")); // next batch starts a fresh lifetime
 		const title = lines().find((l) => l.includes("Agents"));
 		assert.ok(title);
-		assert.match(title, /muted:0\/1/);
+		assert.match(title, /muted:\(done 0\/1 · 1 running\)/);
+		w.dispose();
+	});
+
+	it("swarm mode: collapses rows past maxLines into a folded counter (live first)", () => {
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents", 2);
+		const lines = capture(ui);
+		w.add({ id: "a", title: "ta", startedAt: 0, status: "idle" });
+		w.add({ id: "b", title: "tb", startedAt: 0, status: "running" });
+		w.add({ id: "c", title: "tc", startedAt: 0, status: "idle" });
+		w.add({ id: "d", title: "td", startedAt: 0, status: "running" });
+		const out = lines();
+		// running rows shown first (b, d), idle folded into the counter line.
+		assert.ok(
+			out.some((l) => l.includes("tb")),
+			"running row shown",
+		);
+		assert.ok(
+			out.some((l) => l.includes("td")),
+			"running row shown",
+		);
+		assert.ok(!out.some((l) => l.includes("ta")), "idle row folded");
+		assert.ok(
+			out.some((l) => l.includes("+2 more")),
+			"fold counter",
+		);
+		assert.ok(
+			out.some((l) => l.includes("2 idle")),
+			"fold segments",
+		);
 		w.dispose();
 	});
 

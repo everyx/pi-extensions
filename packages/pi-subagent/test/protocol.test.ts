@@ -130,25 +130,22 @@ describe("routeMessage — in-tree routing (per-hop, O(1))", () => {
 		});
 	});
 
-	it("descendant path delivers via the direct child prefix", () => {
+	it("a descendant path is not routable — point-to-point only", () => {
 		const d = routeMessage(msg("a2/a2-1"), ["a2"], false);
-		assert.deepEqual(d, { kind: "child", childId: "a2", message: msg("a2/a2-1") });
+		assert.equal(d.kind, "error");
 	});
 
-	it("a child whose id is a prefix of another does not shadow (slash boundary)", () => {
-		// "a21" must not match child "a2" — only "a2/..." does.
+	it("a child whose id is a prefix of another does not shadow (no prefix matching)", () => {
 		const d = routeMessage(msg("a21"), ["a2"], false);
 		assert.equal(d.kind, "error");
 	});
 
-	it("unknown target uplinks when a parent exists", () => {
-		assert.deepEqual(routeMessage(msg("zzz"), ["a2"], true), { kind: "uplink", message: msg("zzz") });
-	});
-
-	it("unknown target errors at the root (no parent, no child)", () => {
-		const d = routeMessage(msg("zzz", ""), ["a2"], false);
+	it("unknown target errors whether or not a parent exists — routing is the LLM's job", () => {
+		const d = routeMessage(msg("zzz"), ["a2"], true);
 		assert.equal(d.kind, "error");
-		if (d.kind === "error") assert.match(d.reason, /zzz/);
+		const d2 = routeMessage(msg("zzz", ""), ["a2"], false);
+		assert.equal(d2.kind, "error");
+		if (d2.kind === "error") assert.match(d2.reason, /zzz/);
 	});
 });
 

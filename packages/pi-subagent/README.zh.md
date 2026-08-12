@@ -126,7 +126,7 @@ Pi 调用 `agent_send` 向运行中的 agent 注入重定向消息（当前 turn
 
 | 参数 | 含义 |
 |---|---|
-| `to` | **必填** — 树路径 id（`"a2"`，孙 agent 用 `"a1/a1"`），或 `"@parent"` 发给父会话。 |
+| `to` | **必填** — agent_spawn 给到的 agent id（短人名，如 `max`），或 `"@parent"` 发给 spawn 你的会话。 |
 | `message` | **必填** — 消息文本；目标当前 turn 结束后送达，idle 的 persistent agent 会被唤醒。 |
 
 消息沿树的父子边路由：直接子 agent 下投，`@parent` 上抛，跨层/兄弟消息经途经的父 LLM 上下文中转（见[嵌套 sub-agent](#嵌套-sub-agent)）。
@@ -168,7 +168,7 @@ LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使
 
 子 agent 是完整 pi 实例——全局安装本扩展后，它天然能再 spawn 子 agent。每一层都是独立进程、独立上下文；深度倍增启动时间与 token 成本。是否值得，由你（或模型）判断。
 
-树就是地址空间：每个子 agent 获得树路径 id（`a2`、`a1/a1`…），`agent_send` 沿父子边路由。子 agent 也能用 `"@parent"` 向上发消息——比如遇到缺信息/需决策的阻塞时向父会话求助——父的回复接着它的上下文继续。跨层与兄弟消息经途经的父 LLM 上下文中转，这是树状协调的固有代价。
+机制是纯点对点投递器：`agent_send` 按 id（短人名，如 `max`）投给直接子，或投给 `"@parent"`——其他目标显式报错。路由由 LLM 自行完成：每个 agent 只寻址自己被给到的 id，逐跳转发（孙联系祖 = 每层父 LLM 决定用 `@parent` 上转）。信息披露是唯一限制——父持有它 spawn 的 agent 的 id；没被告知的 id 谁也发不到。
 
 ## 成本与注意
 
