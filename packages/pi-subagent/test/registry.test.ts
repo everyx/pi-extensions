@@ -106,11 +106,14 @@ describe("AgentRegistry — tracking", () => {
 		assert.equal(registry.lookup("a1")?.agentId, "a1");
 	});
 
-	it("nextAgentId yields sequential short ids (a1, a2, …)", () => {
+	it("nextAgentId yields short human names, unique within the session", () => {
 		const { registry } = makeRegistry(null);
-		assert.equal(registry.nextAgentId(), "a1");
-		assert.equal(registry.nextAgentId(), "a2");
-		assert.equal(registry.nextAgentId(), "a3");
+		const ids = new Set([registry.nextAgentId(), registry.nextAgentId(), registry.nextAgentId()]);
+		assert.equal(ids.size, 3, "names are unique");
+		for (const id of ids) {
+			assert.ok(/^[a-z]+$/.test(id), `looks like a name: ${id}`);
+			assert.ok(id.length <= 6, `terse: ${id}`);
+		}
 	});
 
 	it("lookup returns undefined for unknown ids", () => {
@@ -254,9 +257,9 @@ describe("AgentRegistry — in-tree routing", () => {
 		assert.equal(registry.route(msg("@parent", "")).kind, "error");
 	});
 
-	it("uplinks unknown targets when a parent exists, errors at root", () => {
+	it("unknown targets error whether or not a parent exists (LLM routes, mechanism delivers)", () => {
 		const { registry: child } = makeRegistry(null, true);
-		assert.equal(child.route(msg("zzz")).kind, "uplink");
+		assert.equal(child.route(msg("zzz")).kind, "error");
 		const { registry: root } = makeRegistry(null, false);
 		assert.equal(root.route(msg("zzz", "")).kind, "error");
 	});
@@ -295,14 +298,13 @@ describe("AgentRegistry — in-tree routing", () => {
 		assert.equal(await registry.deliver("a2", "hi"), false);
 	});
 
-	it("deliver reaches a descendant via the direct-child prefix (error feedback path)", async () => {
+	it("deliver is exact — a descendant path is not routable from this hop", async () => {
 		const { registry } = makeRegistry(null);
 		const a1 = new FakeAgent("a1");
 		registry.register(a1);
-		// The root registry only holds direct children; a descendant path
-		// ("a1/a1") is delivered to the direct child, whose own layer routes on.
-		assert.equal(await registry.deliver("a1/a1", "[pi-subagent] agent_send to X failed: no such agent"), true);
-		assert.deepEqual(a1.delivered, ["[pi-subagent] agent_send to X failed: no such agent"]);
+		// Point-to-point only: the sender must address a direct child by its
+		// exact id (a descendant id is unknown here and errors).
+		assert.equal(await registry.deliver("a1/a1", "hi"), false);
 	});
 
 	it("a throwing notification still leaves the persistent agent resident (idle)", async () => {

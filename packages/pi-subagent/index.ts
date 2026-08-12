@@ -266,16 +266,15 @@ async function handleMessage(
 	const d = registry.route(msg);
 	switch (d.kind) {
 		case "child": {
-			// Deliver to a direct child (or a descendant via its prefix — the
-			// receiving LLM decides on its own whether to forward further;
-			// cross-level coordination is natural language, not a marker).
+			// Point-to-point delivery to a direct child. Cross-level coordination
+			// is the LLM's job: it addresses only ids it knows, hop by hop.
 			const text = `${formatFrom(d.message.from)}${d.message.message}`;
 			const ok = await registry.deliver(d.childId, text);
 			return ok ? { ok: true, verb: "delivered" } : { ok: false, error: `delivery to ${d.childId} failed` };
 		}
 		case "parent": {
 			if (outbound) {
-				// I am addressing my own parent — send it up; the parent's
+				// I am addressing my own parent — point-to-point up; the parent's
 				// extension injects it into its LLM session.
 				uiRef?.setStatus(MSG_STATUS_KEY, JSON.stringify(d.message));
 				return { ok: true, verb: "delivered" };
@@ -291,11 +290,6 @@ async function handleMessage(
 				{ deliverAs: "steer", triggerTurn: true },
 			);
 			return { ok: true, verb: "delivered" };
-		}
-		case "uplink": {
-			// Cannot route here — my parent may know the target; forward up.
-			uiRef?.setStatus(MSG_STATUS_KEY, JSON.stringify(d.message));
-			return { ok: true, verb: "forwarded" };
 		}
 		case "error": {
 			if (!outbound && msg.from) {
@@ -459,10 +453,9 @@ export default function (pi: ExtensionAPI) {
 				activity,
 				events: agent.getEvents(),
 			});
-			// Tree-path id: "a1" at the root session, "a1/a1" nested (the
-			// parent injects its own id as the path prefix). The registry keys
-			// by this full path so routing prefix-matches across hops.
-			const agentId = HAS_PARENT ? `${MY_AGENT_ID}/${registry.nextAgentId()}` : registry.nextAgentId();
+			// Short human-name id (max, zoe…) — the LLM-facing reference. No tree
+			// structure: agents address only ids they were given, hop by hop.
+			const agentId = registry.nextAgentId();
 			const agent = new AgentProcess({
 				agentId,
 				cwd: ctx.cwd,

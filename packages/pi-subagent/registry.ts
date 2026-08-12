@@ -22,6 +22,7 @@
 
 import type { WidgetResult } from "@everyx/pi-ui/widget.js";
 import type { AgentCompletion } from "./agent-process.js";
+import { randomAgentName } from "./name-gen.js";
 import { type AgentMessage, type RouteDecision, routeMessage } from "./protocol.js";
 
 /** Narrow agent surface the registry needs — AgentProcess satisfies it. */
@@ -62,7 +63,8 @@ export class AgentRegistry {
 	private readonly notify: AgentRegistryDeps["notify"];
 	private readonly getWidget: NonNullable<AgentRegistryDeps["getWidget"]>;
 	private readonly hasParent: boolean;
-	private idCounter = 0;
+	/** Names handed out this session — re-roll on collision (pool ~200). */
+	private readonly usedNames = new Set<string>();
 
 	constructor(deps: AgentRegistryDeps) {
 		this.notify = deps.notify;
@@ -71,14 +73,15 @@ export class AgentRegistry {
 	}
 
 	/**
-	 * Sequential short id (a1, a2, …) — the LLM-facing agent reference for
-	 * this session (agent_stop targets, notification JSON). Sequential
-	 * beats random here: short, trivially copy-safe for the model, and the
-	 * only uniqueness domain is this session's live set.
+	 * Short human-name id (max, zoe, kai…) — the LLM-facing agent reference
+	 * for this session (agent_send targets, notification JSON). Names read
+	 * as names (not machine codes) and cost ~1 token each; uniqueness is
+	 * this session's live set (re-roll on collision).
 	 */
 	nextAgentId(): string {
-		this.idCounter++;
-		return `a${this.idCounter}`;
+		const name = randomAgentName(this.usedNames);
+		this.usedNames.add(name);
+		return name;
 	}
 
 	/** Track a background agent: registry entry + widget row. */
@@ -136,15 +139,17 @@ export class AgentRegistry {
 	 * the direct-child prefix for a descendant path ("a1/a1" → "a1", whose
 	 * own layer routes the rest). Returns false when no child matches.
 	 */
+	/**
+	 * Point-to-point delivery to a direct child by exact id — the mechanism
+	 * delivers, it does not route (no prefix matching, no forwarding).
+	 */
 	async deliver(target: string, text: string): Promise<boolean> {
-		const childId = [...this.agents.keys()].find((c) => target === c || target.startsWith(`${c}/`));
-		if (!childId) return false;
-		const agent = this.agents.get(childId);
+		const agent = this.agents.get(target);
 		if (!agent?.sendMessage) return false;
 		const ok = await agent.sendMessage(text);
 		// A delivered message woke an idle persistent agent — the widget row
 		// flips back to running (spinner resumes). Harmless for running rows.
-		if (ok) this.getWidget()?.setStatus?.(childId, "running");
+		if (ok) this.getWidget()?.setStatus?.(target, "running");
 		return ok;
 	}
 

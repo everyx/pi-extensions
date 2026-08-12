@@ -120,6 +120,8 @@ export class StatusWidget {
 		ui: ExtensionUIContext,
 		/** Optional widget title line (e.g. "Agents") — renders above the rows. */
 		private readonly title?: string,
+		/** Max rows before swarm-mode collapse (running/failed first, rest folded). */
+		private readonly maxLines = 8,
 	) {
 		this.ui = ui;
 	}
@@ -213,12 +215,22 @@ export class StatusWidget {
 		else if (result === "stopped") this.stopped++;
 	}
 
-	/** Lifetime progress meta: `1/3` or `(1+2)/3` (abnormal count in error). */
+	/**
+	 * Lifetime meta, aligned with the card-header meta vocabulary: an outer
+	 * paren group, dot-separated. `done n/total` is the progress; live segments
+	 * (running / idle) are counted from the rows, abnormal ends (failed,
+	 * stopped) are accumulated counters with failed colored error.
+	 */
 	private metaLine(theme: Theme): string {
 		if (this.total === 0) return "";
-		const abnormal = this.failed + this.stopped;
-		const numerator = abnormal > 0 ? `(${this.done}+${theme.fg("error", String(abnormal))})` : String(this.done);
-		return ` ${theme.fg("muted", `${numerator}/${this.total}`)}`;
+		const running = [...this.rows.values()].filter((r) => r.item.status === "running").length;
+		const idle = [...this.rows.values()].filter((r) => r.item.status === "idle").length;
+		const parts: string[] = [`done ${this.done}/${this.total}`];
+		if (running) parts.push(`${running} running`);
+		if (idle) parts.push(`${idle} idle`);
+		if (this.failed) parts.push(theme.fg("error", `${this.failed} failed`));
+		if (this.stopped) parts.push(`${this.stopped} stopped`);
+		return ` ${theme.fg("muted", `(${parts.join(" · ")})`)}`;
 	}
 
 	private registerWidget(): void {
@@ -249,8 +261,30 @@ export class StatusWidget {
 				` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold(this.title))}${this.metaLine(theme)}`,
 			);
 		}
-		for (const row of this.rows.values()) {
-			lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
+		const rows = [...this.rows.values()];
+		if (rows.length > this.maxLines) {
+			// Swarm mode: show the live (running) and abnormal (failed) rows
+			// first, fold the rest into a counter line — a glance must answer
+			// "how many are working / did any fail" without scrolling.
+			const priority = (s: WidgetStatus) =>
+				s === "running" ? 0 : s === "failed" ? 1 : s === "stopped" ? 2 : s === "idle" ? 3 : 4;
+			const sorted = [...rows].sort((a, b) => priority(a.item.status) - priority(b.item.status));
+			for (const row of sorted.slice(0, this.maxLines)) {
+				lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
+			}
+			const rest = sorted.slice(this.maxLines);
+			const restRunning = rest.filter((r) => r.item.status === "running").length;
+			const restFailed = rest.filter((r) => r.item.status === "failed").length;
+			const restIdle = rest.filter((r) => r.item.status === "idle").length;
+			const restParts: string[] = [`+${rest.length} more`];
+			if (restRunning) restParts.push(`${restRunning} running`);
+			if (restFailed) restParts.push(theme.fg("error", `${restFailed} failed`));
+			if (restIdle) restParts.push(`${restIdle} idle`);
+			lines.push(` ${theme.fg("muted", `\u2026 ${restParts.join(" · ")}`)}`);
+		} else {
+			for (const row of rows) {
+				lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
+			}
 		}
 		return lines;
 	}
