@@ -724,7 +724,7 @@ export default function (pi: ExtensionAPI) {
 			// spinner line while the child is being stopped.
 			onUpdate?.({
 				content: [{ type: "text", text: `Stopping ${agent.title}\u2026` }],
-				details: { title: agent.title },
+				details: { title: agent.title, agentId },
 			});
 			try {
 				const stopped = await registry.stopAndRemove(agentId);
@@ -800,8 +800,8 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			onUpdate?.({
-				content: [{ type: "text", text: `Sending to ${to}\u2026` }],
-				details: { to },
+				content: [{ type: "text", text: `Sending to ${target}\u2026` }],
+				details: { to: target },
 			});
 			const r = await handleMessage(pi, registry, { to: target, from: MY_AGENT_ID, message }, true);
 			if (!r.ok) {

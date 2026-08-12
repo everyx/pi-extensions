@@ -22,7 +22,7 @@ export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, 
 	const id = data[idKey] ?? args?.[idKey];
 	const title = data.title;
 	const idPart = id ? `@${id}` : "";
-	const joined = title && idPart ? `${idPart} — ${title}` : (title ?? String(id ?? ""));
+	const joined = title && idPart ? `${idPart} — ${title}` : (title ?? idPart);
 	return joined.slice(0, 60);
 }
 
