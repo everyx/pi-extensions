@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-**Minimal sub‑agents for your Pi — three primitives, no noise, no limits.**
+**Pi agents that work together — three primitives, a tree of named agents, no noise.**
 
 ```
 You:  Research this project's database schema for me

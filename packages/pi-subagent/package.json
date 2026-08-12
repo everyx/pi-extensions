@@ -1,7 +1,7 @@
 {
 	"name": "@everyx/pi-subagent",
 	"version": "0.0.0-development",
-	"description": "Sub-agent tool for pi – delegate tasks to isolated pi instances (resident rpc children)",
+	"description": "Pi agents that work together – three primitives (spawn/stop/send) build a tree of named, message-passing agents",
 	"keywords": [
 		"pi-package"
 	],
