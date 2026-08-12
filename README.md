@@ -2,11 +2,11 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A pnpm workspace monorepo of [pi](https://github.com/earendil-works/pi) extensions. Each package is a plain, independently publishable pi extension.
+My personal [pi](https://github.com/earendil-works/pi) extensions — each package a plain, independently publishable pi extension.
 
 | Package | What it is | npm |
 |---|---|---|
-| [`subagent`](./packages/pi-subagent/README.md) | Minimal sub‑agents for your Pi — two primitives, no noise, no limits. | `@everyx/pi-subagent` |
+| [`subagent`](./packages/pi-subagent/README.md) | Pi agents that work together — three primitives, a tree of named agents, no noise. | `@everyx/pi-subagent` |
 | [`web-tools`](./packages/pi-web-tools/SPEC.md) | Web primitives — `webSearch` + `fetch` (URL → Markdown). | `@everyx/pi-web-tools` |
 
 ## Layout

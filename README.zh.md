@@ -2,11 +2,11 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-[pi](https://github.com/earendil-works/pi) 扩展的 pnpm workspace monorepo。每个包都是一个可独立发布的 pi 扩展。
+我的私人 [pi](https://github.com/earendil-works/pi) 扩展集——每个包都是可独立发布的 pi 扩展。
 
 | 包 | 是什么 | npm |
 |---|---|---|
-| [`subagent`](./packages/pi-subagent/README.zh.md) | Pi 的极简子代理——双原语、无噪音、无限制。 | `@everyx/pi-subagent` |
+| [`subagent`](./packages/pi-subagent/README.zh.md) | Pi 的协作式子代理——三原语、有名有姓、互通消息，调度权在你。 | `@everyx/pi-subagent` |
 | [`web-tools`](./packages/pi-web-tools/SPEC.md) | Web 原语——`webSearch` + `fetch`（URL → Markdown）。 | `@everyx/pi-web-tools` |
 
 ## 布局
