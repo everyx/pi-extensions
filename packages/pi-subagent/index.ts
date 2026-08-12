@@ -61,7 +61,7 @@ const SUBAGENT_SESSION_DIR = resolveSubagentSessionDir();
 
 // ─── In-tree identity ──────────────────────────────────────
 
-/** This process's tree-path id ("" = root session). Injected by the parent at spawn. */
+/** This process's agent id ("" = root session). Injected by the parent at spawn. */
 const MY_AGENT_ID = process.env.PI_SUBAGENT_AGENT_ID ?? "";
 /** I am a child agent when an identity was injected (root children get "a1"…). */
 const HAS_PARENT = MY_AGENT_ID !== "";
@@ -70,10 +70,10 @@ const HAS_PARENT = MY_AGENT_ID !== "";
 let widget: AgentWidget | null = null;
 
 /**
- * Lazily-captured UI handle for the uplink channel (extension_ui_request /
+ * Lazily-captured UI handle for the child→parent channel (extension_ui_request /
  * setStatus under the reserved key). Tool executes refresh it every call —
  * a sub-agent that spawned children has run its own execute first, so the
- * ref is always warm before any inbound message needs to forward up.
+ * ref is always warm before any inbound @parent message needs to go up.
  */
 let uiRef: { setStatus(key: string, text: string | undefined): void } | undefined;
 
@@ -87,11 +87,11 @@ function ensureWidget(ctx: { mode: string; ui: unknown }): AgentWidget | null {
 }
 
 /**
- * Refresh the uplink handle from any tool execute. Every execute runs with
- * a UI context (rpc children too — their setStatus emits the
+ * Refresh the child→parent handle from any tool execute. Every execute runs
+ * with a UI context (rpc children too — their setStatus emits the
  * extension_ui_request event stream the parent consumes), and a sub-agent
  * must have run its own execute before it can spawn children, so the ref
- * is always warm before any inbound message needs to forward up.
+ * is always warm before any inbound @parent message needs to go up.
  */
 function captureUi(ctx: { mode: string; ui: unknown }): void {
 	uiRef = ctx.ui as { setStatus(key: string, text: string | undefined): void };
@@ -252,10 +252,10 @@ function spawnErrorResult(
  * gets a synchronous result) and the inbound handler (child→parent: no
  * return path, so errors are delivered back to the sender as messages).
  *
- *   direct child / descendant → rpc prompt + steer (wakes idle, queues on running)
- *   "@parent" (outbound)      → fire up; the parent injects it into its LLM
- *   "@parent" (inbound)       → my child addressed me — inject into my session
- *   unknown → uplink; root errors, notifying the sender on the inbound path
+ *   direct child → rpc prompt + steer (wakes idle, queues on running)
+ *   "@parent"   → the parent injects it into its LLM (or mine, inbound)
+ *   unknown     → explicit error (routing is the LLM's job, hop by hop);
+ *                 on the inbound path the sender is told best-effort
  */
 async function handleMessage(
 	pi: ExtensionAPI,
@@ -705,10 +705,12 @@ export default function (pi: ExtensionAPI) {
 		parameters: StopParamsSchema,
 
 		async execute(_toolCallId, raw, _signal, onUpdate) {
-			// No captureUi here: agent_stop never uplinks (no forward/up path).
+			// No captureUi here: agent_stop never sends upward (no child→parent path).
 			const params = raw as StopParams;
-			// We teach the @ reference form — honour it as an argument.
-			const agent = registry.lookup(params.agent_id.replace(/^@/, ""));
+			// Honour the @ reference form we teach — strip once, use everywhere
+			// (lookup, stopAndRemove, details) so no @@ double prefix appears.
+			const agentId = params.agent_id.replace(/^@/, "");
+			const agent = registry.lookup(agentId);
 
 			if (!agent) {
 				return {
@@ -725,20 +727,20 @@ export default function (pi: ExtensionAPI) {
 				details: { title: agent.title },
 			});
 			try {
-				const stopped = await registry.stopAndRemove(params.agent_id);
+				const stopped = await registry.stopAndRemove(agentId);
 				if (!stopped) {
 					// Finished between lookup and removal (rare) — don't claim
 					// a stop that never happened.
 					const message = `agent ${params.agent_id} already finished.`;
 					return {
 						content: [{ type: "text", text: message }],
-						details: { agentId: params.agent_id, title: agent.title, error: message },
+						details: { agentId, title: agent.title, error: message },
 						isError: true,
 					};
 				}
 				return {
 					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
-					details: { agentId: params.agent_id, title: agent.title },
+					details: { agentId, title: agent.title },
 				};
 			} catch (err) {
 				// Child died mid-stop (e.g. write-after-end): surface it as a
@@ -746,7 +748,7 @@ export default function (pi: ExtensionAPI) {
 				const message = err instanceof Error ? err.message : String(err);
 				return {
 					content: [{ type: "text", text: message }],
-					details: { agentId: params.agent_id, title: agent.title, error: message },
+					details: { agentId, title: agent.title, error: message },
 					isError: true,
 				};
 			}
@@ -777,9 +779,11 @@ export default function (pi: ExtensionAPI) {
 			const params = raw as SendParams;
 			const to = params.to?.trim();
 			const message = params.message?.trim();
-			// We teach the @ reference form — honour it as an argument (lookup
-			// and card title use the stripped id, so no @@ double prefix).
-			const target = to ? to.replace(/^@/, "") : to;
+			// Honour the @ reference form we teach — but never strip @parent
+			// (the protocol layer routes on the literal value). Plain agent
+			// ids get stripped once, so lookup and the card title resolve and
+			// no @@ double prefix appears.
+			const target = to ? (to === "@parent" ? to : to.replace(/^@/, "")) : to;
 			if (!to) {
 				return {
 					content: [{ type: "text", text: "`to` is required." }],
@@ -803,7 +807,7 @@ export default function (pi: ExtensionAPI) {
 			if (!r.ok) {
 				return {
 					content: [{ type: "text", text: r.error ?? "delivery failed" }],
-					details: { to, error: r.error },
+					details: { to: target, error: r.error },
 					isError: true,
 				};
 			}

@@ -54,7 +54,7 @@ export interface AgentRegistryDeps {
 	notify: (agent: RegisteredAgent, completion: AgentCompletion) => Promise<void> | void;
 	/** Lazy widget access — null in non-TUI modes. */
 	getWidget?: () => WidgetSurface | null;
-	/** This process is itself a child agent (routes "@parent"/uplinks to the parent). */
+	/** This process is itself a child agent ("@parent" is deliverable upward). */
 	hasParent?: boolean;
 }
 
@@ -133,12 +133,6 @@ export class AgentRegistry {
 		return routeMessage(msg, [...this.agents.keys()], this.hasParent);
 	}
 
-	/** Deliver a message to a direct child (rpc prompt + steer behavior). */
-	/**
-	 * Deliver a message to an agent by id — exact for a direct child, or via
-	 * the direct-child prefix for a descendant path ("a1/a1" → "a1", whose
-	 * own layer routes the rest). Returns false when no child matches.
-	 */
 	/** Point-to-point delivery to a direct child by exact id. */
 	async deliver(target: string, text: string): Promise<boolean> {
 		const agent = this.agents.get(target);
