@@ -221,6 +221,25 @@ export function truncateForContext(text: string): string {
 	return truncateTail(text).content;
 }
 
+/**
+ * When an output exceeds the context cap, stash the full text in a temp file
+ * and return the LLM-visible marker (embedded in the result, no extra field):
+ * the model reads the truncated preview and knows the full output is one
+ * `read` away. Returns the marker when truncated, "" otherwise.
+ */
+function maybeWriteFullOutput(agentId: string, output: string): string {
+	const truncated = truncateForContext(output);
+	if (truncated === output) return "";
+	const file = `/tmp/pi-subagent-${agentId}.txt`;
+	try {
+		// Best-effort: a write failure must never break the notification.
+		require("node:fs").writeFileSync(file, output, "utf8");
+	} catch {
+		return "";
+	}
+	return `\n\n(output truncated — full output: ${file})`;
+}
+
 function toErrorResult(err: unknown): {
 	content: { type: "text"; text: string }[];
 	details: Record<string, unknown>;
@@ -339,7 +358,7 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 				// LLM-context protection: cap the visible result (tail 2000 lines /
 				// 50KB, bash parity) — the full text lives in details.result (card
 				// body, never enters LLM context) and the session file.
-				result: truncateForContext(completion.output),
+				result: truncateForContext(completion.output) + maybeWriteFullOutput(agent.agentId, completion.output),
 				// Only a completed persistent agent stays resident (idle) — a
 				// failed follow-up is cleaned up, so no idle claim.
 				idle: agent.persistent && completion.status === "completed" ? true : undefined,
@@ -407,6 +426,7 @@ export default function (pi: ExtensionAPI) {
 			"Use agent_spawn for independent parallel work: several foreground calls already run in parallel. Reserve run_in_background: true for when you need to keep working or reply to the user while the sub-agent runs.",
 			"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
 			"Never poll a background agent — its completion notification carries the result.",
+			"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
 			"Keep a persistent agent for follow-ups: spawn once with persistent: true, then agent_send it new instructions — the context stays alive (idle until woken).",
 		],
 		parameters: SpawnParamsSchema,
@@ -662,8 +682,8 @@ export default function (pi: ExtensionAPI) {
 						{
 							type: "text",
 							text: agent.persistent
-								? `${truncateForContext(completion.output)}\n\n(agent @${agent.agentId} is resident — send it follow-ups with agent_send)`
-								: truncateForContext(completion.output),
+								? `${truncateForContext(completion.output)}${maybeWriteFullOutput(agent.agentId, completion.output)}\n\n(agent @${agent.agentId} is resident — send it follow-ups with agent_send)`
+								: truncateForContext(completion.output) + maybeWriteFullOutput(agent.agentId, completion.output),
 						},
 					],
 					details: {
