@@ -140,6 +140,11 @@ describe("routeMessage — in-tree routing (per-hop, O(1))", () => {
 		assert.equal(d.kind, "error");
 	});
 
+	it("strips a leading @ from the target — we teach the @ reference form, so we honour it as an argument", () => {
+		const d = routeMessage(msg("@a2"), ["a2"], false);
+		assert.deepEqual(d, { kind: "child", childId: "a2", message: msg("@a2") });
+	});
+
 	it("unknown target errors whether or not a parent exists — routing is the LLM's job", () => {
 		const d = routeMessage(msg("zzz"), ["a2"], true);
 		assert.equal(d.kind, "error");

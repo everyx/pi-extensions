@@ -31,7 +31,8 @@ export class AgentWidget {
 	add(agent: AgentProcess): void {
 		this.widget.add({
 			id: agent.agentId,
-			title: agent.title,
+			// @id — title: the user matches the @name the LLM mentions in chat.
+			title: `@${agent.agentId} — ${agent.title}`,
 			startedAt: agent.startedAt,
 			status: agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done",
 			rows: activityToRows(agent.getLatestActivity()),

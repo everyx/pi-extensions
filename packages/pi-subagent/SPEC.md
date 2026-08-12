@@ -107,8 +107,8 @@ session: /path/...jsonl
 
 ```
   ● Agents (done 1/3 · 2 running · 1 idle)
-  ⠋ 检查 CI 配置 (42.0s)
-  ‖ 检查 CI 配置
+  ⠋ @max — 检查 CI 配置 (42.0s)
+  ‖ @zoe — 驻留探索代理
 ```
 
 - 仅跟踪后台 agent 与 persistent 前台 agent（前台非 persistent 已 inline 流式，不重复；persistent 前台完成后驻留 idle，进 widget 保持可寻址）
@@ -165,6 +165,7 @@ queued → running ──→ completed（通知）
 ### 消息模型（点对点投递，路由归 LLM）
 
 - **id**：短人名（`max` / `zoe` / `kai`…，~200 池随机 + 进程内查重）——**无树结构**——对 LLM 只是"系统给的引用"（信息披露是唯一限制：父持有 spawn 的子 id、子知道 `@parent`）
+- **@ 引用语法**：受控文本（卡 title、widget 行、LLM content、通知 JSON）统一 `@max`——用户匹配对话里的 `@max`；参数 `to` 接受前导 `@`（机制剥除，引导的配套承诺）；`[from max]` 结构化标注保持裸名
 - **机制 = 纯投递器**：`agent_send(to)` 只投"直接子精确 id"或 `@parent`——**不认识的目标显式报错**——无自动转发、无机制层寻路
 - **路由 = LLM**：跨层/兄弟协调由每层 LLM 逐跳发起（它只寻址自己知道的 id；孙→祖 = 每跳 `@parent` 转发）——机制不做任何中间决策
 - **发现机制很薄**：子知道谁 = 父 spawn prompt 告知 + 消息 from 字段（文本 `[from max]` 前缀，rpc 投递只传字符串，文本级标注最省）
