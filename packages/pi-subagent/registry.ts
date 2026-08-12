@@ -125,9 +125,9 @@ export class AgentRegistry {
 	}
 
 	/**
-	 * Route one in-tree message against my direct children (pure; the caller
-	 * — agent_send execute or the inbound-message handler — acts on the
-	 * decision: deliver / inject the parent LLM / forward up / error).
+	 * Route one message against my direct children (pure; the caller — the
+	 * agent_send execute or the inbound handler — acts on the decision:
+	 * deliver to a child / inject the parent LLM / error).
 	 */
 	route(msg: AgentMessage): RouteDecision {
 		return routeMessage(msg, [...this.agents.keys()], this.hasParent);
@@ -139,10 +139,7 @@ export class AgentRegistry {
 	 * the direct-child prefix for a descendant path ("a1/a1" → "a1", whose
 	 * own layer routes the rest). Returns false when no child matches.
 	 */
-	/**
-	 * Point-to-point delivery to a direct child by exact id — the mechanism
-	 * delivers, it does not route (no prefix matching, no forwarding).
-	 */
+	/** Point-to-point delivery to a direct child by exact id. */
 	async deliver(target: string, text: string): Promise<boolean> {
 		const agent = this.agents.get(target);
 		if (!agent?.sendMessage) return false;

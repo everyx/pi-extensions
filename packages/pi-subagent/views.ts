@@ -17,8 +17,7 @@ import { createToolView } from "@everyx/pi-ui/view.js";
  */
 /**
  * Card title for agent_spawn / agent_stop / agent_send: `@id — title` when
- * both are known (the @ form is what the LLM sees and the user matches), else
- * whichever is available (title first, then the id).
+ * both are known (the @ form is what the LLM sees and the user matches).
  */
 export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, idKey: string): string {
 	const data = (ctx.result?.data as ({ title?: string } & Record<string, unknown>) | undefined) ?? {};
@@ -59,10 +58,8 @@ export const spawnView = createToolView<Record<string, unknown>, Record<string, 
 		if (model) parts.push(String(model));
 		const thinking = d?.thinking ?? args?.thinking;
 		if (thinking) parts.push(String(thinking));
-		// Duration meta: live Elapsed while running (the call seeds startedAt
-		// at execution start), fixed Took once the foreground task finished.
-		// A background spawn leaves the task running — no duration (the widget
-		// tracks it live).
+		// Duration meta: live Elapsed while running, fixed Took on completion;
+		// a background spawn has no duration (the widget tracks it live).
 		if (d?.startedAt != null) {
 			if (!d.runInBackground) {
 				const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);

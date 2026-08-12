@@ -318,8 +318,9 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 		// Card body (never enters LLM context — verified against convertToLlm).
 		// The full output; the LLM-visible content below is capped (truncateTail).
 		result: completion.output,
-		// Persistent agent completed: resident (idle) — the card shows it.
-		idle: agent.persistent ? true : undefined,
+		// Persistent agent completed → resident (idle); a failed follow-up is
+		// reported and cleaned up, so the idle marker must not appear there.
+		idle: agent.persistent && completion.status === "completed" ? true : undefined,
 		usage: {
 			tokens: completion.stats.tokens || null,
 			toolUses: completion.stats.toolUses || null,
@@ -339,8 +340,9 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 				// 50KB, bash parity) — the full text lives in details.result (card
 				// body, never enters LLM context) and the session file.
 				result: truncateForContext(completion.output),
-				// Persistent agents stay resident (idle) — sendable later.
-				idle: agent.persistent ? true : undefined,
+				// Only a completed persistent agent stays resident (idle) — a
+				// failed follow-up is cleaned up, so no idle claim.
+				idle: agent.persistent && completion.status === "completed" ? true : undefined,
 				// Resume entry point: sub-agent sessions live outside `pi -r`;
 				// attach with `pi --session <path>`.
 				session_path: completion.sessionPath ?? null,
@@ -496,7 +498,7 @@ export default function (pi: ExtensionAPI) {
 							sessionId: agent.sessionId,
 						});
 						await registry.stopAndRemove(agentId);
-					})();
+					})().catch(() => {}); // best-effort: a cleanup failure must not crash the host
 				},
 				onDelta: (delta) => {
 					if (params.run_in_background) {
@@ -705,7 +707,8 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, raw, _signal, onUpdate) {
 			// No captureUi here: agent_stop never uplinks (no forward/up path).
 			const params = raw as StopParams;
-			const agent = registry.lookup(params.agent_id);
+			// We teach the @ reference form — honour it as an argument.
+			const agent = registry.lookup(params.agent_id.replace(/^@/, ""));
 
 			if (!agent) {
 				return {
@@ -774,6 +777,9 @@ export default function (pi: ExtensionAPI) {
 			const params = raw as SendParams;
 			const to = params.to?.trim();
 			const message = params.message?.trim();
+			// We teach the @ reference form — honour it as an argument (lookup
+			// and card title use the stripped id, so no @@ double prefix).
+			const target = to ? to.replace(/^@/, "") : to;
 			if (!to) {
 				return {
 					content: [{ type: "text", text: "`to` is required." }],
@@ -793,7 +799,7 @@ export default function (pi: ExtensionAPI) {
 				content: [{ type: "text", text: `Sending to ${to}\u2026` }],
 				details: { to },
 			});
-			const r = await handleMessage(pi, registry, { to, from: MY_AGENT_ID, message }, true);
+			const r = await handleMessage(pi, registry, { to: target, from: MY_AGENT_ID, message }, true);
 			if (!r.ok) {
 				return {
 					content: [{ type: "text", text: r.error ?? "delivery failed" }],
@@ -804,7 +810,12 @@ export default function (pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: `${r.verb} to ${to}.` }],
 				// Card title shows @id — target title (uniform with agent_stop).
-				details: { to, message, title: registry.lookup(to)?.title, agentId: registry.lookup(to)?.agentId },
+				details: {
+					to: target,
+					message,
+					title: registry.lookup(target)?.title,
+					agentId: registry.lookup(target)?.agentId,
+				},
 			};
 		},
 
