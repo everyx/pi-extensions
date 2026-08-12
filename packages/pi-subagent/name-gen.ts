@@ -154,9 +154,7 @@ const NAMES = [
 	"lane",
 	"mara",
 	"neve",
-	"ora",
 	"pier",
-	"rey",
 	"sage",
 	"tara",
 	"ulys",
@@ -176,7 +174,6 @@ const NAMES = [
 	"ina",
 	"june",
 	"kyle",
-	"lena",
 	"mack",
 	"neil",
 	"opal",
@@ -199,9 +196,10 @@ const NAMES = [
 
 /** Deterministic-ish random pick; re-rolled by the caller on collision. */
 export function randomAgentName(used: ReadonlySet<string>): string {
-	let name = NAMES[Math.floor(Math.random() * NAMES.length)] ?? "agent";
-	while (used.has(name)) {
-		name = NAMES[Math.floor(Math.random() * NAMES.length)] ?? "agent";
-	}
-	return name;
+	const pick = () => NAMES[Math.floor(Math.random() * NAMES.length)] ?? "agent";
+	let name = pick();
+	// Bounded re-rolls: a saturated pool degrades to the first free name
+	// instead of looping forever.
+	for (let i = 0; i < NAMES.length && used.has(name); i++) name = pick();
+	return used.has(name) ? (NAMES.find((n) => !used.has(n)) ?? name) : name;
 }
