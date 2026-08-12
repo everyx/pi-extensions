@@ -571,17 +571,35 @@ describe("AgentProcess — persistent / in-tree messages", () => {
 		assert.equal(agent.status, "completed");
 	});
 
-	it("onIdle fires when a woken persistent agent settles back to idle", async () => {
-		let idleFired = 0;
-		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true, onIdle: () => idleFired++ });
+	it("onIdle fires with completed when a woken persistent agent settles", async () => {
+		const outcomes: string[] = [];
+		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true, onIdle: (o) => outcomes.push(o) });
 		await agent.spawnAndSend("do it");
 		const done = agent.waitForCompletion();
 		fake.emitSettled();
 		await done;
-		assert.equal(idleFired, 0, "no onIdle before a wake");
+		assert.deepEqual(outcomes, [], "no onIdle before a wake");
 		await agent.sendMessage("continue");
 		fake.emitSettled();
-		assert.equal(idleFired, 1, "onIdle fires on the post-wake settle");
+		assert.deepEqual(outcomes, ["completed"], "completed on a clean follow-up settle");
+	});
+
+	it("a failed follow-up reports failed — never disguised as idle", async () => {
+		const outcomes: string[] = [];
+		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true, onIdle: (o) => outcomes.push(o) });
+		await agent.spawnAndSend("do it");
+		const done = agent.waitForCompletion();
+		fake.emitSettled();
+		await done;
+		await agent.sendMessage("continue");
+		// agent_end with a model error → agentError set → the follow-up failed.
+		fake.emitEvent({
+			type: "agent_end",
+			messages: [{ role: "assistant", stopReason: "error", errorMessage: "API boom" }],
+		} as never);
+		fake.emitSettled();
+		assert.deepEqual(outcomes, ["failed"]);
+		assert.equal(agent.status, "failed");
 	});
 
 	it("in-tree messages from the child fire onMessage", () => {
