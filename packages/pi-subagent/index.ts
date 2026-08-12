@@ -312,7 +312,7 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,
-		title: agent.title,
+		title: `@${agent.agentId} — ${agent.title}`,
 		model: agent.model,
 		thinking: agent.thinking,
 		// Card body (never enters LLM context — verified against convertToLlm).
@@ -334,7 +334,7 @@ function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: 
 			customType: "subagent-notification",
 			content: JSON.stringify({
 				status: completion.status,
-				agent_id: agent.agentId,
+				agent_id: `@${agent.agentId}`,
 				// LLM-context protection: cap the visible result (tail 2000 lines /
 				// 50KB, bash parity) — the full text lives in details.result (card
 				// body, never enters LLM context) and the session file.
@@ -584,7 +584,7 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Started background agent ${agent.agentId}. Completion arrives as a notification.`,
+								text: `Started background agent @${agent.agentId}. Completion arrives as a notification.`,
 							},
 						],
 						details: {
@@ -663,7 +663,7 @@ export default function (pi: ExtensionAPI) {
 						{
 							type: "text",
 							text: agent.persistent
-								? `${truncateForContext(completion.output)}\n\n(agent ${agent.agentId} is resident — send it follow-ups with agent_send)`
+								? `${truncateForContext(completion.output)}\n\n(agent @${agent.agentId} is resident — send it follow-ups with agent_send)`
 								: truncateForContext(completion.output),
 						},
 					],
@@ -803,8 +803,8 @@ export default function (pi: ExtensionAPI) {
 			}
 			return {
 				content: [{ type: "text", text: `${r.verb} to ${to}.` }],
-				// Card title prefers the target's human title (uniform with agent_stop).
-				details: { to, message, title: registry.lookup(to)?.title },
+				// Card title shows @id — target title (uniform with agent_stop).
+				details: { to, message, title: registry.lookup(to)?.title, agentId: registry.lookup(to)?.agentId },
 			};
 		},
 

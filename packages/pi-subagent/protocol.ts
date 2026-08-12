@@ -107,8 +107,11 @@ export function routeMessage(message: AgentMessage, childIds: readonly string[],
 	if (message.to === "@parent") {
 		return hasParent ? { kind: "parent", message } : { kind: "error", reason: "root session has no parent" };
 	}
-	if (childIds.includes(message.to)) {
-		return { kind: "child", childId: message.to, message };
+	// We teach the @ reference form in the UI/content — honour it when it
+	// comes back as an argument (the guidance's side of the bargain).
+	const target = message.to.startsWith("@") ? message.to.slice(1) : message.to;
+	if (childIds.includes(target)) {
+		return { kind: "child", childId: target, message };
 	}
 	return { kind: "error", reason: `no such agent: ${message.to}` };
 }

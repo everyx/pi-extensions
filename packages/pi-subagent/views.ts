@@ -15,10 +15,19 @@ import { createToolView } from "@everyx/pi-ui/view.js";
  * Card title for agent_stop / agent_send: the target's human title when the
  * result carried one, else the target id from the result, else from args.
  */
+/**
+ * Card title for agent_spawn / agent_stop / agent_send: `@id — title` when
+ * both are known (the @ form is what the LLM sees and the user matches), else
+ * whichever is available (title first, then the id).
+ */
 export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, idKey: string): string {
 	const data = (ctx.result?.data as ({ title?: string } & Record<string, unknown>) | undefined) ?? {};
 	const args = ctx.args as Record<string, unknown> | undefined;
-	return String(data.title ?? data[idKey] ?? args?.[idKey] ?? "").slice(0, 60);
+	const id = data[idKey] ?? args?.[idKey];
+	const title = data.title;
+	const idPart = id ? `@${id}` : "";
+	const joined = title && idPart ? `${idPart} — ${title}` : (title ?? String(id ?? ""));
+	return joined.slice(0, 60);
 }
 
 export const spawnView = createToolView<Record<string, unknown>, Record<string, unknown>>({
