@@ -54,10 +54,9 @@ export function buildWebSearchSchema(engines: EngineId[]) {
 		engine: Type.Optional(
 			StringEnum(engineValues, {
 				description:
-					"auto (default): cheapest available channel first (search APIs), then the " +
-					"real browser. google/bing/baidu/yandex: search with that real browser " +
-					"engine — enables its native operator syntax in query and locale-based " +
-					"localization. The listed engines are the ones enabled in this install.",
+					"auto (default): pick the best engine automatically. google/bing/baidu/yandex: " +
+					"search with that engine — enables its native operator syntax in query and " +
+					"locale-based localization. The listed engines are the ones enabled in this install.",
 			}),
 		),
 	});

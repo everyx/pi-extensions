@@ -8,6 +8,8 @@
  *     error field, not a throw).
  */
 
+import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { fetchWithTimeout } from "../http.js";
 import type { WebFetchResult } from "../types.js";
 import { renderPage } from "./headless.js";
@@ -27,6 +29,26 @@ interface FetchPageResult {
 	contentType?: string;
 	text?: string;
 	error?: string;
+}
+
+/** Context cap for fetched content (bash-parity tail). */
+const MAX_MARKDOWN = 50_000;
+
+/**
+ * When fetched content exceeds the context cap, stash the full text in /tmp
+ * so the LLM can read it on demand — the result carries an inline marker with
+ * the path (one field, self-describing), like pi-subagent's full-output file.
+ */
+function stashIfTruncated(text: string, url: string): string | undefined {
+	if (text.length <= MAX_MARKDOWN) return undefined;
+	const key = createHash("sha1").update(url).digest("hex").slice(0, 8);
+	const file = `/tmp/pi-web-fetch-${key}.txt`;
+	try {
+		writeFileSync(file, text, "utf8");
+		return file;
+	} catch {
+		return undefined; // best-effort: never break the fetch
+	}
 }
 
 /** Only HTML-family responses go through markdown extraction. */
@@ -121,14 +143,16 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 	if (page.contentType && !isHtmlContent(page.contentType)) {
 		const text = (page.text ?? "").trim();
 		if (!text) return { title: "", markdown: "", error: "Empty response" };
+		const outputPath = stashIfTruncated(text, url);
 		return page.contentType.includes("text/markdown")
-			? { title: titleFromMarkdown(text), markdown: text.slice(0, 50_000) }
-			: { title: "", markdown: text.slice(0, 50_000) };
+			? { title: titleFromMarkdown(text), markdown: text.slice(0, MAX_MARKDOWN), outputPath }
+			: { title: "", markdown: text.slice(0, MAX_MARKDOWN), outputPath };
 	}
 
 	const extracted = htmlToMarkdown(page.text ?? "");
 	if (extracted.markdown && !extracted.error) {
-		return { title: extracted.title, markdown: extracted.markdown.slice(0, 50_000) };
+		const outputPath = stashIfTruncated(extracted.markdown, url);
+		return { title: extracted.title, markdown: extracted.markdown.slice(0, MAX_MARKDOWN), outputPath };
 	}
 
 	// Extraction failed or was incomplete + JS framework markers → CSR page.
