@@ -195,14 +195,14 @@ const SpawnParamsSchema = Type.Object({
 });
 
 const StopParamsSchema = Type.Object({
-	agent_id: Type.String({ description: "The agent ID to stop." }),
+	agent_id: Type.String({ description: 'The agent id to stop (e.g. "@max").' }),
 });
 
 const SendParamsSchema = Type.Object({
 	to: Type.String({
 		description:
-			"The agent id from agent_spawn (a spawn result or completion notification carries it), " +
-			'or "@parent" to message the session that spawned you.',
+			'The agent id from agent_spawn (e.g. "@max" — a spawn result or completion ' +
+			'notification carries it), or "@parent" to message the session that spawned you.',
 	}),
 	message: Type.String({ description: "The message text." }),
 });
@@ -393,16 +393,13 @@ export default function (pi: ExtensionAPI) {
 		name: "agent_spawn",
 		label: "Agent Spawn",
 		description:
-			"Spawn an isolated sub-agent that works in its own context window. " +
-			"The sub-agent starts with zero context from this conversation, so the prompt " +
-			"must be self-contained: include file paths, constraints, and the desired output shape. " +
-			"Use it for heavy tasks whose verbose intermediate output (search results, logs, test " +
-			"output) would pollute your context, and for independent tasks that can run in parallel. " +
-			"Foreground (run_in_background: false): blocks until the sub-agent finishes and returns " +
-			"its final output directly. Background (run_in_background: true): returns an agent_id " +
-			"immediately; the completion notification carries its result (status + agent_id + final " +
-			"output), and you can intervene with agent_stop / agent_send while it runs. " +
-			"persistent: true keeps the agent resident (idle) after completion — message it later " +
+			"Spawn an isolated sub-agent in its own context window. The sub-agent starts with " +
+			"zero context, so the prompt must be self-contained: include file paths, constraints, " +
+			"and the expected output shape. Foreground (run_in_background: false) blocks until it " +
+			"finishes and returns the output directly. Background (run_in_background: true) returns " +
+			"an agent id immediately; the completion notification carries the result (status + " +
+			"agent id + final output) — you can intervene with agent_stop / agent_send while it " +
+			"runs. persistent: true keeps it resident (idle) after completion — message it later " +
 			"to continue the same context.",
 		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
 		promptGuidelines: [
@@ -739,7 +736,7 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 				return {
-					content: [{ type: "text", text: `Stopped agent ${params.agent_id}.` }],
+					content: [{ type: "text", text: `Stopped agent @${agentId}.` }],
 					details: { agentId, title: agent.title },
 				};
 			} catch (err) {
@@ -812,7 +809,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			return {
-				content: [{ type: "text", text: `${r.verb} to ${to}.` }],
+				content: [{ type: "text", text: `${r.verb} to @${target}.` }],
 				// Card title shows @id — target title (uniform with agent_stop).
 				details: {
 					to: target,
