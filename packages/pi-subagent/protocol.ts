@@ -79,9 +79,9 @@ export type ParsedLine = { kind: "response"; response: RpcResponse } | { kind: "
 /** One agent_send payload — flows child→parent over the event stream
  * (extension_ui_request) and parent→child as an rpc prompt. */
 export interface AgentMessage {
-	/** Routing target: "@parent" or a tree-path id ("a2", "a1/a1"). */
+	/** Routing target: a direct-child id ("max") or "@parent". */
 	to: string;
-	/** Sender's tree-path id ("" for the root session). */
+	/** Sender's agent id ("" for the root session). */
 	from: string;
 	/** Message text (LLM-visible content). */
 	message: string;
@@ -116,7 +116,7 @@ export function routeMessage(message: AgentMessage, childIds: readonly string[],
 	return { kind: "error", reason: `no such agent: ${message.to}` };
 }
 
-/** LLM-visible sender prefix: "[from a1] " (root session: ""). */
+/** LLM-visible sender prefix: "[from max] " (root session: ""). */
 export function formatFrom(from: string): string {
 	return from ? `[from ${from}] ` : "";
 }
