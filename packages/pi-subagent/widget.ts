@@ -63,9 +63,12 @@ export class AgentWidget {
 /** Map the latest activity to structured widget rows (data, not formatted).
  *  The widget row is an *excerpt*: long streamed text is clipped to a tail
  *  so the excerpt stays bounded however long the agent runs. */
-function activityToRows(activity: AgentActivity | undefined): WidgetRow[] {
+export function activityToRows(activity: AgentActivity | undefined): WidgetRow[] {
 	if (!activity) return [];
 	if (activity.kind === "thinking") return [{ style: "thinking", content: "Thinking..." }];
-	if (activity.kind === "tool") return [{ style: "tool", content: `${activity.name}: ${activity.args}` }];
+	// Tool args can carry multi-line payloads (e.g. write) — flatten newlines and
+	// cap the excerpt so the widget line can never exceed terminal width (pi-tui
+	// 0.84.1 crashes on over-wide rendered lines).
+	if (activity.kind === "tool") return [{ style: "tool", content: `${activity.name}: ${clipTail(activity.args, 80)}` }];
 	return [{ style: "text", content: clipTail(activity.text, 80) }];
 }
