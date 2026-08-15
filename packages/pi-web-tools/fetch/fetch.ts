@@ -10,6 +10,7 @@
 
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { truncateHead } from "@earendil-works/pi-coding-agent";
 import { fetchWithTimeout } from "../http.js";
 import type { WebFetchResult } from "../types.js";
 import { renderPage } from "./headless.js";
@@ -31,8 +32,15 @@ interface FetchPageResult {
 	error?: string;
 }
 
-/** Context cap for fetched content (bash-parity tail). */
-const MAX_MARKDOWN = 50_000;
+/** Context cap for fetched content: 50KB of UTF-8 bytes — pi truncateHead
+ *  parity. LLM token budgets track bytes, not char counts, so byte-capping
+ *  keeps Chinese/emoji-heavy pages inside the same budget as ASCII ones. */
+const MAX_MARKDOWN_BYTES = 50_000;
+
+/** Cap fetched markdown to the context budget, keeping the head. */
+export function capMarkdown(text: string): string {
+	return truncateHead(text, { maxBytes: MAX_MARKDOWN_BYTES }).content;
+}
 
 /**
  * When fetched content exceeds the context cap, stash the full text in /tmp
@@ -40,7 +48,7 @@ const MAX_MARKDOWN = 50_000;
  * the path (one field, self-describing), like pi-subagent's full-output file.
  */
 function stashIfTruncated(text: string, url: string): string | undefined {
-	if (text.length <= MAX_MARKDOWN) return undefined;
+	if (Buffer.byteLength(text, "utf8") <= MAX_MARKDOWN_BYTES) return undefined;
 	const key = createHash("sha1").update(url).digest("hex").slice(0, 8);
 	const file = `/tmp/pi-web-fetch-${key}.txt`;
 	try {
@@ -145,14 +153,14 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 		if (!text) return { title: "", markdown: "", error: "Empty response" };
 		const outputPath = stashIfTruncated(text, url);
 		return page.contentType.includes("text/markdown")
-			? { title: titleFromMarkdown(text), markdown: text.slice(0, MAX_MARKDOWN), outputPath }
-			: { title: "", markdown: text.slice(0, MAX_MARKDOWN), outputPath };
+			? { title: titleFromMarkdown(text), markdown: capMarkdown(text), outputPath }
+			: { title: "", markdown: capMarkdown(text), outputPath };
 	}
 
 	const extracted = htmlToMarkdown(page.text ?? "");
 	if (extracted.markdown && !extracted.error) {
 		const outputPath = stashIfTruncated(extracted.markdown, url);
-		return { title: extracted.title, markdown: extracted.markdown.slice(0, MAX_MARKDOWN), outputPath };
+		return { title: extracted.title, markdown: capMarkdown(extracted.markdown), outputPath };
 	}
 
 	// Extraction failed or was incomplete + JS framework markers → CSR page.
@@ -164,7 +172,7 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 			if (renderedExtract.markdown && !renderedExtract.error) {
 				return {
 					title: renderedExtract.title,
-					markdown: renderedExtract.markdown.slice(0, 50_000),
+					markdown: capMarkdown(renderedExtract.markdown),
 				};
 			}
 		}
@@ -172,7 +180,7 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 
 	// Non-CSR partial extraction: return what we have (status quo).
 	if (extracted.markdown) {
-		return { title: extracted.title, markdown: extracted.markdown.slice(0, 50_000) };
+		return { title: extracted.title, markdown: capMarkdown(extracted.markdown) };
 	}
 
 	const jsRendered = isLikelyJSRendered(page.text ?? "");
