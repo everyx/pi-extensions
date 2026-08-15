@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { activityToRows } from "../widget.js";
 
 describe("activityToRows — widget line width safety", () => {
@@ -13,6 +14,13 @@ describe("activityToRows — widget line width safety", () => {
 		const content = rows[0]?.content ?? "";
 		assert.ok(content.startsWith("write: "));
 		assert.ok(content.length <= "write: ".length + 80, `content too long: ${content.length}`);
+	});
+
+	it("caps CJK tool args by terminal width, not char count", () => {
+		const rows = activityToRows({ kind: "tool", name: "bash", args: "调研亮色高亮色处理方案".repeat(30) });
+		const content = rows[0]?.content ?? "";
+		// 4-space widget indent + content must fit a 163-col terminal
+		assert.ok(4 + visibleWidth(content) <= 163, `widget line width ${4 + visibleWidth(content)} > 163`);
 	});
 
 	it("flattens multi-line tool args (heredoc payloads) to a single line", () => {

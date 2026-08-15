@@ -6,6 +6,8 @@
  * surfaces across extensions.
  */
 
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 /** Spinner frame interval (80ms — matches Pi's native loader cadence).
  * Single source for animation cadence: the ticker and every animated
  * component subscribe with this — no magic numbers elsewhere. */
@@ -57,11 +59,21 @@ export function durationMeta(
 	return `Took ${formatDuration((endedAt ?? Date.now()) - startedAt)}`;
 }
 
-/** Collapse whitespace, trim, and cut long tails to `max` chars (ellipsis prefix). */
+/** Collapse whitespace, trim, and cut long tails to `max` terminal columns (ellipsis prefix). */
 export function clipTail(s: string, max = 60): string {
 	const clean = s.replace(/\s+/g, " ").trim();
-	if (clean.length <= max) return clean;
-	return `\u2026${clean.slice(clean.length - max + 1)}`;
+	if (visibleWidth(clean) <= max) return clean;
+	// Keep the tail (latest content) within `max - 1` columns, prefixed with …
+	const chars = [...clean];
+	let w = 0;
+	let tail = "";
+	for (let i = chars.length - 1; i >= 0; i--) {
+		const cw = visibleWidth(chars[i]);
+		if (w + cw > max - 1) break;
+		tail = chars[i] + tail;
+		w += cw;
+	}
+	return `\u2026${tail}`;
 }
 
 /**
@@ -74,6 +86,16 @@ export function safeTitle(title: string | undefined, max = 40): string {
 		.replace(/[\r\n\t]+/g, " ")
 		.replace(/"/g, "'")
 		.trim();
-	if (flat.length <= max) return flat;
-	return `${flat.slice(0, max - 1)}\u2026`;
+	if (visibleWidth(flat) <= max) return flat;
+	// Head within `max - 1` columns, trailing ellipsis. Plain output (no ANSI)
+	// so callers can wrap it in their own theme colors.
+	let w = 0;
+	let head = "";
+	for (const ch of flat) {
+		const cw = visibleWidth(ch);
+		if (w + cw > max - 1) break;
+		head += ch;
+		w += cw;
+	}
+	return `${head}\u2026`;
 }

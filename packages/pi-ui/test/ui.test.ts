@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { renderHeader } from "../card.js";
 import { clipTail, formatDuration, Spinner, safeTitle } from "../spinner.js";
 
@@ -40,6 +41,11 @@ describe("clipTail", () => {
 		assert.equal(out.length, 20);
 		assert.ok(out.startsWith("\u2026"));
 	});
+	it("limits by terminal width, not char count (CJK = 2 columns)", () => {
+		const out = clipTail("调研亮色高亮色处理".repeat(20), 80);
+		assert.ok(visibleWidth(out) <= 80, `width ${visibleWidth(out)} > 80`);
+		assert.ok(out.startsWith("\u2026"), "long tail should be ellipsis-prefixed");
+	});
 });
 
 describe("safeTitle", () => {
@@ -51,8 +57,20 @@ describe("safeTitle", () => {
 		assert.equal(out.length, 40);
 		assert.ok(out.endsWith("\u2026"));
 	});
+	it("caps by terminal width for CJK titles", () => {
+		const out = safeTitle("调研亮色高亮色处理方案".repeat(8), 40);
+		assert.ok(visibleWidth(out) <= 40, `width ${visibleWidth(out)} > 40`);
+		assert.ok(out.endsWith("\u2026"));
+	});
 	it("defaults to (untitled)", () => {
 		assert.equal(safeTitle(undefined), "(untitled)");
+	});
+});
+
+describe("reuses pi-tui width utilities", () => {
+	it("visibleWidth counts CJK as 2 columns", () => {
+		assert.equal(visibleWidth("中文"), 4);
+		assert.equal(visibleWidth("a中b"), 4);
 	});
 });
 
