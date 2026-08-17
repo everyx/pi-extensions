@@ -5,16 +5,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { Spinner } from "../spinner.js";
-import { renderWidgetItemLine, StatusWidget, type WidgetItem } from "../widget.js";
+import { EXCERPT_INDENT, renderWidgetItemLine, StatusWidget, type WidgetItem, type WidgetRow } from "../widget.js";
 
 /** Captures the widget's render function through a mock ui.setWidget. */
 function capture(ui: { setWidget: ExtensionUIContext["setWidget"] }) {
-	let render: (() => string[]) | undefined;
+	let render: ((width?: number) => string[]) | undefined;
 	ui.setWidget = (_key, widget) => {
 		render =
 			typeof widget === "function"
-				? (widget as unknown as (tui: unknown, th: unknown) => { render(): string[] })(
+				? (widget as unknown as (tui: unknown, th: unknown) => { render(width?: number): string[] })(
 						{ requestRender: () => {} },
 						theme,
 					).render
@@ -259,5 +260,55 @@ describe("StatusWidget — shared-ticker animation", () => {
 		const after = renders;
 		await sleep(200);
 		assert.equal(renders, after, "clock stops when the widget empties");
+	});
+});
+
+describe("StatusWidget — width-aware activity clipping (no over-wide regression)", () => {
+	// Real themes emit zero-width ANSI — mimic that so width assertions measure
+	// actual rendered columns (pi-tui visibleWidth, the same metric pi's own
+	// over-wide crash check uses: a row ≤ width here can never trip it).
+	const wtheme = {
+		fg: (_c: string, text: string) => text,
+		bold: (text: string) => text,
+		italic: (text: string) => text,
+	} as never;
+
+	const activityLine = (width: number | undefined, rows: WidgetRow[]): string => {
+		const lines = renderWidgetItemLine(
+			{ id: "a", title: "ta", startedAt: 0, status: "running", rows },
+			wtheme,
+			new Spinner(),
+			width,
+		);
+		return lines.find((l) => l.startsWith(EXCERPT_INDENT)) ?? "";
+	};
+
+	it("clips long activity to the exact terminal width (tail kept)", () => {
+		const activity = activityLine(40, [{ style: "text", content: "x".repeat(500) }]);
+		assert.ok(visibleWidth(activity) <= 40, `width ${visibleWidth(activity)} > 40`);
+		assert.ok(visibleWidth(activity) > 30, `unnecessarily short: ${visibleWidth(activity)}`);
+		assert.ok(activity.includes("\u2026"), "tail ellipsis kept");
+		assert.match(activity, /x{10,}$/, "tail (latest content) preserved");
+	});
+
+	it("uses more of a wide terminal — no fixed 80 cap", () => {
+		const narrow = activityLine(60, [{ style: "text", content: "y".repeat(200) }]);
+		const wide = activityLine(200, [{ style: "text", content: "y".repeat(200) }]);
+		assert.ok(visibleWidth(wide) > visibleWidth(narrow), "wide terminal shows more of the tail");
+		assert.ok(visibleWidth(wide) <= 200);
+	});
+
+	it("clips CJK and emoji-ZWJ activity by visible width (grapheme-aware)", () => {
+		const cjk = activityLine(50, [{ style: "tool", content: "bash: 调研亮色高亮色处理方案".repeat(30) }]);
+		assert.ok(visibleWidth(cjk) <= 50, `CJK width ${visibleWidth(cjk)} > 50`);
+		const zwj = activityLine(30, [
+			{ style: "text", content: "\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67".repeat(200) },
+		]);
+		assert.ok(visibleWidth(zwj) <= 30, `ZWJ width ${visibleWidth(zwj)} > 30`);
+	});
+
+	it("defaults to 80 cols when no width is passed", () => {
+		const activity = activityLine(undefined, [{ style: "text", content: "z".repeat(300) }]);
+		assert.ok(visibleWidth(activity) <= 80);
 	});
 });

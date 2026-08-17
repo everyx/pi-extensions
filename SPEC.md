@@ -34,8 +34,8 @@
 - **全阶段 Box 壳**：工具任何阶段不出无壳 spinner，pending → success/error 底色全程覆盖。
 - **`·` 只做 meta 分隔**：不分割动词短语；时间归 header meta、footer 仅路径类摘要。
 - **内容行从卡片左边缘起**：body/footer 不对齐 header 文字，空行即分隔（pi bash 卡惯例）。
-- **统一折叠**：卡内容超 5 视觉行折叠为尾部预览 + `... (N earlier lines, <key> to expand)`（对齐 bash 工具卡的 preview 行数与 hint 格式）；展开全显。
-- **LLM context 截断保护**：进 LLM 的 content 经截断（尾部 2000 行 / 50KB）；UI 渲染源不截断——用户展开看全部，只有 LLM 看到截断版。
+- **统一折叠**：卡内容超出预览预算时折叠为尾部预览 + 展开提示（对齐 bash 工具卡的 preview 行数与 hint 格式）；展开全显。
+- **LLM context 截断保护**：进 LLM 的 content 经截断（对齐 pi bash 工具的默认截断预算）；UI 渲染源不截断——用户展开看全部，只有 LLM 看到截断版。
 - **占位/兜底（仅渲染层）**：卡内容缺失时 dim 色 + 括号占位（对齐 pi bash 卡的 `(no output)`）。
 
 ## TUI 即时反馈

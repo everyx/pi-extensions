@@ -114,8 +114,8 @@ session: /path/...jsonl
 - 仅跟踪后台 agent 与 persistent 前台 agent（前台非 persistent 已 inline 流式，不重复；persistent 前台完成后驻留 idle，进 widget 保持可寻址）
 - 非 persistent 完成/停止立即移除——完成结果由通知卡承担；**persistent 完成后保留 idle 行**（可寻址性可见，‖ 标记，不参与进度计数，可被 agent_stop 移除）
 - 标题行 meta（外层括号 + `·` 分隔，对齐 card header）：`done n/total` 进度 + 实时分段（`n running` / `n idle`）+ 异常计数（`n failed` error 色 / `n stopped`）——行空 widget 消失，计数随下次任务批重置
-- **蜂群降级**：行数超上限（8）时自动切换——running（活跃）与 failed（异常）行优先，其余折叠为计数行 `… +N more (n running · n idle · n failed)`（对齐 Kimi swarm 两档思路）
-- 每行下方追加最新活动摘录（缩进 4 空格，实时更新）：工具调用、Thinking...、或最新正文尾部
+- **蜂群降级**：行数超出预算时自动切换——running（活跃）与 failed（异常）行优先，其余折叠为计数行（对齐 Kimi swarm 两档思路）
+- 每行下方追加最新活动摘录（与标题文本起点对齐，实时更新）：工具调用、Thinking...、或最新正文尾部；截断宽度感知终端宽（render 传入），尾部截断
 
 ## 实现决策
 
@@ -164,7 +164,7 @@ queued → running ──→ completed（通知）
 
 ### 消息模型（点对点投递，路由归 LLM）
 
-- **id**：短人名（`max` / `zoe` / `kai`…，~200 池随机 + 进程内查重）——**无树结构**——对 LLM 只是"系统给的引用"（信息披露是唯一限制：父持有 spawn 的子 id、子知道 `@parent`）
+- **id**：短人名（`max` / `zoe` / `kai`…，随机池 + 进程内查重）——**无树结构**——对 LLM 只是"系统给的引用"（信息披露是唯一限制：父持有 spawn 的子 id、子知道 `@parent`）
 - **@ 引用语法**：受控文本（卡 title、widget 行、LLM content、通知 JSON）统一 `@max`——用户匹配对话里的 `@max`；参数 `to` 接受前导 `@`（机制剥除，引导的配套承诺）；`[from max]` 结构化标注保持裸名
 - **机制 = 纯投递器**：`agent_send(to)` 只投"直接子精确 id"或 `@parent`——**不认识的目标显式报错**——无自动转发、无机制层寻路
 - **路由 = LLM**：跨层/兄弟协调由每层 LLM 逐跳发起（它只寻址自己知道的 id；孙→祖 = 每跳 `@parent` 转发）——机制不做任何中间决策

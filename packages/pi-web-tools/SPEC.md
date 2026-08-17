@@ -31,7 +31,7 @@ web_search(
 → { results: [{ title, url, snippet }] }
 ```
 
-- **无 count / 无分页**：结果量由通道自然返回（固定请求 5 条，内部常量）；无 `total`（通道不报告总数，不编造）。
+- **无 count / 无分页**：结果量由通道自然返回（内部常量）；无 `total`（通道不报告总数，不编造）。
 - **snippet 取通道自带描述**，不 AI 生成。
 - **引擎回声**：实际引擎/通道只进 `details`（UI 卡片可见），LLM 零感知。
 - **locale 显式传，工具不推断**：query 语言检测是语义判断、边界易误判（与"不自动检测操作符"同构）——LLM 对自己的搜索意图最清楚，不传 = 全局结果（引擎默认）。
@@ -85,7 +85,7 @@ LLM 对搜索操作符有先验知识（训练语料含 `site:` / `filetype:` / 
 | `yandex` + 其他 | yandex.com |
 | `baidu` | baidu.com（天然中文） |
 
-- **参数级落地**：google 用 `gl=CN&hl=zh-CN&lr=lang_zh-CN`；bing 用 `mkt=zh-CN`（直接吃 BCP-47）；yandex 用 `lr=213` 等原生参数。
+- **参数级落地**：google/bing/yandex 各用引擎原生参数（实现见 locale.ts）——bing 直接吃 BCP-47。
 - **引擎优先级按语言分组**（auto 下 bsk 通道的选择顺序，在启用集内取）：
 
 | 语言 | 引擎优先级 |
@@ -97,7 +97,7 @@ LLM 对搜索操作符有先验知识（训练语料含 `site:` / `filetype:` / 
 > 判据：当地使用量最大 + 实际可用性（bsk 反爬/质量）。韩国 Naver（63%）与日本 Yahoo（6.6%，底层即 Google）因单市场价值低、维护成本高而不支持，Google/Bing 兜底即可。
 
 - **启用集内无语言优先级命中时**（如 zh 用户只启用 yandex）取启用集首个引擎（不报错——配置集的完整兜底）。
-- **bsk 的 recency 仅 google（`qdr:`）与 bing（`filters`）**：baidu/yandex 无时效参数——请求 recency 时**显式报错**而非静默丢弃（SPEC: 能力缺失不静默）。
+- **bsk 的 recency 仅 google 与 bing（各有原生时效参数）**：baidu/yandex 无时效参数——请求 recency 时**显式报错**而非静默丢弃（SPEC: 能力缺失不静默）。
 - **bsk 的 domains 翻译为 `site:` / `-site:`**（追加进 query）：`site:` 四引擎均支持；`-site:`（blocked）google/bing 完整、baidu 基本（自家平台过滤不彻底属引擎限制）、**yandex 无此操作符 → blocked_domains 显式报错**。
 - **API 通道不支持 locale**（含 tavily——其 `country` 参数是弱本地化，非 spec 承诺的域名级落地）→ 自动 fallback 到 bsk 真实浏览器执行对应本地化搜索。
 

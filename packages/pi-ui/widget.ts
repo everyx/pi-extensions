@@ -11,11 +11,12 @@
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import { formatDuration, SPINNER_TICK_MS, Spinner, safeTitle } from "./spinner.js";
+import { clipTail, formatDuration, SPINNER_TICK_MS, Spinner, safeTitle } from "./spinner.js";
 import { type TickerHandle, ticker } from "./ticker.js";
 
 const WIDGET_KEY = "pi-ui-status";
-const EXCERPT_INDENT = "    ";
+// 3 columns: ` ⠋ ` — content aligns with the @name title start (1 + glyph 1 + space).
+export const EXCERPT_INDENT = "   ";
 
 export type WidgetStatus = "running" | "idle" | "stopped" | "done" | "failed";
 
@@ -47,12 +48,16 @@ export interface WidgetItem {
 }
 
 interface WidgetRender {
-	render(): string[];
+	render(width: number): string[];
 	invalidate(): void;
 }
 
-/** Render one item's status line + activity rows (colors live here). */
-export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Spinner): string[] {
+/** Render one item's status line + activity rows (colors live here).
+ *  `width` is the terminal width pi passes at render time — activity rows are
+ *  clipped to exactly `width - indent` (no safety margin: visibleWidth is the
+ *  same metric pi's over-wide crash check uses), so wide terminals show more
+ *  of the tail and narrow ones stay bounded. */
+export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Spinner, width = 80): string[] {
 	const label = safeTitle(item.title, 40);
 
 	let status: string;
@@ -78,7 +83,17 @@ export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Sp
 	}
 
 	const line = ` ${status} ${theme.fg("bashMode", label)} ${theme.fg("muted", meta)}`;
-	const rows = (item.rows ?? []).map((r) => `${EXCERPT_INDENT}${styleRow(r, theme)}`);
+	// Clip the *plain* text to width first, then style — truncating after
+	// styling could cut an ANSI sequence in half. Tail-keeping (clipTail)
+	// preserves the latest content, pi-bash style.
+	const rows = (item.rows ?? []).map((r) => {
+		// Exact: EXCERPT_INDENT (3) + clipped content ≤ width. visibleWidth is
+		// the same metric pi's over-wide crash check uses (grapheme-aware), so
+		// a row ≤ width here can never trip it. Zero safety margin needed.
+		const max = Math.max(0, width - EXCERPT_INDENT.length);
+		const clipped = clipTail(r.content, max);
+		return `${EXCERPT_INDENT}${styleRow({ ...r, content: clipped }, theme)}`;
+	});
 	return [line, ...rows];
 }
 
@@ -240,7 +255,7 @@ export class StatusWidget {
 			(tui, theme) => {
 				this.tui = tui as { requestRender(): void };
 				return {
-					render: () => this.render(theme),
+					render: (width: number) => this.render(theme, width),
 					invalidate: () => {
 						this.registered = false;
 						this.tui = undefined;
@@ -252,7 +267,7 @@ export class StatusWidget {
 		this.registered = true;
 	}
 
-	private render(theme: Theme): string[] {
+	private render(theme: Theme, width?: number): string[] {
 		const lines: string[] = [];
 		if (this.title) {
 			// One marker line: ` ● <Title>` — 1-char left padding (matching the
@@ -270,7 +285,7 @@ export class StatusWidget {
 				s === "running" ? 0 : s === "failed" ? 1 : s === "stopped" ? 2 : s === "idle" ? 3 : 4;
 			const sorted = [...rows].sort((a, b) => priority(a.item.status) - priority(b.item.status));
 			for (const row of sorted.slice(0, this.maxLines)) {
-				lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
+				lines.push(...renderWidgetItemLine(row.item, theme, row.spinner, width));
 			}
 			const rest = sorted.slice(this.maxLines);
 			const restRunning = rest.filter((r) => r.item.status === "running").length;
@@ -283,7 +298,7 @@ export class StatusWidget {
 			lines.push(` ${theme.fg("muted", `\u2026 ${restParts.join(" · ")}`)}`);
 		} else {
 			for (const row of rows) {
-				lines.push(...renderWidgetItemLine(row.item, theme, row.spinner));
+				lines.push(...renderWidgetItemLine(row.item, theme, row.spinner, width));
 			}
 		}
 		return lines;

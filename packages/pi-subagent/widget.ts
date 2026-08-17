@@ -12,7 +12,6 @@
  */
 
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { clipTail } from "@everyx/pi-ui/spinner.js";
 import type { WidgetResult, WidgetRow, WidgetStatus } from "@everyx/pi-ui/widget.js";
 import { StatusWidget } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
@@ -60,15 +59,18 @@ export class AgentWidget {
 	}
 }
 
-/** Map the latest activity to structured widget rows (data, not formatted).
- *  The widget row is an *excerpt*: long streamed text is clipped to a tail
- *  so the excerpt stays bounded however long the agent runs. */
+/** Map the latest activity to structured widget rows (pure data, not
+ *  formatted). Width is unknown here — the widget render layer clips to the
+ *  terminal width (width-aware tail truncation). Tool args are flattened to
+ *  one line at this layer; text activity is passed through as-is (its
+ *  newlines are flattened by clipTail at render time — both paths keep the
+ *  zero-width-\n over-wide collapse impossible). */
 export function activityToRows(activity: AgentActivity | undefined): WidgetRow[] {
 	if (!activity) return [];
 	if (activity.kind === "thinking") return [{ style: "thinking", content: "Thinking..." }];
-	// Tool args can carry multi-line payloads (e.g. write) — flatten newlines and
-	// cap the excerpt so the widget line can never exceed terminal width (pi-tui
-	// 0.84.1 crashes on over-wide rendered lines).
-	if (activity.kind === "tool") return [{ style: "tool", content: `${activity.name}: ${clipTail(activity.args, 80)}` }];
-	return [{ style: "text", content: clipTail(activity.text, 80) }];
+	// Tool args can carry multi-line payloads (e.g. write) — flatten newlines
+	// into a single excerpt line (tail truncation happens at render time).
+	if (activity.kind === "tool")
+		return [{ style: "tool", content: `${activity.name}: ${activity.args.replace(/\s+/g, " ")}` }];
+	return [{ style: "text", content: activity.text }];
 }
