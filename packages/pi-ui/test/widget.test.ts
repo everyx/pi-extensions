@@ -197,7 +197,7 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		w.dispose();
 	});
 
-	it("the ticker keeps idle rows alive (only terminal statuses are cleaned)", async () => {
+	it("idle-only rows stop the animation clock — zero periodic redraws (pi-bash parity)", async () => {
 		let renders = 0;
 		let widgetFactory: unknown;
 		const ui = {
@@ -209,8 +209,16 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		w.add(item("a"));
 		(widgetFactory as (tui: unknown, th: unknown) => { render(): string[] })({ requestRender: () => renders++ }, theme);
 		w.updateStatus("a", "idle");
-		await sleep(200);
-		assert.ok(renders > 0, "idle row still ticks (kept alive)");
+		const afterIdle = renders;
+		await sleep(250);
+		assert.equal(renders, afterIdle, "no periodic redraws while idle (clock stopped)");
+		// Waking the persistent agent resumes the animation. The event-driven
+		// redraw fires immediately; only resumed clock ticks can increase the
+		// counter during the sleep window — so a stale > comparison would fail.
+		w.updateStatus("a", "running");
+		const before = renders;
+		await sleep(250);
+		assert.ok(renders > before, "animation resumes when a row runs again");
 		w.dispose();
 	});
 });

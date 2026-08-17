@@ -145,7 +145,7 @@ export class StatusWidget {
 		if (this.rows.has(item.id)) return;
 		this.total++;
 		this.rows.set(item.id, { item, spinner: new Spinner() });
-		this.ensureRunning();
+		this.reconcile();
 	}
 
 	/**
@@ -156,6 +156,7 @@ export class StatusWidget {
 		const row = this.rows.get(id);
 		if (!row) return;
 		row.item = { ...row.item, status };
+		this.reconcile();
 		this.tui?.requestRender();
 	}
 
@@ -164,6 +165,7 @@ export class StatusWidget {
 		const row = this.rows.get(id);
 		if (!row) return;
 		row.item = { ...row.item, rows };
+		this.reconcile();
 		this.tui?.requestRender();
 	}
 
@@ -174,14 +176,12 @@ export class StatusWidget {
 			this.dispose();
 			return;
 		}
+		this.reconcile();
 		this.tui?.requestRender();
 	}
 
 	dispose(): void {
-		if (this.animation) {
-			this.animation.unsubscribe();
-			this.animation = undefined;
-		}
+		this.stopAnimation();
 		this.rows.clear();
 		// An empty widget ends its lifetime — the progress meta starts fresh
 		// on the next tracked batch (counters are per widget-lifetime, not
@@ -199,27 +199,71 @@ export class StatusWidget {
 
 	// ── Internal ───────────────────────────────────────────
 
-	private ensureRunning(): void {
-		if (this.animation) return;
-		this.registerWidget();
-		// One shared clock for all animated surfaces: redraws run at the
-		// spinner cadence via the unified ticker, not a widget-local timer.
-		this.animation = ticker.subscribe(() => this.tick(), SPINNER_TICK_MS);
-	}
-
-	private tick(): void {
-		for (const [id, row] of this.rows) {
-			// Terminal statuses end the row's lifetime (folded into the counters).
-			// idle rows stay — a persistent agent remains addressable until stopped.
-			if (row.item.status === "done" || row.item.status === "failed" || row.item.status === "stopped") {
-				this.rows.delete(id);
-				this.countResult(statusToResult(row.item.status));
-			}
-		}
+	/**
+	 * Reconcile widget state after any structural change: fold ended rows into
+	 * the lifetime counters, keep the widget registered while rows exist, and
+	 * run the animation clock only while at least one row is running — pi-bash
+	 * parity: its Loader animates only during execution and stops at
+	 * setComplete. Idle/terminal rows are static; content events redraw them
+	 * on demand (zero periodic redraws when nothing is running). May dispose
+	 * the widget when the last row ends (immediate removal — SPEC: 完成/停止
+	 * 立即移除).
+	 */
+	private reconcile(): void {
+		this.cleanupTerminal();
 		if (this.rows.size === 0) {
 			this.dispose();
 			return;
 		}
+		// A row exists → the widget must be visible (registered) even if idle.
+		this.registerWidget();
+		if (this.hasRunning()) {
+			if (!this.animation) {
+				// One shared clock for all animated surfaces: redraws run at the
+				// spinner cadence via the unified ticker, not a widget-local timer.
+				this.animation = ticker.subscribe(() => this.tick(), SPINNER_TICK_MS);
+			}
+		} else {
+			this.stopAnimation();
+		}
+	}
+
+	private hasRunning(): boolean {
+		for (const { item } of this.rows.values()) {
+			if (item.status === "running") return true;
+		}
+		return false;
+	}
+
+	private stopAnimation(): void {
+		if (this.animation) {
+			this.animation.unsubscribe();
+			this.animation = undefined;
+		}
+	}
+
+	/**
+	 * Fold ended rows into the lifetime counters and remove them immediately
+	 * (idempotent — safe from event paths too). When the last row ends the
+	 * caller's next step disposes the widget, so a terminal status frame is
+	 * never rendered — the removal is immediate per SPEC, not tick-deferred.
+	 * idle rows stay — a persistent agent remains addressable until stopped.
+	 */
+	private cleanupTerminal(): void {
+		for (const [id, row] of this.rows) {
+			if (statusToResult(row.item.status) !== undefined) {
+				this.rows.delete(id);
+				this.countResult(statusToResult(row.item.status));
+			}
+		}
+	}
+
+	private tick(): void {
+		// reconcile covers every state change (subscription, stopAnimation,
+		// dispose on empty) — the tick only needs to redraw at the cadence.
+		// It may have disposed the widget (tui cleared); the optional chain
+		// is the safety net.
+		this.reconcile();
 		this.tui?.requestRender();
 	}
 
