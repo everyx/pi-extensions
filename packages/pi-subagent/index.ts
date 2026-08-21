@@ -32,6 +32,7 @@ import { resolveModel } from "./model.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
+import { runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
 import type { NotificationDetails } from "./types.js";
 import { sendView, spawnView, stopView } from "./views.js";
 import { AgentWidget } from "./widget.js";
@@ -320,12 +321,6 @@ async function handleMessage(
 	}
 }
 
-/** One-shot cleanup shared by every exit path: detach the abort handler, then stop the child. */
-async function teardownAgent(agent: AgentProcess, signal: AbortSignal | undefined, onAbort: () => void): Promise<void> {
-	signal?.removeEventListener("abort", onAbort);
-	await agent.stop().catch(() => {});
-}
-
 /** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
 function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: AgentCompletion): void {
 	const details: NotificationDetails = {
@@ -540,55 +535,59 @@ export default function (pi: ExtensionAPI) {
 				},
 			});
 
-			// Wire the execute AbortSignal (user cancel) to a graceful stop.
-			// Guarded: only stop while the agent is still live — a late abort
-			// (signal outliving this execute) must not stop an agent that
-			// already reached a terminal state or flip stoppedByControl.
-			const onAbort = () => {
-				if (agent.status === "queued" || agent.status === "running") void agent.stop();
-			};
-			if (signal?.aborted) {
-				onAbort();
-			} else {
-				signal?.addEventListener("abort", onAbort, { once: true });
+			// Lifecycle lives in spawn-session.ts — this switch only formats
+			// outcomes into tool results; classification rules are table-tested
+			// in test/spawn-session.test.ts.
+			let outcome: SpawnOutcome;
+			try {
+				outcome = await runSpawnSession(agent, {
+					task,
+					runInBackground: params.run_in_background === true,
+					signal,
+					hooks: {
+						onWorking: () =>
+							onUpdate?.({
+								content: [{ type: "text", text: "Working\u2026" }],
+								details: { task, startedAt, model: agent.model, thinking: agent.thinking },
+							}),
+						onBackgroundStarting: () =>
+							onUpdate?.({
+								content: [{ type: "text", text: `Starting ${agent.title}\u2026` }],
+								details: { runInBackground: true, title: agent.title, model: agent.model, thinking: agent.thinking },
+							}),
+						// Background settled: wire widget + registry + the completion
+						// chain here (mechanisms stay on this side of the seam).
+						onBackgroundSettled: (a) => {
+							ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
+							registry.register(a as AgentProcess);
+							void a
+								.waitForCompletion()
+								.then((completion) => registry.complete(a as AgentProcess, completion))
+								// Defensive: waitForCompletion is deadline-bounded and never
+								// rejects today — if it ever does, clean up without notifying.
+								.catch(() => registry.stopAndRemove(a.agentId));
+						},
+						onResident: (a) => {
+							ensureWidget(ctx);
+							registry.register(a as AgentProcess);
+							registry.markIdle(a.agentId);
+						},
+					},
+				});
+			} catch (err) {
+				return toErrorResult(err);
 			}
 
-			try {
-				// Background: show the starting spinner line while the child spawns.
-				// (Foreground keeps the tool header `Agent <title> (model)`.)
-				if (params.run_in_background) {
-					onUpdate?.({
-						content: [{ type: "text", text: `Starting ${agent.title}\u2026` }],
-						details: { runInBackground: true, title: agent.title, model: agent.model, thinking: agent.thinking },
+			switch (outcome.kind) {
+				case "spawn-failed":
+					// The isError return carries the failure to the LLM and the status
+					// line shows it to the user — no follow-up notification on top.
+					return spawnErrorResult(outcome, {
+						runInBackground: params.run_in_background,
+						title: agent.title,
 					});
-				}
 
-				const started = await agent.spawnAndSend(task);
-
-				// ── Background: return agent_id now, notify on completion ──
-				if (params.run_in_background) {
-					// Spawn failure: the isError return already carries the failure
-					// to the LLM and the status line shows it to the user — a
-					// followUp notification would deliver the same failure twice.
-					if (!started.ok) {
-						await teardownAgent(agent, signal, onAbort);
-						return spawnErrorResult(started, { runInBackground: true, title: agent.title });
-					}
-
-					// Abort is wired to stop while spawning only; once the spawn
-					// settled, the background agent runs on its own — the user
-					// controls it via agent_stop, and this (already returned)
-					// tool call's signal must not kill it later.
-					signal?.removeEventListener("abort", onAbort);
-					ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
-					registry.register(agent);
-					void agent
-						.waitForCompletion()
-						.then((completion) => registry.complete(agent, completion))
-						// Defensive: waitForCompletion is deadline-bounded and never
-						// rejects today — if it ever does, clean up without notifying.
-						.catch(() => registry.stopAndRemove(agent.agentId));
-
+				case "background-started": {
 					onUpdate?.({
 						content: [{ type: "text", text: `Started ${agent.title} (background)` }],
 						details: {
@@ -616,90 +615,60 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
-				// ── Foreground: block until completion ──
-				if (!started.ok) {
-					await teardownAgent(agent, signal, onAbort);
-					return spawnErrorResult(started);
-				}
-
-				onUpdate?.({
-					content: [{ type: "text", text: "Working\u2026" }],
-					details: { task, startedAt, model: agent.model, thinking: agent.thinking },
-				});
-
-				const completion = await agent.waitForCompletion();
-
-				// persistent: the process stays resident after completion (idle,
-				// zero token) and registers so agent_send can wake it later —
-				// foreground users already saw the inline result, so there is no
-				// follow-up notification (background notifications are the
-				// background path's job).
-				if (agent.persistent && completion.status === "completed") {
-					signal?.removeEventListener("abort", onAbort);
-					ensureWidget(ctx);
-					registry.register(agent);
-					registry.markIdle(agent.agentId);
-				} else {
-					await teardownAgent(agent, signal, onAbort);
-				}
-
-				// Failures and limit-stops are both errors for the caller: the
-				// stopped case (total timeout / hard token limit) must not look
-				// like a clean success — mark details.error so the isError
-				// workaround hook restores the error background. A stopped agent
-				// is also what a user cancel (abort) produces — don't blame that
-				// on the limits.
-				if (completion.status === "failed" || completion.status === "stopped") {
-					const message =
-						completion.status === "failed"
-							? completion.output || "Sub-agent failed."
-							: agent.stoppedByControl
-								? completion.output || "Sub-agent stopped."
-								: `${completion.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)`;
+				case "finished": {
+					// Failures and limit-stops are both errors for the caller: the
+					// stopped case (total timeout / hard token limit) must not look
+					// like a clean success. A user cancel (abort) also produces a
+					// stop — don't blame that on the limits.
+					if (outcome.status === "failed" || outcome.status === "stopped") {
+						const message =
+							outcome.status === "failed"
+								? outcome.output || "Sub-agent failed."
+								: outcome.stoppedByControl
+									? outcome.output || "Sub-agent stopped."
+									: `${outcome.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)`;
+						return {
+							content: [{ type: "text", text: truncateForContext(message) }],
+							details: {
+								task,
+								startedAt,
+								endedAt: outcome.endedAt,
+								// Full message (uncapped) — the user reads it on the card,
+								// folded but never dropped; the LLM sees the capped copy.
+								error: message,
+								model: agent.model,
+								thinking: agent.thinking,
+								sessionPath: outcome.sessionPath,
+								events: outcome.events,
+							},
+							isError: true,
+						};
+					}
 					return {
-						content: [{ type: "text", text: truncateForContext(message) }],
+						// Pure text result — no session hint: the output stands alone
+						// (the session path is the card footer, recoverable by the user).
+						// A persistent foreground agent stays resident — the LLM needs
+						// its id to wake it later with agent_send (or stop it).
+						content: [
+							{
+								type: "text",
+								text: outcome.resident
+									? `${truncateForContext(outcome.output)}${maybeWriteFullOutput(agent.agentId, outcome.output)}\n\n(agent @${agent.agentId} is resident \u2014 send it follow-ups with agent_send)`
+									: truncateForContext(outcome.output) + maybeWriteFullOutput(agent.agentId, outcome.output),
+							},
+						],
 						details: {
 							task,
+							sessionPath: outcome.sessionPath,
+							sessionId: outcome.sessionId,
 							startedAt,
-							endedAt: Date.now(),
-							// Full message (uncapped) — the user reads it on the card,
-							// folded but never dropped; the LLM sees the capped copy.
-							error: message,
+							endedAt: outcome.endedAt,
 							model: agent.model,
 							thinking: agent.thinking,
-							sessionPath: completion.sessionPath,
-							events: agent.getEvents(),
+							events: outcome.events,
 						},
-						isError: true,
 					};
 				}
-				return {
-					// Pure text result — no session hint: the output stands alone
-					// (the session path is the card footer, recoverable by the user).
-					// A persistent foreground agent stays resident — the LLM needs
-					// its id to wake it later with agent_send (or stop it).
-					content: [
-						{
-							type: "text",
-							text: agent.persistent
-								? `${truncateForContext(completion.output)}${maybeWriteFullOutput(agent.agentId, completion.output)}\n\n(agent @${agent.agentId} is resident — send it follow-ups with agent_send)`
-								: truncateForContext(completion.output) + maybeWriteFullOutput(agent.agentId, completion.output),
-						},
-					],
-					details: {
-						task,
-						sessionPath: completion.sessionPath,
-						sessionId: completion.sessionId,
-						startedAt,
-						endedAt: Date.now(),
-						model: agent.model,
-						thinking: agent.thinking,
-						events: agent.getEvents(),
-					},
-				};
-			} catch (err) {
-				await teardownAgent(agent, signal, onAbort);
-				return toErrorResult(err);
 			}
 		},
 
