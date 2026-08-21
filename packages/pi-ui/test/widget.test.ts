@@ -168,6 +168,11 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		assert.ok(!(lines[0] ?? "").includes("("), "no meta tail — the icon carries the state");
 	});
 
+	it("keeps the meta tail muted (regression: suffix lost its color)", () => {
+		const lines = renderWidgetItemLine(item("a"), theme, new Spinner());
+		assert.match(lines[0] ?? "", /muted: \(/);
+	});
+
 	it("updateStatus flips a row between running and idle in place", () => {
 		const ui = { setWidget: () => {} } as never;
 		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");

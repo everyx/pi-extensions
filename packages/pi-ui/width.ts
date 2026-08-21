@@ -9,7 +9,22 @@
  */
 
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { clipTail } from "./spinner.js";
+
+/** Collapse whitespace and cut long tails to `max` columns (ellipsis prefix). */
+export function clipTail(s: string, max = 60): string {
+	const clean = s.replace(/\s+/g, " ").trim();
+	if (visibleWidth(clean) <= max) return clean;
+	const chars = [...clean];
+	let w = 0;
+	let tail = "";
+	for (let i = chars.length - 1; i >= 0; i--) {
+		const cw = visibleWidth(chars[i]);
+		if (w + cw > max - 1) break;
+		tail = chars[i] + tail;
+		w += cw;
+	}
+	return `\u2026${tail}`;
+}
 
 /** Cut plain text to `max` columns keeping the head, trailing ellipsis. */
 export function capPlain(s: string, max: number): string {
@@ -23,6 +38,22 @@ export function capPlain(s: string, max: number): string {
 		w += cw;
 	}
 	return `${head}\u2026`;
+}
+
+/**
+ * Task title, rendered safe for a single quoted line: tabs/newlines are
+ * flattened and embedded double quotes neutralized (so quotes around the
+ * title can't be broken). Pass `max` to also cap the width with a trailing
+ * ellipsis (single-line contexts without a wrap fallback); omit it where the
+ * renderer wraps long lines (card headers — bash-style full display).
+ */
+export function safeTitle(title: string | undefined, max?: number): string {
+	const flat = (title ?? "(untitled)")
+		.replace(/[\r\n\t]+/g, " ")
+		.replace(/"/g, "'")
+		.trim();
+	if (max === undefined) return flat;
+	return capPlain(flat, max);
 }
 
 /**

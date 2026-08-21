@@ -86,7 +86,7 @@ export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Sp
 	const line = structRow({
 		prefix: ` ${status} `,
 		content: item.title,
-		suffix: meta ? ` ${meta}` : "",
+		suffix: meta ? theme.fg("muted", ` ${meta}`) : "",
 		width,
 		styleContent: (capped) => theme.fg("bashMode", capped),
 	});
