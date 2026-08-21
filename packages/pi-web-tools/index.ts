@@ -16,7 +16,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { webFetch } from "./fetch/fetch.js";
-import { buildWebSearchSchema, WebFetchParamsSchema } from "./schema.js";
+import { buildWebSearchSchema, type WebFetchParams, WebFetchParamsSchema } from "./schema.js";
 import { exaApiKey, isExaAvailable, searchWithExa } from "./search/api/exa.js";
 import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.js";
 import { isTavilyAvailable, searchWithTavily } from "./search/api/tavily.js";
@@ -252,15 +252,16 @@ async function runChannel(
 // ── web_fetch ────────────────────────────────────────────────────
 
 async function executeFetch(
-	url: string,
+	args: WebFetchParams,
 	signal: AbortSignal | undefined,
 ): Promise<{
 	content: { type: "text"; text: string }[];
 	details: Record<string, unknown>;
 	isError: boolean;
 }> {
+	const url = args.url;
 	const startedAt = Date.now();
-	const result = await webFetch(url, signal);
+	const result = await webFetch(url, { raw: args.raw, signal });
 	if (result.error) {
 		return {
 			content: [{ type: "text", text: result.error }],
@@ -268,14 +269,16 @@ async function executeFetch(
 			isError: true,
 		};
 	}
-	let text = result.title ? `${result.title}\n\n${result.markdown}` : result.markdown;
+	let text = result.title ? `${result.title}\n\n${result.content}` : result.content;
 	// Truncated content: inline marker with the full-output path (one field,
 	// self-describing) — the LLM reads the preview and knows the rest is a
 	// read away.
 	if (result.outputPath) text += `\n\n(output truncated — full output: ${result.outputPath})`;
 	return {
 		content: [{ type: "text", text }],
-		details: { data: { title: result.title, markdown: result.markdown, startedAt, endedAt: Date.now() } },
+		details: {
+			data: { title: result.title, content: result.content, startedAt, endedAt: Date.now() },
+		},
 		isError: false,
 	};
 }
@@ -365,11 +368,11 @@ export default function (pi: ExtensionAPI) {
 				const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
 				return dur ? [dur] : undefined;
 			},
-			body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
+			body: { text: (ctx) => (ctx.result?.data as { content?: string } | undefined)?.content ?? "" },
 		}),
 		async execute(_toolCallId, raw, signal) {
-			const url = (raw as { url: string }).url;
-			return executeFetch(url, signal);
+			const args = raw as WebFetchParams;
+			return executeFetch(args, signal);
 		},
 	});
 }

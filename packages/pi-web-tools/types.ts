@@ -63,11 +63,14 @@ export interface ChannelSearchContext {
 	timeoutMs?: number;
 }
 
-/** web_fetch result (SPEC: { title, markdown }; error carries HTTP status). */
+/** web_fetch result. `content` is converted Markdown or the raw source
+ *  (non-prose bodies wrapped in a content-typed code fence); error carries
+ *  HTTP status. */
 export interface WebFetchResult {
 	title: string;
-	markdown: string;
-	/** /tmp path of the full text when markdown was truncated; the LLM can read it. */
+	/** Content — Markdown (HTML converted) or raw source (fenced by content type). */
+	content: string;
+	/** /tmp path of the full text when content was truncated; the LLM can read it. */
 	outputPath?: string;
 	error?: string;
 }

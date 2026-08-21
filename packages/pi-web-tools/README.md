@@ -5,7 +5,7 @@
 Web primitives for Pi — `web_search` + `web_fetch`.
 
 - **`web_search`** — search the web. Free-tier search APIs first (Exa / Tavily / Parallel), then real-browser search (Google / Bing / Baidu / Yandex via BrowserSkill). Engine defaults follow the system language (e.g. a Chinese system adds Bing, served from cn.bing.com); pass `locale` explicitly for localized results; full search-operator syntax when you pick an engine explicitly.
-- **`web_fetch`** — fetch a URL as Markdown (LLM / token friendly), with real-browser UA when BrowserSkill is available.
+- **`web_fetch`** — fetch a URL: HTML pages convert to Markdown by default (LLM / token friendly), pass `raw: true` to get the source HTML as-is (fenced by content type). Non-HTML (JSON/XML/text) is always returned as-is. Real-browser UA when BrowserSkill is available.
 
 Two primitives, nothing else — no content storage, no curator, no PDF/video extraction.
 

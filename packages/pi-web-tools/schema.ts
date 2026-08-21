@@ -63,10 +63,17 @@ export function buildWebSearchSchema(engines: EngineId[]) {
 }
 
 export const WebFetchParamsSchema = Type.Object({
-	url: Type.String({
-		description: "The http(s) URL to fetch as Markdown.",
-	}),
+	url: Type.String({ description: "The http(s) URL to fetch." }),
+	raw: Type.Optional(
+		Type.Boolean({
+			description:
+				"Return the raw source instead of converted Markdown (HTML stays HTML, " +
+				"non-prose bodies are wrapped in a content-typed code fence). " +
+				"Default false: HTML pages are converted to Markdown; non-HTML (JSON/XML/plain text) " +
+				"is always returned as-is either way.",
+		}),
+	),
 });
 
 export type WebSearchParams = import("./types.js").WebSearchParams;
-export type WebFetchParams = { url: string };
+export type WebFetchParams = { url: string; raw?: boolean };

@@ -61,7 +61,7 @@ const fetchView = createToolView<Record<string, unknown>, unknown>({
 		const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
 		return dur ? [dur] : undefined;
 	},
-	body: { text: (ctx) => (ctx.result?.data as { markdown?: string } | undefined)?.markdown ?? "" },
+	body: { text: (ctx) => (ctx.result?.data as { content?: string } | undefined)?.content ?? "" },
 });
 
 const themeName = process.env.THEME || "light";
@@ -416,7 +416,7 @@ const pathC: LifecyclePath = {
 					details: {
 						data: {
 							title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust",
-							markdown: fetchedMarkdown,
+							content: fetchedMarkdown,
 							startedAt: 1_752_000_000_000,
 							endedAt: 1_752_000_001_800,
 						},
@@ -436,7 +436,7 @@ const pathC: LifecyclePath = {
 					details: {
 						data: {
 							title: "Rocket — Simple, Fast, Type-Safe Web Framework for Rust",
-							markdown: fetchedMarkdown,
+							content: fetchedMarkdown,
 							startedAt: 1_752_000_000_000,
 							endedAt: 1_752_000_001_800,
 						},

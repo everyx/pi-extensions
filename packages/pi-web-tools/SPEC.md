@@ -39,11 +39,13 @@ web_search(
 ### `web_fetch`
 
 ```
-web_fetch(url: string) → { title, markdown }
+web_fetch(url: string, raw?: boolean) → { title, content }
 ```
 
-- HTML → Markdown 转换（转化即可读、省 token）。
-- **返回不含 url**：工具的定位是"了解 URL 对应页面的内容"——返回即内容（title + markdown）；重定向是 HTTP 层透明行为，LLM 引用入口 URL 即可（用户访问时自动跟随），无需回显落地 URL。
+- **形态随内容自带**：参数 `raw` 表达请求意图（默认 false = 要易读版；true = 要原始）。`content` 的形态由内容自身与围栏标注表达（HTML 源码→```html、JSON→```json、XML→```xml），LLM/TUI 从内容与围栏标签判断，无需独立格式字段。
+- HTML（raw: false）→ 转 Markdown（转化即可读、省 token）作为正文；HTML（raw: true）→ 原始 HTML 源码（```html 围栏）。
+- 非 HTML（JSON/XML/纯文本）：无论 raw 取值，一律原样返回（它们本就是可读形态，无 markdown 转变）；JSON/XML 包对应围栏，markdown/纯文本作为正文不包——markdown/raw 只在 HTML 页面有区分，非 HTML 天生是 raw。
+- **返回不含 url**：工具的定位是"了解 URL 对应页面的内容"——返回即内容（title + content）；重定向是 HTTP 层透明行为，LLM 引用入口 URL 即可（用户访问时自动跟随），无需回显落地 URL。
 - **错误时 `error` 字段承载 HTTP 状态码**（如 `HTTP 404: Not Found` / `HTTP 403: Forbidden`）——成功时不需要 status 字段（有内容即成功）。
 - **只做核心 fetch**：静态页面 HTML → Markdown。复杂抓取（带 cookies 的认证页、POST/API、二进制下载、视频流、交互页面）→ **交给 LLM 自己用 bash curl**（提供能力而非方案）。
 - 不做独立缓存 / storage（即用即走）。
@@ -172,7 +174,13 @@ UA 来源优先级：
   本地转换输出同一格式。
 - **内容判定**：仅 HTML/XHTML 走 markdown 提取；其他文本响应（JSON/XML/
   纯文本等）原样返回原文（title 空——原文无 title 不编造）；二进制
-  （image/audio/video 等）报错。
+  （image/audio/video 等）报错。非正文（JSON/XML/原始 HTML）包对应
+  content-type 的 markdown 围栏，正文（markdown/纯文本）不包。
+- **raw 语义**：`raw: true` 时 HTML 也返回原始源码（```html 围栏），请求头
+  首选 `text/html`（不协商 markdown 正文）；不做 markdown 转换、不做 CSR
+  渲染（要源码就不是要渲染结果）；站点 URL 重写（如 GitHub blob→raw）仍
+  保留——那是 URL 语义改写，非格式变换。raw 路径不解析 title（一律空——
+  raw = 纯原文，不做任何解析；默认路径才会提取 frontmatter title）。
 - **CSR 页**（壳空 + JS 渲染）：本地 headless 渲染后返回真实内容给 LLM，
   渲染不可用才回落占位——定位是 LLM friendly 抓取工具，不给占位。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；

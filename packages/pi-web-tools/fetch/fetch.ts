@@ -23,6 +23,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** Accept header: prefer Markdown for Agents (content negotiation, Cloudflare). */
 const ACCEPT =
 	"text/markdown, text/html, application/xhtml+xml, application/xml;q=0.9, image/avif, image/webp, */*;q=0.8";
+/** For raw fetches: request the HTML source, not a negotiated markdown body. */
+const ACCEPT_HTML = "text/html, application/xhtml+xml, application/xml;q=0.9, image/avif, image/webp, */*;q=0.8";
 
 interface FetchPageResult {
 	ok: boolean;
@@ -35,11 +37,14 @@ interface FetchPageResult {
 /** Context cap for fetched content: 50KB of UTF-8 bytes — pi truncateHead
  *  parity. LLM token budgets track bytes, not char counts, so byte-capping
  *  keeps Chinese/emoji-heavy pages inside the same budget as ASCII ones. */
-const MAX_MARKDOWN_BYTES = 50_000;
+const MAX_CONTENT_BYTES = 50_000;
 
-/** Cap fetched markdown to the context budget, keeping the head. */
-export function capMarkdown(text: string): string {
-	return truncateHead(text, { maxBytes: MAX_MARKDOWN_BYTES }).content;
+/** Cap content to the context budget (50KB of UTF-8 bytes — pi truncateHead
+ *  parity). LLM token budgets track bytes, not char counts, so byte-capping
+ *  keeps Chinese/emoji-heavy pages inside the same budget as ASCII ones.
+ *  Applies to converted Markdown and raw source alike. */
+export function capContent(text: string): string {
+	return truncateHead(text, { maxBytes: MAX_CONTENT_BYTES }).content;
 }
 
 /**
@@ -48,7 +53,7 @@ export function capMarkdown(text: string): string {
  * the path (one field, self-describing), like pi-subagent's full-output file.
  */
 function stashIfTruncated(text: string, url: string): string | undefined {
-	if (Buffer.byteLength(text, "utf8") <= MAX_MARKDOWN_BYTES) return undefined;
+	if (Buffer.byteLength(text, "utf8") <= MAX_CONTENT_BYTES) return undefined;
 	const key = createHash("sha1").update(url).digest("hex").slice(0, 8);
 	const file = `/tmp/pi-web-fetch-${key}.txt`;
 	try {
@@ -65,7 +70,7 @@ function isHtmlContent(contentType: string): boolean {
 }
 
 /** Direct HTTP fetch with browser-like headers + timeout. */
-async function fetchPage(url: string, ua: string, signal?: AbortSignal): Promise<FetchPageResult> {
+async function fetchPage(url: string, ua: string, signal?: AbortSignal, preferHtml = false): Promise<FetchPageResult> {
 	let response: Response;
 	try {
 		response = await fetchWithTimeout(
@@ -73,7 +78,7 @@ async function fetchPage(url: string, ua: string, signal?: AbortSignal): Promise
 			{
 				headers: {
 					"User-Agent": ua,
-					Accept: ACCEPT,
+					Accept: preferHtml ? ACCEPT_HTML : ACCEPT,
 					"Accept-Language": "en-US,en;q=0.9",
 					"Cache-Control": "no-cache",
 					"Sec-Fetch-Dest": "document",
@@ -86,7 +91,11 @@ async function fetchPage(url: string, ua: string, signal?: AbortSignal): Promise
 		);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		return { ok: false, status: 0, error: message };
+		// undici wraps connection-level failures as "fetch failed" with the
+		// code on err.cause — surface it so callers can tell a server-side
+		// reset (anti-bot / Cloudflare) from other network errors.
+		const code = (err as { cause?: { code?: string } }).cause?.code;
+		return { ok: false, status: 0, error: code ? `${message} (${code})` : message };
 	}
 
 	const contentType = response.headers.get("content-type") ?? "";
@@ -121,46 +130,85 @@ async function fetchPage(url: string, ua: string, signal?: AbortSignal): Promise
 	return { ok: true, status: response.status, contentType, text };
 }
 
-/** The web_fetch primitive. Returns { title, markdown } with error field on failure. */
-export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFetchResult> {
+export interface WebFetchOptions {
+	/** Return the raw source as-is instead of converted Markdown (HTML stays HTML). */
+	raw?: boolean;
+	signal?: AbortSignal;
+}
+
+/** Language tag for non-prose bodies — lets both the TUI (no mis-rendering)
+ *  and the LLM (shape from the fence label) read JSON/XML/HTML correctly. */
+function codeBlockLang(contentType: string): string | undefined {
+	if (contentType.includes("html")) return "html";
+	if (contentType.includes("json")) return "json";
+	if (contentType.includes("xml")) return "xml";
+	return undefined;
+}
+
+/** Wrap non-prose content in a fenced code block labelled by content type. */
+function fenced(content: string, lang?: string): string {
+	return lang ? `\`\`\`${lang}\n${content}\n\`\`\`` : content;
+}
+
+/** The web_fetch primitive. Returns { title, content } with error field on failure. */
+export async function webFetch(url: string, options: WebFetchOptions = {}): Promise<WebFetchResult> {
+	const { raw = false, signal } = options;
 	if (!/^https?:\/\//i.test(url)) {
-		return { title: "", markdown: "", error: `Unsupported URL: ${url} (only http/https)` };
+		return { title: "", content: "", error: `Unsupported URL: ${url} (only http/https)` };
 	}
 
 	const ua = await resolveUserAgent();
 	// Site adapters rewrite content URLs (e.g. GitHub blob → raw); fall back
 	// to the original URL when the rewrite target is unavailable.
 	const targetUrl = adaptUrl(url) ?? url;
-	let page = await fetchPage(targetUrl, ua, signal);
+	// raw asks for the source, so prefer an HTML (not negotiated-markdown) body.
+	let page = await fetchPage(targetUrl, ua, signal, raw);
 	if (targetUrl !== url && (!page.ok || !page.text)) {
-		page = await fetchPage(url, ua, signal);
+		page = await fetchPage(url, ua, signal, raw);
 	}
 
 	// Direct HTTP failure → normalized error.
 	if (!page.ok) {
 		return {
 			title: "",
-			markdown: "",
+			content: "",
 			error: page.error || `Failed to fetch ${url}`,
 		};
 	}
 
-	// Non-HTML responses return raw content as-is. text/markdown (negotiated)
-	// is already the target format — title from its frontmatter; other text
-	// bodies (JSON/XML/plain) have no title of their own.
+	// raw: return the source content as-is — HTML stays HTML (no markdown
+	// conversion, no CSR rendering). Site URL rewrites still apply (that's a
+	// URL-semantic rewrite, not a format transform). Non-prose bodies get a
+	// fenced code block labelled by content type.
+	if (raw) {
+		const text = (page.text ?? "").trim();
+		if (!text) return { title: "", content: "", error: "Empty response" };
+		const outputPath = stashIfTruncated(text, url);
+		const lang = codeBlockLang(page.contentType ?? "");
+		return { title: "", content: fenced(capContent(text), lang), outputPath };
+	}
+
+	// Non-HTML: the source is already readable — return it as-is (no markdown
+	// conversion is possible). structurJSON/XML bodies get a fenced code block
+	// so the caller never mistakes them for prose; markdown bodies keep their
+	// frontmatter title and show as-is.
 	if (page.contentType && !isHtmlContent(page.contentType)) {
 		const text = (page.text ?? "").trim();
-		if (!text) return { title: "", markdown: "", error: "Empty response" };
+		if (!text) return { title: "", content: "", error: "Empty response" };
 		const outputPath = stashIfTruncated(text, url);
-		return page.contentType.includes("text/markdown")
-			? { title: titleFromMarkdown(text), markdown: capMarkdown(text), outputPath }
-			: { title: "", markdown: capMarkdown(text), outputPath };
+		const isMd = page.contentType.includes("text/markdown");
+		const lang = codeBlockLang(page.contentType);
+		return {
+			title: isMd ? titleFromMarkdown(text) : "",
+			content: isMd ? capContent(text) : fenced(capContent(text), lang),
+			outputPath,
+		};
 	}
 
 	const extracted = htmlToMarkdown(page.text ?? "");
 	if (extracted.markdown && !extracted.error) {
 		const outputPath = stashIfTruncated(extracted.markdown, url);
-		return { title: extracted.title, markdown: capMarkdown(extracted.markdown), outputPath };
+		return { title: extracted.title, content: capContent(extracted.markdown), outputPath };
 	}
 
 	// Extraction failed or was incomplete + JS framework markers → CSR page.
@@ -172,7 +220,7 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 			if (renderedExtract.markdown && !renderedExtract.error) {
 				return {
 					title: renderedExtract.title,
-					markdown: capMarkdown(renderedExtract.markdown),
+					content: capContent(renderedExtract.markdown),
 				};
 			}
 		}
@@ -180,13 +228,13 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<WebFe
 
 	// Non-CSR partial extraction: return what we have (status quo).
 	if (extracted.markdown) {
-		return { title: extracted.title, markdown: capMarkdown(extracted.markdown) };
+		return { title: extracted.title, content: capContent(extracted.markdown) };
 	}
 
 	const jsRendered = isLikelyJSRendered(page.text ?? "");
 	return {
 		title: "",
-		markdown: "",
+		content: "",
 		error: jsRendered ? "(no readable content) — page appears to be JavaScript-rendered" : "(no readable content)",
 	};
 }
