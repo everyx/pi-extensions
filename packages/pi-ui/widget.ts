@@ -11,8 +11,9 @@
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import { clipTail, formatDuration, SPINNER_TICK_MS, Spinner, safeTitle } from "./spinner.js";
+import { formatDuration, SPINNER_TICK_MS, Spinner } from "./spinner.js";
 import { type TickerHandle, ticker } from "./ticker.js";
+import { structRow } from "./width.js";
 
 const WIDGET_KEY = "pi-ui-status";
 // 3 columns: ` ⠋ ` — content aligns with the @name title start (1 + glyph 1 + space).
@@ -53,13 +54,10 @@ interface WidgetRender {
 }
 
 /** Render one item's status line + activity rows (colors live here).
- *  `width` is the terminal width pi passes at render time — activity rows are
- *  clipped to exactly `width - indent` (no safety margin: visibleWidth is the
- *  same metric pi's over-wide crash check uses), so wide terminals show more
- *  of the tail and narrow ones stay bounded. */
+ *  `width` is the terminal width pi passes at render time. Both the title
+ *  line and activity rows go through structRow (width.ts) — the single
+ *  width-safety exit — so no emitted line can exceed the terminal. */
 export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Spinner, width = 80): string[] {
-	const label = safeTitle(item.title, 40);
-
 	let status: string;
 	let meta: string;
 	if (item.status === "running") {
@@ -82,18 +80,26 @@ export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Sp
 		meta = "(done)";
 	}
 
-	const line = ` ${status} ${theme.fg("bashMode", label)} ${theme.fg("muted", meta)}`;
-	// Clip the *plain* text to width first, then style — truncating after
-	// styling could cut an ANSI sequence in half. Tail-keeping (clipTail)
-	// preserves the latest content, pi-bash style.
-	const rows = (item.rows ?? []).map((r) => {
-		// Exact: EXCERPT_INDENT (3) + clipped content ≤ width. visibleWidth is
-		// the same metric pi's over-wide crash check uses (grapheme-aware), so
-		// a row ≤ width here can never trip it. Zero safety margin needed.
-		const max = Math.max(0, width - EXCERPT_INDENT.length);
-		const clipped = clipTail(r.content, max);
-		return `${EXCERPT_INDENT}${styleRow({ ...r, content: clipped }, theme)}`;
+	// Title row: ` ⠋ <title> (<meta>)` — prefix fixes the alignment (same
+	// 3 columns as EXCERPT_INDENT), meta stays visible on the right, and
+	// structRow caps the title to exactly what fits.
+	const line = structRow({
+		prefix: ` ${status} `,
+		content: item.title,
+		suffix: meta ? ` ${meta}` : "",
+		width,
+		styleContent: (capped) => theme.fg("bashMode", capped),
 	});
+	// Activity rows: indented under the title, keeping the latest content.
+	const rows = (item.rows ?? []).map((r) =>
+		structRow({
+			prefix: EXCERPT_INDENT,
+			content: r.content,
+			width,
+			keep: "tail",
+			styleContent: (clipped) => styleRow({ ...r, content: clipped }, theme),
+		}),
+	);
 	return [line, ...rows];
 }
 

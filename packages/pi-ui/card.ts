@@ -46,7 +46,9 @@ export function renderIcon(icon: CardIcon, theme: Theme): string {
 	return theme.fg(icon.color, icon.glyph);
 }
 
-/** Bold name + quoted sanitized title (`Agent "task"`, `web_search "q"`). */
+/** Bold name + quoted sanitized title (`Agent "task"`, `web_search "q"`).
+ *  Title is not width-capped — the Text renderer wraps long headers
+ *  (bash-style full display); safeTitle still flattens newlines/quotes. */
 export function renderNameTitle(name: string, title: string | undefined, theme: Theme): string {
 	const bold = theme.fg("toolTitle", theme.bold(name));
 	return title ? `${bold} ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : bold;

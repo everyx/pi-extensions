@@ -314,7 +314,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: buildWebSearchSchema(ENABLED.engines),
 		...createToolView<Record<string, unknown>, unknown>({
 			name: "web_search",
-			title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? "").slice(0, 60),
+			title: (ctx) => String((ctx.args as Record<string, unknown>).query ?? ""),
 			tail: (ctx) => (ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 			meta: (ctx) => {
 				const d = (ctx.result?.data ?? {}) as {
@@ -358,7 +358,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: WebFetchParamsSchema,
 		...createToolView<Record<string, unknown>, unknown>({
 			name: "web_fetch",
-			title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? "").slice(0, 80),
+			title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? ""),
 			tail: (ctx) => (ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 			meta: (ctx) => {
 				// No page title in meta — the URL already fills the header, and

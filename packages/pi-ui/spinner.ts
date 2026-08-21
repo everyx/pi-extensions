@@ -79,14 +79,16 @@ export function clipTail(s: string, max = 60): string {
 /**
  * Task title, rendered safe for a single quoted line: tabs/newlines are
  * flattened and embedded double quotes neutralized (so quotes around the
- * title can't be broken), then capped with a trailing ellipsis.
+ * title can't be broken). Pass `max` to also cap the width with a trailing
+ * ellipsis (single-line contexts without a wrap fallback); omit it where the
+ * renderer wraps long lines (card headers — bash-style full display).
  */
-export function safeTitle(title: string | undefined, max = 40): string {
+export function safeTitle(title: string | undefined, max?: number): string {
 	const flat = (title ?? "(untitled)")
 		.replace(/[\r\n\t]+/g, " ")
 		.replace(/"/g, "'")
 		.trim();
-	if (visibleWidth(flat) <= max) return flat;
+	if (max === undefined || visibleWidth(flat) <= max) return flat;
 	// Head within `max - 1` columns, trailing ellipsis. Plain output (no ANSI)
 	// so callers can wrap it in their own theme colors.
 	let w = 0;

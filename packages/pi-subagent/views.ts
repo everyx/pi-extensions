@@ -23,14 +23,14 @@ export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, 
 	const title = data.title;
 	const idPart = id ? `@${id}` : "";
 	const joined = title && idPart ? `${idPart} — ${title}` : (title ?? idPart);
-	return joined.slice(0, 60);
+	return joined;
 }
 
 export const spawnView = createToolView<Record<string, unknown>, Record<string, unknown>>({
 	name: "agent_spawn",
 	title: (ctx) => {
 		const d = ctx.result?.data as { title?: string; task?: string } | undefined;
-		return String((ctx.args as { title?: unknown }).title ?? d?.title ?? d?.task ?? "").slice(0, 60);
+		return String((ctx.args as { title?: unknown }).title ?? d?.title ?? d?.task ?? "");
 	},
 	tail: (ctx) => {
 		if (ctx.status === "error") return "start failed";

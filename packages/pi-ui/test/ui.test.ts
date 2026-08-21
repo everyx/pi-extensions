@@ -62,6 +62,10 @@ describe("safeTitle", () => {
 		assert.ok(visibleWidth(out) <= 40, `width ${visibleWidth(out)} > 40`);
 		assert.ok(out.endsWith("\u2026"));
 	});
+	it("keeps long titles intact when no max is passed (wrap-fallback contexts)", () => {
+		const long = "x".repeat(200);
+		assert.equal(safeTitle(long), long);
+	});
 	it("defaults to (untitled)", () => {
 		assert.equal(safeTitle(undefined), "(untitled)");
 	});
