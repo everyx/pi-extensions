@@ -8,9 +8,10 @@ describe("stashOverflow", () => {
 		const text = `# Doc\n\n${"x".repeat(100_000)}`;
 		const r = stashOverflow(text, "agent-1");
 		assert.ok(r.text.startsWith("# Doc"));
-		assert.ok(r.stashPath?.startsWith("/tmp/pi-stash-"));
-		assert.ok(existsSync(r.stashPath!));
-		assert.equal(readFileSync(r.stashPath!, "utf8"), text, "stash holds the FULL text");
+		const stash = r.stashPath ?? "";
+		assert.ok(stash.startsWith("/tmp/pi-stash-"));
+		assert.ok(existsSync(stash));
+		assert.equal(readFileSync(stash, "utf8"), text, "stash holds the FULL text");
 	});
 
 	it("keep tail keeps the latest (pi-bash style)", () => {

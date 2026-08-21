@@ -13,7 +13,7 @@ describe("stashOverflow — context budget (pi truncateHead parity)", () => {
 	it("caps ASCII content at 50KB of bytes, keeping the head", () => {
 		const text = `# Doc\n\n${"x".repeat(100_000)}`;
 		const r = stashOverflow(text, "k");
-		assert.ok(Buffer.byteLength(r.text, "utf8") <= 50_000, `bytes ${Buffer.byteLength(r.text, "utf8")} > 50KB`);
+		assert.ok(Buffer.byteLength(r.text, "utf8") <= 51_200, `bytes ${Buffer.byteLength(r.text, "utf8")} > 50KiB`);
 		assert.ok(r.text.startsWith("# Doc"), "head must be kept");
 		assert.ok(r.stashPath?.startsWith("/tmp/pi-stash-"), "full text stashed");
 	});
@@ -22,7 +22,7 @@ describe("stashOverflow — context budget (pi truncateHead parity)", () => {
 		// 50k CJK chars = ~150KB bytes — char slicing would blow the budget 3x.
 		const text = `# 文档\n\n${"调研亮色高亮色处理方案".repeat(20_000)}`;
 		const r = stashOverflow(text, "k");
-		assert.ok(Buffer.byteLength(r.text, "utf8") <= 50_000, `bytes ${Buffer.byteLength(r.text, "utf8")} > 50KB`);
+		assert.ok(Buffer.byteLength(r.text, "utf8") <= 51_200, `bytes ${Buffer.byteLength(r.text, "utf8")} > 50KiB`);
 		assert.ok(r.text.startsWith("# 文档"), "head must be kept");
 		assert.ok(r.stashPath, "full text stashed even when only the line limit is far away");
 	});

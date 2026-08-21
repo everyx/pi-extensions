@@ -41,7 +41,7 @@ export interface SpawnSessionAgent {
  *  onBackgroundSettled hook. A user abort surfaces as finished/stopped with
  *  stoppedByControl — it is an outcome, not a separate kind. */
 export type SpawnOutcome =
-	| { kind: "spawn-failed"; error: string; startedAt: number }
+	| { kind: "spawn-failed"; error: string }
 	| { kind: "background-started"; agent: SpawnSessionAgent; startedAt: number }
 	| {
 			kind: "finished";
@@ -97,7 +97,7 @@ export async function runSpawnSession(
 		const started = await agent.spawnAndSend(task);
 		if (!started.ok) {
 			await teardown();
-			return { kind: "spawn-failed", error: started.error, startedAt: agent.startedAt };
+			return { kind: "spawn-failed", error: started.error };
 		}
 
 		// Background: return now. The abort listener detaches here — once the

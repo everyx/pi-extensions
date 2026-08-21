@@ -1,3 +1,13 @@
+/**
+ * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
+ *
+ *   - UA: system default browser version → standard UA string (see ua.ts),
+ *     cached per process.
+ *   - Browser-like request headers (Accept: text/markdown content negotiation),
+ *     timeout, SPA empty-body detection, error normalization (HTTP status →
+ *     error field, not a throw).
+ */
+
 import { stashOverflow } from "@everyx/pi-ui/context.js";
 import { fetchWithTimeout } from "../http.js";
 import type { WebFetchResult } from "../types.js";
