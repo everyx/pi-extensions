@@ -1,26 +1,30 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { capContent, webFetch } from "../fetch/fetch.js";
+import { stashOverflow } from "@everyx/pi-ui/context.js";
+import { webFetch } from "../fetch/fetch.js";
 
-describe("capContent — byte-budget truncation (pi truncateHead parity)", () => {
+describe("stashOverflow — context budget (pi truncateHead parity)", () => {
 	it("passes short text through unchanged", () => {
 		const text = "# Title\n\nshort body";
-		assert.equal(capContent(text), text);
+		assert.equal(stashOverflow(text, "k").text, text);
+		assert.equal(stashOverflow(text, "k").stashPath, undefined);
 	});
 
 	it("caps ASCII content at 50KB of bytes, keeping the head", () => {
 		const text = `# Doc\n\n${"x".repeat(100_000)}`;
-		const out = capContent(text);
-		assert.ok(Buffer.byteLength(out, "utf8") <= 50_000, `bytes ${Buffer.byteLength(out, "utf8")} > 50KB`);
-		assert.ok(out.startsWith("# Doc"), "head must be kept");
+		const r = stashOverflow(text, "k");
+		assert.ok(Buffer.byteLength(r.text, "utf8") <= 50_000, `bytes ${Buffer.byteLength(r.text, "utf8")} > 50KB`);
+		assert.ok(r.text.startsWith("# Doc"), "head must be kept");
+		assert.ok(r.stashPath?.startsWith("/tmp/pi-stash-"), "full text stashed");
 	});
 
 	it("caps CJK content at the same byte budget (not char count)", () => {
 		// 50k CJK chars = ~150KB bytes — char slicing would blow the budget 3x.
 		const text = `# 文档\n\n${"调研亮色高亮色处理方案".repeat(20_000)}`;
-		const out = capContent(text);
-		assert.ok(Buffer.byteLength(out, "utf8") <= 50_000, `bytes ${Buffer.byteLength(out, "utf8")} > 50KB`);
-		assert.ok(out.startsWith("# 文档"), "head must be kept");
+		const r = stashOverflow(text, "k");
+		assert.ok(Buffer.byteLength(r.text, "utf8") <= 50_000, `bytes ${Buffer.byteLength(r.text, "utf8")} > 50KB`);
+		assert.ok(r.text.startsWith("# 文档"), "head must be kept");
+		assert.ok(r.stashPath, "full text stashed even when only the line limit is far away");
 	});
 });
 

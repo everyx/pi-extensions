@@ -150,7 +150,7 @@ describe("runSpawnSession", () => {
 	it("hooks fire in order: onWorking before send, not after", async () => {
 		const order: string[] = [];
 		const agent = fakeAgent({
-			spawnAndSend: async (prompt) => {
+			spawnAndSend: async (_prompt) => {
 				order.push("send");
 				return { ok: true };
 			},

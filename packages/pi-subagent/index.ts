@@ -25,6 +25,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
+import { stashOverflow, truncationMarker } from "@everyx/pi-ui/context.js";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, MSG_STATUS_KEY } from "./event-interpret.js";
@@ -223,22 +224,14 @@ export function truncateForContext(text: string): string {
 }
 
 /**
- * When an output exceeds the context cap, stash the full text in a temp file
- * and return the LLM-visible marker (embedded in the result, no extra field):
- * the model reads the truncated preview and knows the full output is one
- * `read` away. Returns the marker when truncated, "" otherwise.
+ * When an output exceeds the context cap, stash the full text (shared
+ * primitive in pi-ui/context.ts) and return the LLM-visible marker embedded
+ * in the result: the model reads the truncated preview and knows the full
+ * output is one `read` away. Returns the marker when truncated, "" otherwise.
  */
 function maybeWriteFullOutput(agentId: string, output: string): string {
-	const truncated = truncateForContext(output);
-	if (truncated === output) return "";
-	const file = `/tmp/pi-subagent-${agentId}.txt`;
-	try {
-		// Best-effort: a write failure must never break the notification.
-		require("node:fs").writeFileSync(file, output, "utf8");
-	} catch {
-		return "";
-	}
-	return `\n\n(output truncated — full output: ${file})`;
+	const { stashPath } = stashOverflow(output, agentId, { keep: "tail" });
+	return stashPath ? truncationMarker(stashPath) : "";
 }
 
 function toErrorResult(err: unknown): {

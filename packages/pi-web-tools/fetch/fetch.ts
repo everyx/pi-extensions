@@ -1,16 +1,4 @@
-/**
- * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
- *
- *   - UA: system default browser version → standard UA string (see ua.ts),
- *     cached per process.
- *   - Browser-like request headers (Accept: text/markdown content negotiation),
- *     timeout, SPA empty-body detection, error normalization (HTTP status →
- *     error field, not a throw).
- */
-
-import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { truncateHead } from "@earendil-works/pi-coding-agent";
+import { stashOverflow } from "@everyx/pi-ui/context.js";
 import { fetchWithTimeout } from "../http.js";
 import type { WebFetchResult } from "../types.js";
 import { renderPage } from "./headless.js";
@@ -34,34 +22,12 @@ interface FetchPageResult {
 	error?: string;
 }
 
-/** Context cap for fetched content: 50KB of UTF-8 bytes — pi truncateHead
- *  parity. LLM token budgets track bytes, not char counts, so byte-capping
- *  keeps Chinese/emoji-heavy pages inside the same budget as ASCII ones. */
-const MAX_CONTENT_BYTES = 50_000;
-
-/** Cap content to the context budget (50KB of UTF-8 bytes — pi truncateHead
- *  parity). LLM token budgets track bytes, not char counts, so byte-capping
- *  keeps Chinese/emoji-heavy pages inside the same budget as ASCII ones.
- *  Applies to converted Markdown and raw source alike. */
-export function capContent(text: string): string {
-	return truncateHead(text, { maxBytes: MAX_CONTENT_BYTES }).content;
-}
-
-/**
- * When fetched content exceeds the context cap, stash the full text in /tmp
- * so the LLM can read it on demand — the result carries an inline marker with
- * the path (one field, self-describing), like pi-subagent's full-output file.
- */
-function stashIfTruncated(text: string, url: string): string | undefined {
-	if (Buffer.byteLength(text, "utf8") <= MAX_CONTENT_BYTES) return undefined;
-	const key = createHash("sha1").update(url).digest("hex").slice(0, 8);
-	const file = `/tmp/pi-web-fetch-${key}.txt`;
-	try {
-		writeFileSync(file, text, "utf8");
-		return file;
-	} catch {
-		return undefined; // best-effort: never break the fetch
-	}
+/** Context cap + /tmp full-text stash — the shared primitive (pi-ui/context.ts).
+ *  Budget is pi-bash parity: 2000 lines / 50KB, whichever hits first. Applies
+ *  to converted Markdown and raw source alike. */
+function capWithStash(text: string, url: string): { content: string; outputPath?: string } {
+	const { text: capped, stashPath } = stashOverflow(text, url);
+	return { content: capped, outputPath: stashPath };
 }
 
 /** Only HTML-family responses go through markdown extraction. */
@@ -183,9 +149,8 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	if (raw) {
 		const text = (page.text ?? "").trim();
 		if (!text) return { title: "", content: "", error: "Empty response" };
-		const outputPath = stashIfTruncated(text, url);
-		const lang = codeBlockLang(page.contentType ?? "");
-		return { title: "", content: fenced(capContent(text), lang), outputPath };
+		const { content, outputPath } = capWithStash(text, url);
+		return { title: "", content: fenced(content, codeBlockLang(page.contentType ?? "")), outputPath };
 	}
 
 	// Non-HTML: the source is already readable — return it as-is (no markdown
@@ -195,20 +160,19 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	if (page.contentType && !isHtmlContent(page.contentType)) {
 		const text = (page.text ?? "").trim();
 		if (!text) return { title: "", content: "", error: "Empty response" };
-		const outputPath = stashIfTruncated(text, url);
+		const { content, outputPath } = capWithStash(text, url);
 		const isMd = page.contentType.includes("text/markdown");
-		const lang = codeBlockLang(page.contentType);
 		return {
 			title: isMd ? titleFromMarkdown(text) : "",
-			content: isMd ? capContent(text) : fenced(capContent(text), lang),
+			content: isMd ? content : fenced(content, codeBlockLang(page.contentType)),
 			outputPath,
 		};
 	}
 
 	const extracted = htmlToMarkdown(page.text ?? "");
 	if (extracted.markdown && !extracted.error) {
-		const outputPath = stashIfTruncated(extracted.markdown, url);
-		return { title: extracted.title, content: capContent(extracted.markdown), outputPath };
+		const { content, outputPath } = capWithStash(extracted.markdown, url);
+		return { title: extracted.title, content, outputPath };
 	}
 
 	// Extraction failed or was incomplete + JS framework markers → CSR page.
@@ -220,7 +184,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 			if (renderedExtract.markdown && !renderedExtract.error) {
 				return {
 					title: renderedExtract.title,
-					content: capContent(renderedExtract.markdown),
+					content: capWithStash(renderedExtract.markdown, url).content,
 				};
 			}
 		}
@@ -228,7 +192,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 
 	// Non-CSR partial extraction: return what we have (status quo).
 	if (extracted.markdown) {
-		return { title: extracted.title, content: capContent(extracted.markdown) };
+		return { title: extracted.title, content: capWithStash(extracted.markdown, url).content };
 	}
 
 	const jsRendered = isLikelyJSRendered(page.text ?? "");
