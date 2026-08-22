@@ -9,6 +9,7 @@
  *   agent-process.ts  — AgentProcess: one resident `pi --mode rpc` child, semantic API
  *   registry.ts       — AgentRegistry: lifecycle + completion policy + routing (tested)
  *   model.ts          — model-spec → ResolvedModel (testable)
+ *   nested-fold.ts    — foreground-card nested-subtree meta counters (tested)
  *   render.ts         — TUI rendering + notification card renderer
  *   widget.ts         — Agents status widget
  *
@@ -30,6 +31,7 @@ import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
+import { createNestedFold } from "./nested-fold.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
@@ -115,15 +117,20 @@ function widgetSurface(): WidgetSurface | null {
 
 /**
  * Tree telemetry (nested agents): a sub-agent's own spawns are invisible to
- * the user — the only TUI is the root session's. Every node reports its own
- * children upward over the same setStatus transport as @parent messages;
- * intermediate nodes forward verbatim (depth + 1), the root applies events
- * to the widget. Foreground spawns are not tracked: their lifetime is fully
- * contained in this execute's tool card.
+ * the user — the only TUI is the root session's. Every node reports ALL its
+ * spawns upward (foreground and background alike) over the same setStatus
+ * transport as @parent messages; intermediate nodes forward verbatim
+ * (depth + 1). Consumption is decided at the anchor boundary — the execute
+ * that owns the visible surface:
+ *   • root + background child → widget rows (indent = depth)
+ *   • root + foreground child → folded into that card's nested meta counters
+ * A foreground card's subtree therefore never reaches the widget, and a
+ * background row's subtree never leaks into a card — one subtree, one
+ * surface (SPEC: 显示面统一规则).
  */
 function createTreeTelemetry(hasParent: boolean) {
-	/** Ids reported as added — guards activity/remove so untracked foreground
-	 *  agents never emit telemetry. */
+	/** Ids reported as added — guards activity/remove so unknown ids never
+	 *  emit telemetry. */
 	const tracked = new Set<string>();
 	const report = (event: AgentTreeEvent) => uiRef?.setStatus(TREE_STATUS_KEY, JSON.stringify(event));
 	return {
@@ -189,65 +196,96 @@ interface SendParams {
 	message: string;
 }
 
-const SpawnParamsSchema = Type.Object({
-	prompt: Type.String({
-		description: "The task for the sub-agent (self-contained: it starts with zero context).",
-	}),
-	title: Type.String({
-		minLength: 1,
-		description:
-			"Short task title (3-5 words) — required. Identifies the agent in the UI, " +
-			"notification card, and session name.",
-	}),
-	model: Type.Optional(
-		Type.String({
-			description:
-				'Model for the sub-agent — provider/modelId or fuzzy name (e.g. "haiku", "sonnet"). ' +
-				"Omit to inherit your current model — don't switch the model unless the task " +
-				"explicitly requires it.",
-		}),
-	),
-	thinking: Type.Optional(
-		StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"], {
-			description:
-				'Reasoning intensity for the sub-agent ("off"…"max"). ' +
-				"Omit to inherit your current thinking level — don't change it unless the task " +
-				"requires a different depth.",
-		}),
-	),
-	tools: Type.Optional(
-		Type.Array(Type.String(), {
-			description:
-				"Tool allowlist for the sub-agent. Omit to grant all tools. For read-only " +
-				"exploration, restrict to read/grep/find/ls and consider a cheaper model.",
-		}),
-	),
-	run_in_background: Type.Optional(
-		Type.Boolean({
-			description:
-				"If true, return an agent_id immediately and notify you on completion — you can " +
-				"keep working meanwhile. If false (default), block until the result is ready.",
-		}),
-	),
-	timeoutMs: Type.Optional(
-		Type.Integer({
-			minimum: 1,
-			description:
-				"Optional wall-clock deadline for the whole task, in milliseconds. Omit for no " +
-				"time limit (the default — the child runs until it finishes or is stopped). " +
-				"Pass a value when you want to bound a risky/looping task; on expiry the agent is " +
-				"stopped and the call reports stopped.",
-		}),
-	),
-	persistent: Type.Optional(
-		Type.Boolean({
-			description:
-				"If true, keep the agent resident after it completes (idle, zero token) so you can " +
-				"send it follow-up messages later — the process stays alive until you stop it. " +
-				"Default false (the agent exits when done).",
-		}),
-	),
+// Shared agent_spawn parameter fields — the root session gets the full set;
+// sub-agents get a foreground-only subset (see buildSpawnParamsSchema).
+const SpawnPromptField = Type.String({
+	description: "The task for the sub-agent (self-contained: it starts with zero context).",
 });
+const SpawnTitleField = Type.String({
+	minLength: 1,
+	description:
+		"Short task title (3-5 words) — required. Identifies the agent in the UI, " +
+		"notification card, and session name.",
+});
+const SpawnModelField = Type.Optional(
+	Type.String({
+		description:
+			'Model for the sub-agent — provider/modelId or fuzzy name (e.g. "haiku", "sonnet"). ' +
+			"Omit to inherit your current model — don't switch the model unless the task " +
+			"explicitly requires it.",
+	}),
+);
+const SpawnThinkingField = Type.Optional(
+	StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"], {
+		description:
+			'Reasoning intensity for the sub-agent ("off"…"max"). ' +
+			"Omit to inherit your current thinking level — don't change it unless the task " +
+			"requires a different depth.",
+	}),
+);
+const SpawnToolsField = Type.Optional(
+	Type.Array(Type.String(), {
+		description:
+			"Tool allowlist for the sub-agent. Omit to grant all tools. For read-only " +
+			"exploration, restrict to read/grep/find/ls and consider a cheaper model.",
+	}),
+);
+const SpawnTimeoutField = Type.Optional(
+	Type.Integer({
+		minimum: 1,
+		description:
+			"Optional wall-clock deadline for the whole task, in milliseconds. Omit for no " +
+			"time limit (the default — the child runs until it finishes or is stopped). " +
+			"Pass a value when you want to bound a risky/looping task; on expiry the agent is " +
+			"stopped and the call reports stopped.",
+	}),
+);
+
+/**
+ * Sub-agents never see run_in_background: their lifetime is bounded by the
+ * parent's synchronous wait, so a background child could not outlive them nor
+ * deliver its result anywhere — it would race the returned answer with forced
+ * ack turns. Only the long-lived root session hosts background work. Hiding
+ * the parameter beats erroring on it: the misuse cannot happen at all.
+ *
+ * persistent stays available to everyone: its residency is scoped to the host
+ * session by definition ("alive until your session ends") — a sub-agent using
+ * an iterative helper within its own lifetime is fully served, and parent
+ * exit cleans residents up like any other child.
+ */
+export function buildSpawnParamsSchema(hasParent: boolean): ReturnType<typeof Type.Object> {
+	return Type.Object({
+		prompt: SpawnPromptField,
+		title: SpawnTitleField,
+		model: SpawnModelField,
+		thinking: SpawnThinkingField,
+		tools: SpawnToolsField,
+		timeoutMs: SpawnTimeoutField,
+		persistent: Type.Optional(
+			Type.Boolean({
+				description:
+					"If true, keep the agent resident after it completes (idle, zero token) so you can " +
+					"send it follow-up messages later — the process stays alive until your session ends " +
+					"(a sub-agent's residents are cleaned up when it returns) or until you stop it. " +
+					"Default false (the agent exits when done).",
+			}),
+		),
+		...(hasParent
+			? {}
+			: {
+					run_in_background: Type.Optional(
+						Type.Boolean({
+							description:
+								"If true, return an agent_id immediately and notify you on completion — you can " +
+								"keep working meanwhile. If false (default), block until the result is ready. " +
+								"Root-only: as a sub-agent you cannot host background work.",
+						}),
+					),
+				}),
+	});
+}
+
+const SpawnParamsSchema = buildSpawnParamsSchema(HAS_PARENT);
 
 const StopParamsSchema = Type.Object({
 	agent_id: Type.String({ description: 'The agent id to stop (e.g. "@max").' }),
@@ -457,29 +495,61 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "agent_spawn",
 		label: "Agent Spawn",
-		description:
-			"Spawn an isolated sub-agent in its own context window. The sub-agent starts with " +
-			"zero context, so the prompt must be self-contained: include file paths, constraints, " +
-			"and the expected output shape. Foreground (run_in_background: false) blocks until it " +
-			"finishes and returns the output directly. Background (run_in_background: true) returns " +
-			"an agent id immediately; the completion notification carries the result (status + " +
-			"agent id + final output) — you can intervene with agent_stop / agent_send while it " +
-			"runs. persistent: true keeps it resident (idle) after completion — message it later " +
-			"to continue the same context.",
+		description: HAS_PARENT
+			? "Spawn an isolated sub-agent in your own context window. The sub-agent starts with " +
+				"zero context, so the prompt must be self-contained: include file paths, constraints, " +
+				"and the expected output shape. The call blocks until it finishes and returns the output. " +
+				"Background spawns are root-only — your lifetime ends when this call returns; persistent " +
+				"helpers are fine and live as long as you do."
+			: "Spawn an isolated sub-agent in its own context window. The sub-agent starts with " +
+				"zero context, so the prompt must be self-contained: include file paths, constraints, " +
+				"and the expected output shape. Foreground (run_in_background: false) blocks until it " +
+				"finishes and returns the output directly. Background (run_in_background: true) returns " +
+				"an agent id immediately; the completion notification carries the result (status + " +
+				"agent id + final output) — you can intervene with agent_stop / agent_send while it " +
+				"runs. persistent: true keeps it resident (idle) after completion — message it later " +
+				"to continue the same context.",
 		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
-		promptGuidelines: [
-			"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
-			"Use agent_spawn for independent parallel work: several foreground calls already run in parallel. Reserve run_in_background: true for when you need to keep working or reply to the user while the sub-agent runs.",
-			"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
-			"Never poll a background agent — its completion notification carries the result.",
-			"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
-			"Keep a persistent agent for follow-ups: spawn once with persistent: true, then agent_send it new instructions — the context stays alive (idle until woken).",
-		],
+		promptGuidelines: HAS_PARENT
+			? [
+					"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
+					"For independent parallel work, issue several foreground agent_spawn calls together — they run concurrently.",
+					"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
+					"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
+					"Keep a persistent helper for iterative work within this task: spawn once with persistent: true, then agent_send it follow-ups — it lives as long as your session does.",
+				]
+			: [
+					"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
+					"Use agent_spawn for independent parallel work: several foreground calls already run in parallel. Reserve run_in_background: true for when you need to keep working or reply to the user while the sub-agent runs.",
+					"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
+					"Never poll a background agent — its completion notification carries the result.",
+					"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
+					"Keep a persistent agent for follow-ups: spawn once with persistent: true, then agent_send it new instructions — the context stays alive (idle until woken).",
+				],
 		parameters: SpawnParamsSchema,
 
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
 			captureUi(ctx);
-			const params = raw as SpawnParams;
+			const params = raw as unknown as SpawnParams;
+			// Schema hides run_in_background from sub-agents; this guard catches
+			// hallucinated args (schema validation may pass extras through).
+			if (HAS_PARENT && params.run_in_background != null) {
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								"run_in_background is root-only: your lifetime ends when this call returns, so " +
+								"background work could not outlive you nor deliver its result. For parallel " +
+								"work, issue several foreground agent_spawn calls together (they run " +
+								"concurrently); for long-running work, describe it in your reply so the " +
+								"caller can decide.",
+						},
+					],
+					details: { error: "background spawns are root-only", title: params.title },
+					isError: true,
+				};
+			}
 			const task = params.prompt?.trim();
 			if (!task) {
 				return {
@@ -509,6 +579,15 @@ export default function (pi: ExtensionAPI) {
 			// source (RPC event handler); the callbacks here only refresh the
 			// live card via onUpdate.
 			let streamed = "";
+			// Nested-subtree counters for THIS card (foreground only): fed by
+			// tree events arriving through this child's process — every deeper
+			// spawn of the subtree lands here, never in the widget.
+			const nestedFold = createNestedFold();
+			// Once this execute returns, the card is frozen (onUpdate is a
+			// no-op) — a persistent child keeps living and spawning, so its
+			// later descendants must surface on the widget instead of folding
+			// into a dead card's counters.
+			let cardClosed = false;
 			// Live-card details: the shared slice every foreground update carries.
 			const liveDetails = (activity?: AgentActivity) => ({
 				task,
@@ -517,6 +596,7 @@ export default function (pi: ExtensionAPI) {
 				thinking: agent.thinking,
 				activity,
 				events: agent.getEvents(),
+				nested: nestedFold.snapshot(),
 			});
 			// Short human-name id (max, zoe…) — the LLM-facing reference. No tree
 			// structure: agents address only ids they were given, hop by hop.
@@ -542,17 +622,51 @@ export default function (pi: ExtensionAPI) {
 				// from deeper spawns forwards up (depth + 1) or lands on the root widget.
 				onMessage: onChildMessage,
 				onTreeEvent: (event) => {
-					ensureWidget(ctx); // a nested row may arrive before any local spawn built the widget
+					// Anchor boundary, three explicit cases:
+					//   root + my foreground child (card still open) → fold into
+					//     THIS card's meta counters — one subtree, one surface;
+					//   non-root → forward verbatim (depth + 1) to my parent;
+					//   root + background child, or a closed card's persistent
+					//     child → widget rows.
+					const foregroundEdge = params.run_in_background !== true;
+					if (!HAS_PARENT && foregroundEdge && !cardClosed) {
+						nestedFold.fold(event);
+						onUpdate?.({
+							content: [{ type: "text", text: streamed }],
+							details: liveDetails(agent.getLatestActivity()),
+						});
+						return;
+					}
 					if (HAS_PARENT) {
 						tree.report(event.op === "add" ? { ...event, depth: event.depth + 1 } : event);
 						return;
 					}
+					ensureWidget(ctx); // a nested row may arrive before any local spawn built the widget
 					if (widget) applyTreeEvent(widget, event);
 				},
-				// A wake finished: completed → idle row; a failed follow-up is
-				// reported (abnormal end — not a deliberate stop) then cleaned up.
+				// A wake finished. Completed: its output must reach this spawner's
+				// context — symmetric with the first-completion notification, an
+				// agent_send "delivered" alone would leave the answer unread.
+				// Deliberate stops stay silent (stoppedByControl). A failed
+				// follow-up is reported (abnormal end) then cleaned up.
 				onIdle: (outcome) => {
 					if (outcome === "completed") {
+						if (!agent.stoppedByControl) {
+							void (async () => {
+								const [output, stats] = await Promise.all([agent.lastOutput(), agent.getStats()]);
+								notifyCompletion(pi, agent, {
+									status: "completed",
+									output,
+									stats: {
+										tokens: stats?.tokens ?? 0,
+										toolUses: stats?.toolUses ?? 0,
+										durationMs: Date.now() - agent.startedAt,
+									},
+									sessionPath: agent.sessionPath,
+									sessionId: agent.sessionId,
+								});
+							})().catch(() => {}); // best-effort: a notification failure must not crash the host
+						}
 						registry.markIdle(agentId);
 						return;
 					}
@@ -646,12 +760,21 @@ export default function (pi: ExtensionAPI) {
 							registry.markIdle(a.agentId);
 							tree.add(a, "idle");
 						},
+						// Foreground settled: report the child upward (widget-rooted
+						// nodes only — at the root the card itself is the display; a
+						// card-contained node's subtree folds at its own anchor). This
+						// closes the blind spot where a background agent's foreground
+						// children were invisible entirely.
+						onForegroundSettled: (a) => {
+							if (HAS_PARENT) tree.add(a, "running");
+						},
 					},
 				});
 			} catch (err) {
 				return toErrorResult(err);
 			}
 
+			cardClosed = true; // from here on onUpdate cannot refresh the card
 			switch (outcome.kind) {
 				case "spawn-failed":
 					// The isError return carries the failure to the LLM and the status
@@ -695,6 +818,8 @@ export default function (pi: ExtensionAPI) {
 					// like a clean success. A user cancel (abort) also produces a
 					// stop — don't blame that on the limits.
 					if (outcome.status === "failed" || outcome.status === "stopped") {
+						if (HAS_PARENT && !outcome.resident)
+							tree.remove(agentId, outcome.status === "failed" ? "failed" : "stopped");
 						const message =
 							outcome.status === "failed"
 								? outcome.output || "Sub-agent failed."
@@ -714,10 +839,12 @@ export default function (pi: ExtensionAPI) {
 								thinking: agent.thinking,
 								sessionPath: outcome.sessionPath,
 								events: outcome.events,
+								nested: nestedFold.snapshot(),
 							},
 							isError: true,
 						};
 					}
+					if (HAS_PARENT && !outcome.resident) tree.remove(agentId, "done");
 					return {
 						// Pure text result — no session hint: the output stands alone
 						// (the session path is the card footer, recoverable by the user).
@@ -740,6 +867,7 @@ export default function (pi: ExtensionAPI) {
 							model: agent.model,
 							thinking: agent.thinking,
 							events: outcome.events,
+							nested: nestedFold.snapshot(),
 						},
 					};
 				}

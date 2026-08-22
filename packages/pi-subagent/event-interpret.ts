@@ -51,11 +51,13 @@ export const TREE_STATUS_KEY = "pi-subagent-tree";
 
 /**
  * Tree telemetry — one hop of the spawn tree reporting a nested agent's state
- * upward. Emitted by a node for its own children (depth starts at 1); every
- * intermediate node forwards verbatim with depth + 1, the root applies it to
- * the widget. Ids are globally unique (name-gen), so activity/remove need no
- * depth. Foreground spawns are intentionally absent: their lifetime is fully
- * contained in the parent's execute (the tool card shows it there).
+ * upward. Emitted by a node for its own children — ALL spawns, foreground and
+ * background alike (depth starts at 1); every intermediate node forwards
+ * verbatim with depth + 1. Consumption is decided at the anchor boundary: the
+ * root applies background-child events to the widget and folds foreground-
+ * child events into that card's nested meta counters — one subtree, one
+ * surface. Ids are globally unique (name-gen), so activity/remove need no
+ * depth.
  *
  * Orphan note: if the reporting node dies before its child finishes, the
  * child's remove still arrives eventually — the parent's deadline-bounded

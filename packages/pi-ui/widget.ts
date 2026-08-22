@@ -21,7 +21,7 @@ export const EXCERPT_INDENT = "   ";
 
 export type WidgetStatus = "running" | "idle" | "stopped" | "done" | "failed";
 
-/** How a tracked item ended — feeds the lifetime progress meta (`1/3`). */
+/** How a tracked item ended — feeds the lifetime progress meta (`done n/total …`). */
 export type WidgetResult = "done" | "failed" | "stopped";
 
 /** Map a terminal widget status to the result it implies (tick cleanup). */
@@ -126,10 +126,10 @@ function styleRow(row: WidgetRow, theme: Theme): string {
  *   dispose()        — clear everything (session shutdown)
  *
  * Lifetime progress: while the widget is alive it counts every tracked item
- * (`total`) and how each ended (`done`/`failed`/`stopped`), rendered after
- * the title as `1/3` — or `(1+2)/3` once any item ended abnormally (the
- * abnormal count is colored error; the parentheses are the math convention
- * for a polynomial numerator). A remove() without a result is not counted.
+ * (`total`) and how each ended (`done`/`failed`/`stopped`), rendered by
+ * metaLine() after the title as a paren group: `done 2/5 · 1 running ·
+ * 1 failed` (dot-separated, abnormal counts colored). A remove() without a
+ * result is not counted.
  */
 export class StatusWidget {
 	private readonly ui: ExtensionUIContext;

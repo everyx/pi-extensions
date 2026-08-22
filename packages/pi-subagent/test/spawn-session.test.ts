@@ -51,6 +51,17 @@ describe("runSpawnSession", () => {
 		assert.ok(agent.calls.includes("stop"));
 	});
 
+	it("foreground settled → onForegroundSettled fired with the agent", async () => {
+		const agent = fakeAgent();
+		let settledAgent: unknown;
+		await runSpawnSession(agent, {
+			task: "do",
+			runInBackground: false,
+			hooks: { onForegroundSettled: (a) => (settledAgent = a) },
+		});
+		assert.equal(settledAgent, agent);
+	});
+
 	it("spawn failure → spawn-failed, agent stopped, abort listener detached", async () => {
 		const agent = fakeAgent({
 			spawnAndSend: async () => ({ ok: false, error: "boom" }),

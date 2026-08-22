@@ -10,6 +10,7 @@
 
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
+import type { NestedCounters } from "./nested-fold.js";
 
 /**
  * Card title for agent_stop / agent_send: the target's human title when the
@@ -47,7 +48,14 @@ export const spawnView = createToolView<Record<string, unknown>, Record<string, 
 	},
 	meta: (ctx) => {
 		const d = ctx.result?.data as
-			| { model?: string; thinking?: string; startedAt?: number; endedAt?: number; runInBackground?: boolean }
+			| {
+					model?: string;
+					thinking?: string;
+					startedAt?: number;
+					endedAt?: number;
+					runInBackground?: boolean;
+					nested?: NestedCounters;
+			  }
 			| undefined;
 		const args = ctx.args as { model?: unknown; thinking?: unknown } | undefined;
 		const parts: string[] = [];
@@ -62,6 +70,18 @@ export const spawnView = createToolView<Record<string, unknown>, Record<string, 
 				const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
 				if (dur) parts.push(dur);
 			}
+		}
+		// Nested-subtree summary (foreground cards): widget vocabulary — the
+		// whole descendant tree of this agent folded into one count set.
+		// Vocabulary mirror of pi-ui widget.ts metaLine() — keep both in sync
+		// (SPEC: 显示面统一规则 mandates the shared vocabulary).
+		const n = d?.nested;
+		if (n && n.total > 0) {
+			parts.push(`done ${n.done}/${n.total}`);
+			if (n.running) parts.push(`${n.running} running`);
+			if (n.idle) parts.push(`${n.idle} idle`);
+			if (n.failed) parts.push(`${n.failed} failed`);
+			if (n.stopped) parts.push(`${n.stopped} stopped`);
 		}
 		return parts;
 	},

@@ -40,7 +40,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 ### agent_spawn 工具卡片
 
 ```
-✓ agent_spawn "检查 CI 配置" (sonnet · high · Took 27.5s)
+✓ agent_spawn "检查 CI 配置" (sonnet · high · Took 27.5s · done 2/3 · 1 running)
 ⠙ agent_spawn "检查 CI 配置" (claude-sonnet · high · Elapsed 12.3s)
 Thinking...
 bash: pnpm check
@@ -51,7 +51,7 @@ bash: pnpm check
 session: /path/...jsonl
 ```
 
-- header：`⠋/✓/✗` + `agent_spawn` + `"title"` + muted meta——时间从 state 共享；`run_in_background` 时 renderCall 返回空（后台 spawn 用独立结果卡）
+- header：`⠋/✓/✗` + `agent_spawn` + `"title"` + muted meta——时间从 state 共享；`run_in_background` 时 renderCall 返回空（后台 spawn 用独立结果卡）；前台卡 meta 尾部追加**嵌套子树汇总段**（`done n/total · n running · …`，与 widget 标题行同词汇，见实现决策「显示面统一规则」）
 - body：混合活动流——prompt 在流头，随后按事件顺序渲染子 agent 会话（Thinking... / 工具调用 / 流式文本）；随输出增长 prompt 与早期活动滚出折叠区
 - footer：仅 `session: <path>`
 - 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值
@@ -156,7 +156,7 @@ queued → running ──→ completed（通知）
 ```
 
 - **就绪判定**：prompt 命令 preflight 回执
-- **persistent**：显式开启（`agent_spawn(persistent: true)`），默认不常驻（行为不变）——"不设隐藏限制，限制由调用者显式要求"；前台/后台都支持（前台阻塞等待 + 完成后进程保留 idle，可后续唤醒追问，功能不矛盾）
+- **persistent**：显式开启（`agent_spawn(persistent: true)`），默认不常驻（行为不变）——"不设隐藏限制，限制由调用者显式要求"；全场景可用（驻留范围 = 宿主会话生命周期）；`run_in_background` 仅 root 可用
 - **idle 语义**：进程驻留、零 token（rpc 模式命令驱动，无 turn 不调模型）；完成通知带 `idle` 标记；widget 保留 idle 行（可寻址性可见）；可被 agent_stop 杀掉
 - **stop**：stdin EOF 优雅退出，`stoppedByControl` 抑制通知
 - **失败与超限都返回 isError 工具结果**，与 bash 的 `exit N` / `(cancelled)` 对齐
@@ -202,6 +202,7 @@ queued → running ──→ completed（通知）
 - content：`{status, agent_id, result, session_path}`（LLM 可见）；persistent 时追加 `idle: true`
 - details：渲染数据，不进 LLM 上下文；persistent 通知卡追加 idle 状态词
 - spawn 失败不投递通知：isError 工具结果已经同时告知 LLM 和用户，followUp 通知会重复
+- **唤醒轮次同样投递**（2026-08-22）：persistent 代理被 agent_send 唤醒并成功完成后，输出经 onIdle → notifyCompletion 回到派发者上下文——与首轮对称（否则 `agent_send` 只回 "delivered"，答案落在父看不见的地方）。主动 stop（stoppedByControl）保持静默；失败唤醒照旧报 failed
 
 ### Graceful turn limits
 
@@ -217,6 +218,25 @@ queued → running ──→ completed（通知）
 ### 嵌套
 
 子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。子进程扩展经环境变量获得自身身份（`PI_SUBAGENT_AGENT_ID` / `PI_SUBAGENT_PARENT`）——孙 agent 由子进程自身 registry 分配人名 id。
+
+### 显示面统一规则（2026-08-22）
+
+一个子树只在一个地方显示——由子树根被什么装载决定：
+
+- **前台 spawn 装得下**：子的整个生命周期包含在父的一次工具调用内 → 子树全部折进该卡的 meta 计数（`done n/total · n running · …`），不上 widget；嵌套卡片本身仍按会话流出现在卡 body 里。计数范围 = 该代理的**后代 spawn**（不含它自己——直接子由卡片 tail 表达）
+- **后台 spawn 溢出**：子的生命周期超出工具调用 → 子树挂 widget（自身一行，后代 indent 行）
+
+机制：所有节点对**所有** spawn（不分前后台）上报树事件，逐跳 verbatim 转发（depth + 1）；消费在锚点边界决定——root 对后台子的子树应用为 widget 行，对前台子的子树折叠进该卡 meta 计数。此前「前台 spawn 不上报」造成两个盲区：前台子的后台孙逃逸到 widget（indent 悬空、父退出后成陈旧行）、后台子的前台孙完全不可见。
+
+配合「子代理只允许前台 spawn」：子代理子树内不再产生后台边，卡内子树天然纯前台；widget 上只有 root 直接后台链及其后代。
+
+**persistent 前台子的关卡后归属**：persistent 子在卡完成后仍存活（驻留），其唤醒期间新 spawn 的后代不能再折进已冻结的卡——execute 结算即关闭折叠（`cardClosed`），此后该子树的事件转 widget 行（与后台链同路径）。
+
+### 子代理禁止后台 spawn；persistent 全场景开放（2026-08-22）
+
+**后台**：子代理的生命周期被父的同步等待封顶——它的后台子要么活不过父的返回（管道 EOF 静默杀死），要么逼出收条 turn 覆盖真正的答卷、卡片计数悬空。这些是后台边与前台等待的时序纠缠，树清理解决不了，所以子代理进程（`PI_SUBAGENT_AGENT_ID` 存在）注册的 agent_spawn schema **直接不含** `run_in_background` 字段（`buildSpawnParamsSchema(HAS_PARENT)`），description/promptGuidelines 同步换为前台版文案（并行→同块多个前台调用，天然并发；长期任务→在答复中上报由调用者决定）。execute 保留一行守卫防幻觉传参。曾实现过「收割」（前台返回前 allSettled 等齐后台子），随本规则作废删除——卡内不可能再有后台边，整类问题（孤子孙、收条覆盖答卷、meta 计数不归位、强制多等一轮）灭绝于源头。
+
+**persistent 全场景开放**：其真实语义是「完成后不退场、可继续对话，活到宿主会话结束」——root 的 persistent 在会话退出时同样被 shutdown 清理，子代理的 persistent 在父返回时被树清理收走，二者是同一条规则的不同实例，无承诺破产。典型用例：任务期内开局一个 persistent 助手多轮 agent_send 迭代使用。
 
 ### 上游限制：isError 被丢弃（workaround）
 

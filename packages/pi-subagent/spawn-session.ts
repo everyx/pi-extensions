@@ -66,6 +66,10 @@ export interface SpawnSessionHooks {
 	onBackgroundStarting?(): void;
 	/** Background spawn settled OK: caller wires widget/registry/completion. */
 	onBackgroundSettled?(agent: SpawnSessionAgent): void;
+	/** Foreground spawn settled OK (process up, task sent): symmetric with
+	 *  onBackgroundSettled — the caller reports the child upward (tree
+	 *  telemetry) here. */
+	onForegroundSettled?(agent: SpawnSessionAgent): void;
 	/** Foreground persistent completed: caller registers + marks idle. */
 	onResident?(agent: SpawnSessionAgent): void;
 }
@@ -108,6 +112,8 @@ export async function runSpawnSession(
 			hooks.onBackgroundSettled?.(agent);
 			return { kind: "background-started", agent, startedAt: agent.startedAt };
 		}
+
+		hooks.onForegroundSettled?.(agent);
 
 		const completion = await agent.waitForCompletion();
 		detach();

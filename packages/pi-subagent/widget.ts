@@ -1,14 +1,15 @@
 /**
  * pi-subagent — AgentWidget.
  *
- * Persistent above-editor widget showing one status line per *background*
- * agent: `⠋ title (42.0s)`, plus a latest-activity excerpt line aligned
- * under the title. Backed by the shared pi-ui StatusWidget (generic
- * foreground indicator for background work); the agent-specific part is
- * the row data (AgentProcess → WidgetItem) and the activity excerpt.
+ * Persistent above-editor widget showing one status line per tracked agent:
+ * `⠋ title (42.0s)`, plus a latest-activity excerpt line aligned under the
+ * title. Backed by the shared pi-ui StatusWidget (generic foreground
+ * indicator for background work); the agent-specific part is the row data
+ * (AgentProcess → WidgetItem) and the activity excerpt.
  *
- * Foreground agents are intentionally excluded — their live output already
- * streams inline in the tool card.
+ * Tracked: background agents (direct or nested under a background ancestor)
+ * and persistent foreground agents. A foreground card's whole subtree is
+ * folded into that card's meta counters instead — one subtree, one surface.
  */
 
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
