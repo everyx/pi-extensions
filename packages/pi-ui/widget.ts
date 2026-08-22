@@ -46,6 +46,10 @@ export interface WidgetItem {
 	status: WidgetStatus;
 	/** Latest activity rows (structured, not pre-formatted). */
 	rows?: WidgetRow[];
+	/** Nesting depth (0 = top level): 2 spaces of indent per level. Nested
+	 *  entries come from tree telemetry (a sub-agent's own spawns) — same
+	 *  row format, deeper indent. */
+	indent?: number;
 }
 
 interface WidgetRender {
@@ -80,20 +84,21 @@ export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Sp
 		meta = "(done)";
 	}
 
-	// Title row: ` ⠋ <title> (<meta>)` — prefix fixes the alignment (same
-	// 3 columns as EXCERPT_INDENT), meta stays visible on the right, and
-	// structRow caps the title to exactly what fits.
+	// Title row: `<indent> ⠋ <title> (<meta>)` — prefix fixes the alignment
+	// (same 3 columns as EXCERPT_INDENT at depth 0), meta stays visible on the
+	// right, and structRow caps the title to exactly what fits.
 	const line = structRow({
-		prefix: ` ${status} `,
+		prefix: `${"  ".repeat(item.indent ?? 0)} ${status} `,
 		content: item.title,
 		suffix: meta ? theme.fg("muted", ` ${meta}`) : "",
 		width,
 		styleContent: (capped) => theme.fg("bashMode", capped),
 	});
-	// Activity rows: indented under the title, keeping the latest content.
+	// Activity rows: indented under the title (plus nesting indent), keeping
+	// the latest content.
 	const rows = (item.rows ?? []).map((r) =>
 		structRow({
-			prefix: EXCERPT_INDENT,
+			prefix: `${"  ".repeat(item.indent ?? 0)}${EXCERPT_INDENT}`,
 			content: r.content,
 			width,
 			keep: "tail",

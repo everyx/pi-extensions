@@ -16,6 +16,7 @@
  *   the child runs until it finishes or is stopped via agent_stop.
  */
 
+import type { AgentTreeEvent } from "./event-interpret.js";
 import { type AgentActivity, interpretEvent } from "./event-interpret.js";
 import type { AgentMessage, RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
@@ -65,6 +66,8 @@ export interface AgentProcessOptions {
 	onActivityChange?: (activity: AgentActivity) => void;
 	/** In-tree message received from this child (extension_ui_request under the reserved key). */
 	onMessage?: (message: AgentMessage) => void;
+	/** Tree telemetry from this child's own spawns (extension_ui_request, tree key) — forward or apply. */
+	onTreeEvent?: (event: AgentTreeEvent) => void;
 	/** A woken persistent agent settled: "completed" → idle, "failed" → report + clean up. */
 	onIdle?: (outcome: "completed" | "failed") => void;
 	/** Resident after completion (idle, zero token) — explicit opt-in, default off. */
@@ -132,6 +135,7 @@ export class AgentProcess {
 		this.onDelta = options.onDelta;
 		this.onActivityChange = options.onActivityChange;
 		this.onMessage = options.onMessage;
+		this.onTreeEvent = options.onTreeEvent;
 		this.onIdle = options.onIdle;
 
 		const args: string[] = [];
@@ -345,6 +349,7 @@ export class AgentProcess {
 	private readonly onDelta: ((delta: string) => void) | undefined;
 	private readonly onActivityChange: ((activity: AgentActivity) => void) | undefined;
 	private readonly onMessage: ((message: AgentMessage) => void) | undefined;
+	private readonly onTreeEvent: ((event: AgentTreeEvent) => void) | undefined;
 	private readonly onIdle: ((outcome: "completed" | "failed") => void) | undefined;
 
 	private onEvent(event: RpcEvent): void {
@@ -404,6 +409,9 @@ export class AgentProcess {
 					break;
 				case "agent_msg":
 					this.onMessage?.(ev.message);
+					break;
+				case "agent_tree":
+					this.onTreeEvent?.(ev.event);
 					break;
 			}
 		}

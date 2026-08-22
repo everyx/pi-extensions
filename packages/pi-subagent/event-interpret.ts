@@ -19,6 +19,7 @@
  * arrive off the wire. AgentProcess.onEvent is a thin switch over the result.
  */
 
+import type { WidgetResult } from "@everyx/pi-ui/widget.js";
 import type { AgentMessage, RpcEvent } from "./protocol.js";
 
 /**
@@ -39,10 +40,32 @@ export type AgentEvent =
 	| { type: "tool_call"; activity: Extract<AgentActivity, { kind: "tool" }> }
 	| { type: "text_delta"; delta: string }
 	| { type: "agent_failed"; error: string }
-	| { type: "agent_msg"; message: AgentMessage };
+	| { type: "agent_msg"; message: AgentMessage }
+	| { type: "agent_tree"; event: AgentTreeEvent };
 
 /** Status key that carries agent_send messages over extension_ui_request. */
 export const MSG_STATUS_KEY = "pi-subagent-msg";
+
+/** Status key that carries tree telemetry over extension_ui_request. */
+export const TREE_STATUS_KEY = "pi-subagent-tree";
+
+/**
+ * Tree telemetry — one hop of the spawn tree reporting a nested agent's state
+ * upward. Emitted by a node for its own children (depth starts at 1); every
+ * intermediate node forwards verbatim with depth + 1, the root applies it to
+ * the widget. Ids are globally unique (name-gen), so activity/remove need no
+ * depth. Foreground spawns are intentionally absent: their lifetime is fully
+ * contained in the parent's execute (the tool card shows it there).
+ *
+ * Orphan note: if the reporting node dies before its child finishes, the
+ * child's remove still arrives eventually — the parent's deadline-bounded
+ * waitForCompletion rejects and emits a best-effort "stopped". The row never
+ * hangs forever; it may just outlive the truth by up to one deadline.
+ */
+export type AgentTreeEvent =
+	| { op: "add"; id: string; title: string; startedAt: number; depth: number; status: "running" | "idle" }
+	| { op: "activity"; id: string; activity: AgentActivity }
+	| { op: "remove"; id: string; status: WidgetResult };
 
 /**
  * Summarize tool-call arguments into a one-line excerpt: the friendly arg
@@ -104,11 +127,12 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 	}
 
 	if (raw.type === "extension_ui_request") {
-		// In-tree message delivery: the sender's extension emits a setStatus
-		// carrying the JSON payload under our reserved key (rpc-mode forwards
+		// In-tree channels: the sender's extension emits a setStatus carrying a
+		// JSON payload under one of our reserved keys (rpc-mode forwards
 		// extension_ui_request verbatim, no throttling). Anything else in the
 		// extension_ui_request namespace is not ours — ignore.
-		if (raw.method === "setStatus" && raw.statusKey === MSG_STATUS_KEY && typeof raw.statusText === "string") {
+		if (typeof raw.statusText !== "string") return [];
+		if (raw.method === "setStatus" && raw.statusKey === MSG_STATUS_KEY) {
 			try {
 				const parsed = JSON.parse(raw.statusText) as { to?: unknown; from?: unknown; message?: unknown };
 				if (typeof parsed.to === "string" && typeof parsed.message === "string") {
@@ -125,6 +149,17 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 				}
 			} catch {
 				/* malformed payload — ignore */
+			}
+			return [];
+		}
+		// Tree telemetry: same transport, own reserved key, validated per-op.
+		if (raw.method === "setStatus" && raw.statusKey === TREE_STATUS_KEY) {
+			try {
+				return [{ type: "agent_tree" as const, event: parseTreeEvent(JSON.parse(raw.statusText)) }].filter(
+					(e) => e.event !== undefined,
+				) as [{ type: "agent_tree"; event: AgentTreeEvent }];
+			} catch {
+				return []; // malformed payload — ignore
 			}
 		}
 		return [];
@@ -155,4 +190,34 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 	}
 
 	return [];
+}
+
+/** Validate an untrusted tree-event payload, op by op. Undefined = malformed. */
+export function parseTreeEvent(value: unknown): AgentTreeEvent | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const v = value as Record<string, unknown>;
+	if (typeof v.id !== "string" || !v.id) return undefined;
+	switch (v.op) {
+		case "add":
+			if (typeof v.title !== "string" || typeof v.startedAt !== "number" || typeof v.depth !== "number") {
+				return undefined;
+			}
+			if (v.status !== "running" && v.status !== "idle") return undefined;
+			return { op: "add", id: v.id, title: v.title, startedAt: v.startedAt, depth: v.depth, status: v.status };
+		case "activity":
+			return isActivity(v.activity) ? { op: "activity", id: v.id, activity: v.activity } : undefined;
+		case "remove":
+			if (v.status !== "done" && v.status !== "failed" && v.status !== "stopped") return undefined;
+			return { op: "remove", id: v.id, status: v.status as WidgetResult };
+		default:
+			return undefined;
+	}
+}
+
+function isActivity(value: unknown): value is AgentActivity {
+	if (!value || typeof value !== "object") return false;
+	const v = value as Record<string, unknown>;
+	if (v.kind === "thinking" || v.kind === "text") return typeof v.text === "string";
+	if (v.kind === "tool") return typeof v.name === "string" && typeof v.args === "string";
+	return false;
 }

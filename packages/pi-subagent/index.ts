@@ -28,7 +28,7 @@ import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent
 import { stashOverflow, truncationMarker } from "@everyx/pi-ui/context.js";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
-import { type AgentActivity, MSG_STATUS_KEY } from "./event-interpret.js";
+import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
@@ -111,8 +111,61 @@ function widgetSurface(): WidgetSurface | null {
 	};
 }
 
-// ─── Tool parameter schemas ──────────────────────────────────
+// ─── Tool parameter schemas ──────────────────────────────
 
+/**
+ * Tree telemetry (nested agents): a sub-agent's own spawns are invisible to
+ * the user — the only TUI is the root session's. Every node reports its own
+ * children upward over the same setStatus transport as @parent messages;
+ * intermediate nodes forward verbatim (depth + 1), the root applies events
+ * to the widget. Foreground spawns are not tracked: their lifetime is fully
+ * contained in this execute's tool card.
+ */
+function createTreeTelemetry(hasParent: boolean) {
+	/** Ids reported as added — guards activity/remove so untracked foreground
+	 *  agents never emit telemetry. */
+	const tracked = new Set<string>();
+	const report = (event: AgentTreeEvent) => uiRef?.setStatus(TREE_STATUS_KEY, JSON.stringify(event));
+	return {
+		report,
+		add(agent: { agentId: string; title: string; startedAt: number }, status: "running" | "idle"): void {
+			if (!hasParent) return;
+			tracked.add(agent.agentId);
+			report({ op: "add", id: agent.agentId, title: agent.title, startedAt: agent.startedAt, depth: 1, status });
+		},
+		activity(agent: { agentId: string; getLatestActivity(): AgentActivity | undefined }): void {
+			if (!tracked.has(agent.agentId)) return;
+			const activity = agent.getLatestActivity();
+			if (!activity) return;
+			report({ op: "activity", id: agent.agentId, activity });
+		},
+		remove(agentId: string, status: "done" | "failed" | "stopped"): void {
+			if (!tracked.delete(agentId)) return;
+			report({ op: "remove", id: agentId, status });
+		},
+	};
+}
+
+/** Root side: apply a forwarded tree event to the widget (pure data rows). */
+function applyTreeEvent(widget: AgentWidget, event: AgentTreeEvent): void {
+	switch (event.op) {
+		case "add":
+			widget.addNested({
+				agentId: event.id,
+				title: event.title,
+				startedAt: event.startedAt,
+				indent: event.depth,
+				status: event.status,
+			});
+			break;
+		case "activity":
+			widget.updateActivity(event.id, event.activity);
+			break;
+		case "remove":
+			widget.remove(event.id, event.status);
+			break;
+	}
+}
 /** agent_spawn tool params (schema static shape). */
 interface SpawnParams {
 	prompt: string;
@@ -395,6 +448,11 @@ export default function (pi: ExtensionAPI) {
 		void handleMessage(pi, registry, msg, false);
 	};
 
+	// Tree telemetry for this node's own children (up-report) and forwarding
+	// of deeper events. Lives at extension scope: the tracked-set must span
+	// executes (a background child reports activity long after its execute returned).
+	const tree = createTreeTelemetry(HAS_PARENT);
+
 	// ── agent_spawn ────────────────────────────────────
 	pi.registerTool({
 		name: "agent_spawn",
@@ -480,8 +538,17 @@ export default function (pi: ExtensionAPI) {
 					PI_SUBAGENT_AGENT_ID: agentId,
 					PI_SUBAGENT_PARENT: MY_AGENT_ID,
 				},
-				// Child→parent messages re-enter the router on this hop.
+				// Child→parent messages re-enter the router on this hop. Tree telemetry
+				// from deeper spawns forwards up (depth + 1) or lands on the root widget.
 				onMessage: onChildMessage,
+				onTreeEvent: (event) => {
+					ensureWidget(ctx); // a nested row may arrive before any local spawn built the widget
+					if (HAS_PARENT) {
+						tree.report(event.op === "add" ? { ...event, depth: event.depth + 1 } : event);
+						return;
+					}
+					if (widget) applyTreeEvent(widget, event);
+				},
 				// A wake finished: completed → idle row; a failed follow-up is
 				// reported (abnormal end — not a deliberate stop) then cleaned up.
 				onIdle: (outcome) => {
@@ -502,6 +569,7 @@ export default function (pi: ExtensionAPI) {
 							sessionPath: agent.sessionPath,
 							sessionId: agent.sessionId,
 						});
+						tree.remove(agentId, "failed");
 						await registry.stopAndRemove(agentId);
 					})().catch(() => {}); // best-effort: a cleanup failure must not crash the host
 				},
@@ -509,6 +577,7 @@ export default function (pi: ExtensionAPI) {
 					if (params.run_in_background) {
 						// Live widget excerpt: the latest streamed text tail.
 						widget?.updateActivity(agent.agentId, agent.getLatestActivity());
+						tree.activity(agent);
 						return;
 					}
 					streamed += delta;
@@ -521,6 +590,7 @@ export default function (pi: ExtensionAPI) {
 					if (params.run_in_background) {
 						// Live widget excerpt for thinking/tool transitions.
 						widget?.updateActivity(agent.agentId, activity);
+						tree.activity(agent);
 						return;
 					}
 					if (activity.kind === "text") return; // covered by onDelta
@@ -553,17 +623,28 @@ export default function (pi: ExtensionAPI) {
 						onBackgroundSettled: (a) => {
 							ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
 							registry.register(a as AgentProcess);
+							tree.add(a, "running"); // up-report: my child exists
 							void a
 								.waitForCompletion()
-								.then((completion) => registry.complete(a as AgentProcess, completion))
+								.then((completion) => {
+									tree.remove(
+										a.agentId,
+										completion.status === "completed" ? "done" : completion.status === "failed" ? "failed" : "stopped",
+									);
+									registry.complete(a as AgentProcess, completion);
+								})
 								// Defensive: waitForCompletion is deadline-bounded and never
 								// rejects today — if it ever does, clean up without notifying.
-								.catch(() => registry.stopAndRemove(a.agentId));
+								.catch(() => {
+									tree.remove(a.agentId, "stopped");
+									registry.stopAndRemove(a.agentId);
+								});
 						},
 						onResident: (a) => {
 							ensureWidget(ctx);
 							registry.register(a as AgentProcess);
 							registry.markIdle(a.agentId);
+							tree.add(a, "idle");
 						},
 					},
 				});
@@ -707,6 +788,7 @@ export default function (pi: ExtensionAPI) {
 			});
 			try {
 				const stopped = await registry.stopAndRemove(agentId);
+				if (stopped) tree.remove(agentId, "stopped");
 				if (!stopped) {
 					// Finished between lookup and removal (rare) — don't claim
 					// a stop that never happened.

@@ -325,3 +325,39 @@ describe("StatusWidget — width-aware activity clipping (no over-wide regressio
 		assert.ok(visibleWidth(activity) <= 80);
 	});
 });
+
+describe("nested rows (indent)", () => {
+	it("indent shifts both the title line and activity excerpt; width safety holds", () => {
+		const item: WidgetItem = {
+			id: "n1",
+			title: "deep task",
+			startedAt: Date.now(),
+			status: "running",
+			indent: 2,
+			rows: [{ style: "tool", content: "Reading src/compiler/checker.ts" }],
+		};
+		const lines = renderWidgetItemLine(item, theme, new Spinner(), 60);
+		assert.equal(lines.length, 2);
+		const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+		const plainTitle = lines[0].replace(ansi, "");
+		const plainExcerpt = lines[1].replace(ansi, "");
+		// 2 levels × 2 spaces before the status glyph
+		assert.ok(plainTitle.startsWith("    "), `expected leading indent, got: ${JSON.stringify(plainTitle)}`);
+		// excerpt = nesting indent + EXCERPT_INDENT
+		assert.ok(plainExcerpt.startsWith(`      `), `expected excerpt indent, got: ${JSON.stringify(plainExcerpt)}`);
+		for (const p of [plainTitle, plainExcerpt]) {
+			const w = [...p].reduce((n, ch) => n + (/\p{M}/u.test(ch) ? 0 : 1), 0);
+			assert.ok(w <= 60, `line exceeds width: ${w}`);
+		}
+	});
+
+	it("depth 0 renders identical to the legacy format", () => {
+		const a = renderWidgetItemLine({ id: "a", title: "t", startedAt: 0, status: "done" }, theme, new Spinner());
+		const b = renderWidgetItemLine(
+			{ id: "a", title: "t", startedAt: 0, status: "done", indent: 0 },
+			theme,
+			new Spinner(),
+		);
+		assert.deepEqual(a, b);
+	});
+});

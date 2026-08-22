@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type AgentEvent, interpretEvent, MSG_STATUS_KEY } from "../event-interpret.js";
+import { type AgentEvent, interpretEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "../event-interpret.js";
 
 function expect(raw: Record<string, unknown>): AgentEvent[] {
 	return interpretEvent({ type: "x", ...raw });
@@ -224,5 +224,57 @@ describe("interpretEvent — unknown events", () => {
 	it("maps nothing", () => {
 		assert.deepEqual(interpretEvent({ type: "extension_error" }), []);
 		assert.deepEqual(interpretEvent({ type: "agent_start" }), []);
+	});
+});
+
+describe("tree telemetry events (TREE_STATUS_KEY)", () => {
+	const treeEvent = (statusText: unknown) =>
+		interpretEvent({
+			type: "extension_ui_request",
+			method: "setStatus",
+			statusKey: TREE_STATUS_KEY,
+			statusText: typeof statusText === "string" ? statusText : JSON.stringify(statusText),
+		});
+
+	it("parses add (running) / add (idle, resident)", () => {
+		assert.deepEqual(
+			treeEvent({ op: "add", id: "n1", title: "deep task", startedAt: 100, depth: 1, status: "running" }),
+			[
+				{
+					type: "agent_tree",
+					event: { op: "add", id: "n1", title: "deep task", startedAt: 100, depth: 1, status: "running" },
+				},
+			],
+		);
+		assert.deepEqual(treeEvent({ op: "add", id: "n2", title: "t", startedAt: 1, depth: 3, status: "idle" }), [
+			{ type: "agent_tree", event: { op: "add", id: "n2", title: "t", startedAt: 1, depth: 3, status: "idle" } },
+		]);
+	});
+
+	it("parses activity with each activity kind", () => {
+		assert.deepEqual(treeEvent({ op: "activity", id: "n1", activity: { kind: "tool", name: "bash", args: "ls" } }), [
+			{ type: "agent_tree", event: { op: "activity", id: "n1", activity: { kind: "tool", name: "bash", args: "ls" } } },
+		]);
+		assert.equal(treeEvent({ op: "activity", id: "n1", activity: { kind: "text", text: "hi" } })?.length, 1);
+		assert.equal(treeEvent({ op: "activity", id: "n1", activity: { kind: "thinking", text: "" } })?.length, 1);
+	});
+
+	it("parses remove with terminal statuses only", () => {
+		assert.deepEqual(treeEvent({ op: "remove", id: "n1", status: "done" }), [
+			{ type: "agent_tree", event: { op: "remove", id: "n1", status: "done" } },
+		]);
+		assert.equal(treeEvent({ op: "remove", id: "n1", status: "failed" })?.length, 1);
+		assert.equal(treeEvent({ op: "remove", id: "n1", status: "stopped" })?.length, 1);
+		// non-terminal statuses are rejected
+		assert.deepEqual(treeEvent({ op: "remove", id: "n1", status: "running" }), []);
+		assert.deepEqual(treeEvent({ op: "remove", id: "n1", status: "idle" }), []);
+	});
+
+	it("rejects malformed payloads (bad op, missing fields, bad json, bad activity)", () => {
+		assert.deepEqual(treeEvent({ op: "nope", id: "n1" }), []);
+		assert.deepEqual(treeEvent({ op: "add", id: "", title: "t", startedAt: 1, depth: 1, status: "running" }), []);
+		assert.deepEqual(treeEvent({ op: "add", title: "t", startedAt: 1, depth: 1, status: "running" }), []);
+		assert.deepEqual(treeEvent({ op: "activity", id: "n1", activity: { kind: "weird" } }), []);
+		assert.deepEqual(treeEvent("{not json"), []);
 	});
 });

@@ -38,6 +38,24 @@ export class AgentWidget {
 		});
 	}
 
+	/** Track a nested agent (tree telemetry from a descendant's own spawns):
+	 *  pure data — no local AgentProcess behind the row. */
+	addNested(agent: {
+		agentId: string;
+		title: string;
+		startedAt: number;
+		indent: number;
+		status: "running" | "idle";
+	}): void {
+		this.widget.add({
+			id: agent.agentId,
+			title: `@${agent.agentId} — ${agent.title}`,
+			startedAt: agent.startedAt,
+			status: agent.status === "idle" ? "idle" : "running",
+			indent: agent.indent,
+		});
+	}
+
 	/** Stop tracking; the end result feeds the lifetime progress meta. */
 	remove(agentId: string, result?: WidgetResult): void {
 		this.widget.remove(agentId, result);
