@@ -42,9 +42,14 @@ web_search(
 web_fetch(url: string, raw?: boolean) → { title, content }
 ```
 
-- **形态随内容自带**：参数 `raw` 表达请求意图（默认 false = 要易读版；true = 要原始）。`content` 的形态由内容自身与围栏标注表达（HTML 源码→```html、JSON→```json、XML→```xml），LLM/TUI 从内容与围栏标签判断，无需独立格式字段。
-- HTML（raw: false）→ 转 Markdown（转化即可读、省 token）作为正文；HTML（raw: true）→ 原始 HTML 源码（```html 围栏）。
-- 非 HTML（JSON/XML/纯文本）：无论 raw 取值，一律原样返回（它们本就是可读形态，无 markdown 转变）；JSON/XML 包对应围栏，markdown/纯文本作为正文不包——markdown/raw 只在 HTML 页面有区分，非 HTML 天生是 raw。
+- **数据纯净**：`content` 是工具的返回数据——抓到什么给什么，永不装饰
+  （围栏会改写载荷边界且遇内嵌 ``` 破防）。形状由 `contentType` 字段自描述
+  （响应 Content-Type 原文），不靠内容里的标注语法。
+- 参数 `raw` 表达请求意图（默认 false = 要易读版；true = 要原始）。
+  HTML（raw: false）→ 转 Markdown（转化即可读、省 token）；HTML
+  （raw: true）→ 原始源码；非 HTML（SVG/JSON/YAML/CSV/纯文本……都是文本）
+  无论 raw 取值一律原样返回——markdown/raw 只在 HTML 页面有区分，
+  非 HTML 天生是 raw。
 - **返回不含 url**：工具的定位是"了解 URL 对应页面的内容"——返回即内容（title + content）；重定向是 HTTP 层透明行为，LLM 引用入口 URL 即可（用户访问时自动跟随），无需回显落地 URL。
 - **错误时 `error` 字段承载 HTTP 状态码**（如 `HTTP 404: Not Found` / `HTTP 403: Forbidden`）——成功时不需要 status 字段（有内容即成功）。
 - **只做核心 fetch**：静态页面 HTML → Markdown。复杂抓取（带 cookies 的认证页、POST/API、二进制下载、视频流、交互页面）→ **交给 LLM 自己用 bash curl**（提供能力而非方案）。
@@ -172,11 +177,31 @@ UA 来源优先级：
   `title`/`description`/`image`，仅输出有值的字段）→ 正文 → JSON-LD（
   有则末尾 fenced `json` 块）；协商直取（`Accept: text/markdown`）与
   本地转换输出同一格式。
-- **内容判定**：仅 HTML/XHTML 走 markdown 提取；其他文本响应（JSON/XML/
-  纯文本等）原样返回原文（title 空——原文无 title 不编造）；二进制
-  （image/audio/video 等）报错。非正文（JSON/XML/原始 HTML）包对应
-  content-type 的 markdown 围栏，正文（markdown/纯文本）不包。
-- **raw 语义**：`raw: true` 时 HTML 也返回原始源码（```html 围栏），请求头
+- **内容判定：无门**。工具不做任何 content-type 准入判定——每道门都是
+  替 LLM 做的"这个你不用看"决策，限制能力。规则只有两条：HTML/XHTML 默认
+  走 markdown 提取（变换是服务，`raw` 随时可关）；其他一切响应原样返回
+  （SVG/JSON/CSV/YAML 都是文本，真二进制有损解码成可辨认的噪声，
+  `contentType` 字段说明真相）。剩余 error 仅协议层：网络失败、HTTP 状态、
+  空响应、非 http(s)。数据层永不装饰内容（围栏会改写载荷且遇内嵌 ``` 破防），
+  形状由 `contentType` 字段自描述。
+- **溢出的两种消费模型**（映射 pi 自身 bash/read 的分流——源头是否持久）：
+  网页 markdown =「读文章」，维持 pi 官方范式——封顶预览 + 截断标记
+  （LLM 靠预览判断相关性）；其余一切（含 raw 源码）=「用数据」——LLM 是
+  刻意来取这份文件的，预览只是全文消费时的重复成本，超预算即整份落盘、
+  返回 `(content not inlined — 大小, MIME) + 路径`，交给 read 工具的
+  offset/limit 翻页消费；二进制噪声由此不进 context。未超预算照旧内联
+  （小文件不值得多一轮 read），预算沿用 50KB/2000 行不引入新阈值。
+- **图片是第三种交付物**：`image/*`（SVG 除外——它是 XML 文本）不落文本
+  通道，经 pi 的 `resizeImage` 归一化（自动缩放/降质进 ~4.5MB base64 预算）
+  后返回 image block——TUI 按 cell 尺寸内联渲染（无字节限制），模型多模态
+  消费。解码失败回落噪声路径（诚实可见），不做任何准入门。
+- **下载缓冲上限（宿主物理保护，非政策）**：响应体流式读取、运行计数
+  （不信任 Content-Length——chunked 响应没有），超 64MB 即弃流，返回
+  `(content not buffered — 超限大小, MIME)`；64MB 远高于图片预算，
+  一切可缩放图片均不受影响。Accept 不含 `image/avif`——本地图形解码器
+  （Photon）解不了 AVIF（已实测），协商回 AVIF 只会把可显示的图降级成
+  噪声；webp/jpeg/png 均可解。
+- **raw 语义**：`raw: true` 时 HTML 也返回原始源码（无任何包装），请求头
   首选 `text/html`（不协商 markdown 正文）；不做 markdown 转换、不做 CSR
   渲染（要源码就不是要渲染结果）；站点 URL 重写（如 GitHub blob→raw）仍
   保留——那是 URL 语义改写，非格式变换。raw 路径不解析 title（一律空——

@@ -68,8 +68,12 @@ export interface ChannelSearchContext {
  *  HTTP status. */
 export interface WebFetchResult {
 	title: string;
-	/** Content — Markdown (HTML converted) or raw source (fenced by content type). */
+	/** Content — Markdown (HTML converted) or the source verbatim. Never decorated. */
 	content: string;
+	/** Response Content-Type header, verbatim (e.g. "image/svg+xml; charset=utf-8"). */
+	contentType?: string;
+	/** Decoded image payload (auto-resized into the multimodal budget) when the response was an image. */
+	image?: { data: string; mimeType: string };
 	/** /tmp path of the full text when content was truncated; the LLM can read it. */
 	outputPath?: string;
 	error?: string;

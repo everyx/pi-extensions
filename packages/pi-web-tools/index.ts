@@ -253,7 +253,7 @@ async function executeFetch(
 	args: WebFetchParams,
 	signal: AbortSignal | undefined,
 ): Promise<{
-	content: { type: "text"; text: string }[];
+	content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
 	details: Record<string, unknown>;
 	isError: boolean;
 }> {
@@ -267,15 +267,25 @@ async function executeFetch(
 			isError: true,
 		};
 	}
-	let text = result.title ? `${result.title}\n\n${result.content}` : result.content;
-	// Truncated content: inline marker with the full-output path (one field,
-	// self-describing) — the LLM reads the preview and knows the rest is a
-	// read away.
-	if (result.outputPath) text += `\n\n(output truncated — full output: ${result.outputPath})`;
+	// LLM-visible markers (preview pointer / not-inlined) are shaped by the
+	// fetch layer — here the title prefix is the only addition.
+	const text = result.title ? `${result.title}\n\n${result.content}` : result.content;
+	const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
+		{ type: "text", text },
+	];
+	if (result.image) {
+		content.push({ type: "image", data: result.image.data, mimeType: result.image.mimeType });
+	}
 	return {
-		content: [{ type: "text", text }],
+		content,
 		details: {
-			data: { title: result.title, content: result.content, startedAt, endedAt: Date.now() },
+			data: {
+				title: result.title,
+				content: result.content,
+				contentType: result.contentType,
+				startedAt,
+				endedAt: Date.now(),
+			},
 		},
 		isError: false,
 	};
