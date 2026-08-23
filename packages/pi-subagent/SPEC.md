@@ -127,6 +127,8 @@ protocol.ts        — 纯函数 JSONL 协议层
 rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + 事件流 + 退出）
 event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数）
 agent-process.ts   — AgentProcess：一个常驻 rpc 子进程的语义封装
+notification.ts    — 完成通知 payload 构造（LLM JSON 截断/stash + details 卡形状单点）
+tree-display.ts    — 子树显示面（显示面统一规则锚点：fold/forward/widget 决策 + 计数）
 registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 点对点投递 + 完成策略
 model.ts           — model spec → resolved model（纯函数）
 types.ts           — 共享协议类型（RenderEvent / SubagentDetails / NotificationDetails）

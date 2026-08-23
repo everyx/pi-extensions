@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 import { CHROMIUM_BINARIES } from "../browsers.js";
 import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
 import type { ChannelSearchContext, EngineId, SearchResultItem, WebSearchParams } from "../types.js";
+import { EXTRACT_SCRIPT, isCaptchaState, parseExtraction, parsePageState, STATE_PROBE_SCRIPT } from "./extract.js";
 import { engineSearchUrl } from "./locale.js";
 
 const execFileAsync = promisify(execFile);
@@ -229,85 +230,6 @@ async function evaluate(sessionId: string, expression: string, timeoutMs: number
  * .b_ad / li[class*='ad']; AI blocks carry ai-* / data-ai-* style markers
  * (Google AI Overview, Bing AI summary, Baidu AI 搜索).
  */
-const EXTRACT_SCRIPT = String.raw`
-(() => {
-	const out = [];
-	const seen = new Set();
-	const isAdOrAi = (titleEl, a) => {
-		if (a && /adurl|aclk/.test(a.href)) return true;
-		for (let n = titleEl.parentElement; n && n !== document.body; n = n.parentElement) {
-			const cls = (typeof n.className === 'string' ? n.className : '') + ' ' + (n.getAttribute('data-text-ad') || '') + ' ' + (n.getAttribute('data-ad-text') || '') + ' ' + (n.getAttribute('data-ai-tracking-id') || '');
-			const role = n.getAttribute('role') || '';
-			const id = (n.id || '') + ' ' + (n.getAttribute('data-testid') || '');
-			if (/\b(ad|ads|advertisement|sponsored|b_ad)\b/i.test(cls + role)) return true;
-			if (/(^|[\s_-])(ai-pin|ai-overview|ai-answer|ai-summary|ai-search|b_ai|ai-container)([\s_-]|$)|^b_ai_|data-ai-tracking/i.test(cls + id)) return true;
-		}
-		return false;
-	};
-	const push = (titleEl) => {
-		const a = titleEl.closest('a') || titleEl.querySelector('a');
-		if (!a) return;
-		let href = a.href || '';
-		// Google may wrap result links in /url?q=<real-url> (cookie-less/flagged
-		// traffic); normal logged-in traffic gets direct links — handle both.
-		if (/google\.com\/url\?/.test(href)) {
-			const m = href.match(/[?&](?:q|url)=([^&]+)/);
-			if (m) {
-				try {
-					const decoded = decodeURIComponent(m[1]);
-					if (decoded.startsWith("http")) href = decoded;
-				} catch {
-					// keep the redirect URL
-				}
-			}
-		}
-		// Bing wraps results in /ck/a?u=<base64url> redirects — recover the real
-		// URL. u is "a1" + base64url(URL); try plain first, then without the a1.
-		if (/bing\.com\/ck\//.test(href)) {
-			const m = href.match(/[?&]u=([^&]+)/);
-			if (m) {
-				for (const candidate of [m[1], m[1].replace(/^a1/, "")]) {
-					try {
-						const b64 = candidate.replace(/-/g, "+").replace(/_/g, "/");
-						const decoded = decodeURIComponent(atob(b64));
-						if (decoded.startsWith("http")) {
-							href = decoded;
-							break;
-						}
-					} catch {
-						// try next candidate
-					}
-				}
-			}
-		}
-		const title = (titleEl.textContent || '').trim();
-		if (!title || !href.startsWith('http') || seen.has(href) || isAdOrAi(titleEl, a)) return;
-		// Skip the engine's own pages (local packs / "more results").
-		if (/google\.com\/search|bing\.com\/search|baidu\.com\/s|yandex\.com\/search/.test(href)) return;
-		seen.add(href);
-		let snippet = '';
-		let n = titleEl;
-		for (let i = 0; i < 4 && n; i++) {
-			n = n.parentElement;
-			if (!n) break;
-			const t = (n.textContent || '').replace(/\s+/g, ' ').trim();
-			if (t.length > title.length) { snippet = t.slice(0, 300); break; }
-		}
-		out.push({ title, url: href, snippet });
-	};
-	document.querySelectorAll('h3, h2').forEach(push);
-	return JSON.stringify(out);
-})()
-`;
-
-function parseResults(raw: string): SearchResultItem[] {
-	try {
-		const parsed = JSON.parse(raw) as SearchResultItem[];
-		return parsed.filter((r) => r.url && r.title);
-	} catch {
-		throw new Error("real-browser channel: could not parse search results from page");
-	}
-}
 
 /** Build a direct engine search URL (query + locale + recency as params). */
 function buildSearchUrl(params: WebSearchParams, engine: EngineId): string {
@@ -347,22 +269,12 @@ export async function searchWithBsk(
 		const nav = await runBsk(["navigate", "--session", sessionId, buildSearchUrl(params, engine)], timeoutMs);
 		if (!nav.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav.stderr}`);
 		const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
-		const results = parseResults(raw);
+		const results = parseExtraction(raw);
 		if (results.length === 0) {
 			// Empty extraction may mean a captcha/anti-bot wall rather than
 			// genuinely no results — surface it instead of silently returning 0.
-			const probe = await evaluate(
-				sessionId,
-				`JSON.stringify({ url: location.href, text: document.body ? document.body.innerText.slice(0, 200) : "" })`,
-				timeoutMs,
-			);
-			let state: { url: string; text: string } = { url: "", text: "" };
-			try {
-				state = JSON.parse(probe) as { url: string; text: string };
-			} catch {
-				// keep defaults
-			}
-			if (/captcha|not a robot|automated requests/i.test(`${state.url} ${state.text}`)) {
+			const probe = await evaluate(sessionId, STATE_PROBE_SCRIPT, timeoutMs);
+			if (isCaptchaState(parsePageState(probe))) {
 				throw new Error(`real-browser channel: ${engine} blocked with a captcha challenge`);
 			}
 		}

@@ -1,21 +1,5 @@
-/**
- * web-tools preview — 1:1 screen simulation, aligned with pi-subagent's.
- *
- * Each path occupies one full screen and mirrors how pi actually renders:
- * tool calls stack top-down (each call is one slot that evolves in place:
- * pending header → completed card), results fold, and every path loops with
- * a blank pause between rounds. The path title highlights the live status
- * word (accent) as the lifecycle advances.
- *
- *   pnpm preview                # 1:1 live paths (TTY)
- *   THEME=ayu-dark pnpm preview # or any pi theme name
- */
-
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
-import { Box } from "@earendil-works/pi-tui";
+import { initTheme } from "@earendil-works/pi-coding-agent";
+import { createPreviewRuntime } from "@everyx/pi-ui/preview-runtime.js";
 import { fetchView, searchView } from "./views.js";
 
 // ── Views (same templates as index.ts) ─────────────────────────
@@ -23,42 +7,12 @@ import { fetchView, searchView } from "./views.js";
 const themeName = process.env.THEME || "light";
 initTheme(themeName);
 
-// The live theme object lives in an internal module that the package entry
-// doesn't re-export and whose subpath is blocked by its "exports" map. Walk
-// node_modules physically (tsx's resolver enforces exports even for
-// require.resolve) and import the file by absolute URL, which bypasses the
-// exports map entirely.
-function findPkgDir(name: string): string | null {
-	let dir = import.meta.dirname;
-	for (;;) {
-		const candidate = path.join(dir, "node_modules", name);
-		if (existsSync(path.join(candidate, "package.json"))) return candidate;
-		const parent = path.dirname(dir);
-		if (parent === dir) return null;
-		dir = parent;
-	}
-}
-const pkgDir = findPkgDir("@earendil-works/pi-coding-agent");
-if (!pkgDir) throw new Error("pi-coding-agent not found under node_modules");
-const themeModulePath = path.join(pkgDir, "dist", "modes", "interactive", "theme", "theme.js");
-const { theme: globalTheme } = (await import(pathToFileURL(themeModulePath).href)) as { theme: Theme };
-const theme = globalTheme as Theme;
-
-function renderLines(component: unknown, width = 100): string[] {
-	const c = component as { render(w: number): string[] };
-	return c.render(width);
-}
-
-/** Simulate pi's framework tool shell (tool-execution.js default shell). */
-function shell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[]) {
-	const box = new Box(1, 1, (t: string) => theme.bg(bg, t));
-	for (const child of children) box.addChild(child as never);
-	return { render: (w: number) => renderLines(box, w) };
-}
-
-function toolShell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[], w = 100): string[] {
-	return renderLines(shell(bg, children), w);
-}
+// Dev storybook runtime — shared across extension previews (one
+// implementation). The theme lives in an internal pi module whose subpath is
+// blocked by its "exports" map; preview-runtime.ts walks node_modules
+// physically and imports it by absolute URL, bypassing the exports map.
+const rt = await createPreviewRuntime();
+const { theme, toolShell } = rt;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

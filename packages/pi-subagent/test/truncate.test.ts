@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { truncateForContext } from "../index.js";
+import { truncateForContext } from "../notification.js";
 
 test("short output passes through untruncated", () => {
 	assert.equal(truncateForContext("short result"), "short result");

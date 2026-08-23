@@ -25,19 +25,19 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
-import { stashOverflow, truncationMarker } from "@everyx/pi-ui/context.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { safeTitle } from "@everyx/pi-ui/width.js";
 import { Type } from "typebox";
-import { type AgentCompletion, AgentProcess } from "./agent-process.js";
+import { AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
-import { createNestedFold, resolveTreeAnchor } from "./nested-fold.js";
+import { maybeWriteFullOutput, notifyCompletion, truncateForContext } from "./notification.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
-import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
+import { AgentRegistry, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
 import { runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
-import type { NotificationDetails, SubagentDetails } from "./types.js";
+import { createSubtreeDisplay } from "./tree-display.js";
+import type { SubagentDetails } from "./types.js";
 import { sendView, spawnView, stopView } from "./views.js";
 import { AgentWidget } from "./widget.js";
 
@@ -154,26 +154,6 @@ function createTreeTelemetry(hasParent: boolean) {
 	};
 }
 
-/** Root side: apply a forwarded tree event to the widget (pure data rows). */
-function applyTreeEvent(widget: AgentWidget, event: AgentTreeEvent): void {
-	switch (event.op) {
-		case "add":
-			widget.addNested({
-				agentId: event.id,
-				title: event.title,
-				startedAt: event.startedAt,
-				indent: event.depth,
-				status: event.status,
-			});
-			break;
-		case "activity":
-			widget.updateActivity(event.id, event.activity);
-			break;
-		case "remove":
-			widget.remove(event.id, event.status);
-			break;
-	}
-}
 /** agent_spawn tool params (schema static shape). */
 interface SpawnParams {
 	prompt: string;
@@ -308,29 +288,6 @@ const SendParamsSchema = Type.Object({
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-/**
- * LLM-context protection for result content, aligned with pi's bash tool:
- * truncateTail keeps the tail (2000 lines / 50KB). Only LLM-visible content
- * is capped — details.events stay complete, so folding/expansion never
- * loses content for the user; the session file has everything. Single exit
- * for every path that produces LLM-visible output (foreground result,
- * background notification).
- */
-export function truncateForContext(text: string): string {
-	return truncateTail(text).content;
-}
-
-/**
- * When an output exceeds the context cap, stash the full text (shared
- * primitive in pi-ui/context.ts) and return the LLM-visible marker embedded
- * in the result: the model reads the truncated preview and knows the full
- * output is one `read` away. Returns the marker when truncated, "" otherwise.
- */
-function maybeWriteFullOutput(agentId: string, output: string): string {
-	const { stashPath } = stashOverflow(output, agentId, { keep: "tail" });
-	return stashPath ? truncationMarker(stashPath) : "";
-}
-
 function toErrorResult(err: unknown): {
 	content: { type: "text"; text: string }[];
 	details: Record<string, unknown>;
@@ -409,53 +366,6 @@ async function handleMessage(
 			return { ok: false, error: d.reason };
 		}
 	}
-}
-
-/** Deliver a completion notification: JSON content (LLM) + rich details (user card). */
-function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: AgentCompletion): void {
-	const details: NotificationDetails = {
-		status: completion.status,
-		agent_id: agent.agentId,
-		title: `@${agent.agentId} — ${agent.title}`,
-		model: agent.model,
-		thinking: agent.thinking,
-		// Card body (never enters LLM context — verified against convertToLlm).
-		// The full output; the LLM-visible content below is capped (truncateTail).
-		result: completion.output,
-		// Persistent agent completed → resident (idle); a failed follow-up is
-		// reported and cleaned up, so the idle marker must not appear there.
-		idle: agent.persistent && completion.status === "completed" ? true : undefined,
-		usage: {
-			tokens: completion.stats.tokens || null,
-			toolUses: completion.stats.toolUses || null,
-			durationMs: completion.stats.durationMs || null,
-		},
-		sessionPath: completion.sessionPath,
-		sessionId: completion.sessionId,
-	};
-
-	pi.sendMessage(
-		{
-			customType: "subagent-notification",
-			content: JSON.stringify({
-				status: completion.status,
-				agent_id: `@${agent.agentId}`,
-				// LLM-context protection: cap the visible result (tail 2000 lines /
-				// 50KB, bash parity) — the full text lives in details.result (card
-				// body, never enters LLM context) and the session file.
-				result: truncateForContext(completion.output) + maybeWriteFullOutput(agent.agentId, completion.output),
-				// Only a completed persistent agent stays resident (idle) — a
-				// failed follow-up is cleaned up, so no idle claim.
-				idle: agent.persistent && completion.status === "completed" ? true : undefined,
-				// Resume entry point: sub-agent sessions live outside `pi -r`;
-				// attach with `pi --session <path>`.
-				session_path: completion.sessionPath ?? null,
-			}),
-			display: true,
-			details,
-		},
-		{ deliverAs: "followUp", triggerTurn: true },
-	);
 }
 
 // ─── Default export (pi extension entry) ───────────────────────
@@ -590,15 +500,23 @@ export default function (pi: ExtensionAPI) {
 			// source (RPC event handler); the callbacks here only refresh the
 			// live card via onUpdate.
 			let streamed = "";
-			// Nested-subtree counters for THIS card (foreground only): fed by
-			// tree events arriving through this child's process — every deeper
-			// spawn of the subtree lands here, never in the widget.
-			const nestedFold = createNestedFold();
-			// Once this execute returns, the card is frozen (onUpdate is a
-			// no-op) — a persistent child keeps living and spawning, so its
-			// later descendants must surface on the widget instead of folding
-			// into a dead card's counters.
-			let cardClosed = false;
+			// Where my child's subtree telemetry lands (SPEC: 显示面统一规则) —
+			// fold into THIS card while it's open, forward to my parent, or
+			// surface on the root widget. One module owns the whole decision.
+			const subtree = createSubtreeDisplay({
+				hasParent: HAS_PARENT,
+				foregroundEdge: params.run_in_background !== true,
+				getWidget: () => {
+					ensureWidget(ctx);
+					return widget ?? undefined;
+				},
+				forward: (event) => tree.report(event),
+				onFold: () =>
+					onUpdate?.({
+						content: [{ type: "text", text: streamed }],
+						details: liveDetails(agent.getLatestActivity()),
+					}),
+			});
 			// Live-card details: the shared slice every foreground update carries.
 			const liveDetails = (activity?: AgentActivity): SubagentDetails => ({
 				task,
@@ -607,11 +525,27 @@ export default function (pi: ExtensionAPI) {
 				thinking: agent.thinking,
 				activity,
 				events: agent.getEvents(),
-				nested: nestedFold.snapshot(),
+				nested: subtree.nested(),
 			});
 			// Short human-name id (max, zoe…) — the LLM-facing reference. No tree
 			// structure: agents address only ids they were given, hop by hop.
 			const agentId = registry.nextAgentId();
+			// Wake-turn ending → completion notification. The assembly is
+			// identical for both endings except status/output-default.
+			const notifyWake = async (status: "completed" | "failed"): Promise<void> => {
+				const [output, stats] = await Promise.all([agent.lastOutput(), agent.getStats()]);
+				notifyCompletion(pi, agent, {
+					status,
+					output: output || (status === "failed" ? "Follow-up turn failed (model API error)." : output),
+					stats: {
+						tokens: stats?.tokens ?? 0,
+						toolUses: stats?.toolUses ?? 0,
+						durationMs: Date.now() - agent.startedAt,
+					},
+					sessionPath: agent.sessionPath,
+					sessionId: agent.sessionId,
+				});
+			};
 			const agent = new AgentProcess({
 				agentId,
 				cwd: ctx.cwd,
@@ -632,29 +566,7 @@ export default function (pi: ExtensionAPI) {
 				// Child→parent messages re-enter the router on this hop. Tree telemetry
 				// from deeper spawns forwards up (depth + 1) or lands on the root widget.
 				onMessage: onChildMessage,
-				onTreeEvent: (event) => {
-					switch (
-						resolveTreeAnchor({
-							hasParent: HAS_PARENT,
-							foregroundEdge: params.run_in_background !== true,
-							cardClosed,
-						})
-					) {
-						case "fold":
-							nestedFold.fold(event);
-							onUpdate?.({
-								content: [{ type: "text", text: streamed }],
-								details: liveDetails(agent.getLatestActivity()),
-							});
-							return;
-						case "forward":
-							tree.report(event.op === "add" ? { ...event, depth: event.depth + 1 } : event);
-							return;
-						case "widget":
-							ensureWidget(ctx); // a nested row may arrive before any local spawn built the widget
-							if (widget) applyTreeEvent(widget, event);
-					}
-				},
+				onTreeEvent: (event) => subtree.onTreeEvent(event),
 				// A wake finished. Completed: its output must reach this spawner's
 				// context — symmetric with the first-completion notification, an
 				// agent_send "delivered" alone would leave the answer unread.
@@ -663,40 +575,15 @@ export default function (pi: ExtensionAPI) {
 				onIdle: (outcome) => {
 					if (outcome === "completed") {
 						if (!agent.stoppedByControl) {
-							void (async () => {
-								const [output, stats] = await Promise.all([agent.lastOutput(), agent.getStats()]);
-								notifyCompletion(pi, agent, {
-									status: "completed",
-									output,
-									stats: {
-										tokens: stats?.tokens ?? 0,
-										toolUses: stats?.toolUses ?? 0,
-										durationMs: Date.now() - agent.startedAt,
-									},
-									sessionPath: agent.sessionPath,
-									sessionId: agent.sessionId,
-								});
-							})().catch(() => {}); // best-effort: a notification failure must not crash the host
+							void notifyWake("completed").catch(() => {}); // best-effort: must not crash the host
 						}
 						registry.markIdle(agentId);
 						return;
 					}
-					void (async () => {
-						const [output, stats] = await Promise.all([agent.lastOutput(), agent.getStats()]);
-						notifyCompletion(pi, agent, {
-							status: "failed",
-							output: output || "Follow-up turn failed (model API error).",
-							stats: {
-								tokens: stats?.tokens ?? 0,
-								toolUses: stats?.toolUses ?? 0,
-								durationMs: Date.now() - agent.startedAt,
-							},
-							sessionPath: agent.sessionPath,
-							sessionId: agent.sessionId,
-						});
-						tree.remove(agentId, "failed");
-						await registry.stopAndRemove(agentId);
-					})().catch(() => {}); // best-effort: a cleanup failure must not crash the host
+					void notifyWake("failed")
+						.then(() => tree.remove(agentId, "failed"))
+						.then(() => registry.stopAndRemove(agentId))
+						.catch(() => {}); // best-effort: a cleanup failure must not crash the host
 				},
 				onDelta: (delta) => {
 					if (params.run_in_background) {
@@ -790,7 +677,7 @@ export default function (pi: ExtensionAPI) {
 				return toErrorResult(err);
 			}
 
-			cardClosed = true; // from here on onUpdate cannot refresh the card
+			subtree.closeCard(); // from here on onUpdate cannot refresh the card
 			switch (outcome.kind) {
 				case "spawn-failed":
 					// The isError return carries the failure to the LLM and the status
@@ -855,7 +742,7 @@ export default function (pi: ExtensionAPI) {
 								thinking: agent.thinking,
 								sessionPath: outcome.sessionPath,
 								events: outcome.events,
-								nested: nestedFold.snapshot(),
+								nested: subtree.nested(),
 							} satisfies SubagentDetails,
 							isError: true,
 						};
@@ -883,7 +770,7 @@ export default function (pi: ExtensionAPI) {
 							model: agent.model,
 							thinking: agent.thinking,
 							events: outcome.events,
-							nested: nestedFold.snapshot(),
+							nested: subtree.nested(),
 						} satisfies SubagentDetails,
 					};
 				}

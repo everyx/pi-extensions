@@ -21,6 +21,7 @@ pi 扩展的共享原语库，两族：**视图**（数据驱动卡片——工�
 | `ticker.ts` | 共享动画时钟（多订阅最小间隔聚合） | — |
 | `widget.ts` | 前台状态指示器（Agents 条、进度 meta、idle 行） | StatusWidget 等 |
 | `card.ts` / `view.ts` | 视图族：卡片积木 + createToolView 声明工厂 | 见各自文件 |
+| `preview-runtime.ts` | **dev-only** storybook 运行时：主题深加载 hack + 框架 shell 模拟（生产代码禁止导入） | createPreviewRuntime |
 
 无 index 桶文件——按模块深路径导入，树摇友好且职责自明。
 

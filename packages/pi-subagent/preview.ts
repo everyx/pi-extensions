@@ -12,11 +12,8 @@
  *   THEME=ayu-dark npm run preview   # or any pi theme name
  */
 
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
-import { Box } from "@earendil-works/pi-tui";
+import { createPreviewRuntime } from "@everyx/pi-ui/preview-runtime.js";
 import type { WidgetResult } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
@@ -44,26 +41,8 @@ initTheme(themeName);
 // node_modules physically (tsx's resolver enforces exports even for
 // require.resolve) and import the file by absolute URL, which bypasses the
 // exports map entirely.
-function findPkgDir(name: string): string | null {
-	let dir = import.meta.dirname;
-	for (;;) {
-		const candidate = path.join(dir, "node_modules", name);
-		if (existsSync(path.join(candidate, "package.json"))) return candidate;
-		const parent = path.dirname(dir);
-		if (parent === dir) return null;
-		dir = parent;
-	}
-}
-const pkgDir = findPkgDir("@earendil-works/pi-coding-agent");
-if (!pkgDir) throw new Error("pi-coding-agent not found under node_modules");
-const themeModulePath = path.join(pkgDir, "dist", "modes", "interactive", "theme", "theme.js");
-const { theme: globalTheme } = (await import(pathToFileURL(themeModulePath).href)) as { theme: Theme };
-const theme = globalTheme as Theme;
-
-function renderLines(component: unknown, width = 100): string[] {
-	const c = component as { render(w: number): string[] };
-	return c.render(width);
-}
+// Dev storybook runtime — shared across extension previews (one implementation).
+const { theme, renderLines, toolShell } = await createPreviewRuntime();
 
 /**
  * Simulate pi's framework tool shell (tool-execution.js):
@@ -72,15 +51,6 @@ function renderLines(component: unknown, width = 100): string[] {
  * background follows state (pending while running, success/error on
  * completion) — covering the header AND the body.
  */
-function shell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[]) {
-	const box = new Box(1, 1, (t: string) => theme.bg(bg, t));
-	for (const child of children) box.addChild(child as never);
-	return { render: (w: number) => renderLines(box, w) };
-}
-
-function toolShell(bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg", children: unknown[], w = 100): string[] {
-	return renderLines(shell(bg, children), w);
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
