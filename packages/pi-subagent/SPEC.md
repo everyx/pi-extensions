@@ -212,7 +212,7 @@ queued → running ──→ completed（通知）
 ### 会话存储
 
 - 目录在 pi 标准会话树之外——`pi -r` 保持干净；永不删除
-- `--name` 仅当显式提供 title 时传（否则跟随 pi 默认）
+- `--name` 始终传递：显式 title，缺省则从 prompt 首行派生（safeTitle 截断）——title 是纯 UI 标签，不影响子代理行为，永不值得为它阻塞 spawn 或消耗校验轮次
 - attach：`pi --session <path>`
 
 ### 嵌套

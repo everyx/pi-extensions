@@ -27,6 +27,7 @@ import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { stashOverflow, truncationMarker } from "@everyx/pi-ui/context.js";
+import { safeTitle } from "@everyx/pi-ui/width.js";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
@@ -201,12 +202,17 @@ interface SendParams {
 const SpawnPromptField = Type.String({
 	description: "The task for the sub-agent (self-contained: it starts with zero context).",
 });
-const SpawnTitleField = Type.String({
-	minLength: 1,
-	description:
-		"Short task title (3-5 words) — required. Identifies the agent in the UI, " +
-		"notification card, and session name.",
-});
+const SpawnTitleField = Type.Optional(
+	Type.String({
+		description: "Task title. Omit to derive one from the prompt.",
+	}),
+);
+
+/** Fallback when no explicit title was given: the prompt's first line, capped
+ *  to a one-line title budget (session names / notification cards never wrap). */
+export function deriveTitle(prompt: string | undefined): string {
+	return safeTitle((prompt ?? "").split("\n")[0], 60);
+}
 const SpawnModelField = Type.Optional(
 	Type.String({
 		description:
@@ -531,6 +537,11 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
 			captureUi(ctx);
 			const params = raw as unknown as SpawnParams;
+			// Title is cosmetic — it names the session, card, and notifications,
+			// and never changes what the agent does. Never worth blocking a spawn
+			// on (or a validation round-trip): omitted → derive from the prompt's
+			// first line; renderers cap display length themselves.
+			const resolveTitle = (): string => params.title?.trim() || deriveTitle(params.prompt);
 			// Schema hides run_in_background from sub-agents; this guard catches
 			// hallucinated args (schema validation may pass extras through).
 			if (HAS_PARENT && params.run_in_background != null) {
@@ -546,7 +557,7 @@ export default function (pi: ExtensionAPI) {
 								"caller can decide.",
 						},
 					],
-					details: { error: "background spawns are root-only", title: params.title },
+					details: { error: "background spawns are root-only", title: resolveTitle() },
 					isError: true,
 				};
 			}
@@ -566,7 +577,7 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: resolved.error }],
 					details: params.run_in_background
-						? { runInBackground: true, title: params.title, error: resolved.error }
+						? { runInBackground: true, title: resolveTitle(), error: resolved.error }
 						: { error: resolved.error },
 					isError: true,
 				};
@@ -607,7 +618,7 @@ export default function (pi: ExtensionAPI) {
 				model: resolved.model,
 				thinking: params.thinking ?? pi.getThinkingLevel(),
 				tools: params.tools,
-				title: params.title,
+				title: resolveTitle(),
 				sessionDir: SUBAGENT_SESSION_DIR,
 				timeoutMs: params.timeoutMs,
 				// Resident after completion (idle, zero token) — explicit opt-in.
