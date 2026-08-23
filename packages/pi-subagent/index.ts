@@ -32,12 +32,12 @@ import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { resolveModel } from "./model.js";
-import { createNestedFold } from "./nested-fold.js";
+import { createNestedFold, resolveTreeAnchor } from "./nested-fold.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
 import { runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
-import type { NotificationDetails } from "./types.js";
+import type { NotificationDetails, SubagentDetails } from "./types.js";
 import { sendView, spawnView, stopView } from "./views.js";
 import { AgentWidget } from "./widget.js";
 
@@ -600,7 +600,7 @@ export default function (pi: ExtensionAPI) {
 			// into a dead card's counters.
 			let cardClosed = false;
 			// Live-card details: the shared slice every foreground update carries.
-			const liveDetails = (activity?: AgentActivity) => ({
+			const liveDetails = (activity?: AgentActivity): SubagentDetails => ({
 				task,
 				startedAt,
 				model: agent.model,
@@ -633,27 +633,27 @@ export default function (pi: ExtensionAPI) {
 				// from deeper spawns forwards up (depth + 1) or lands on the root widget.
 				onMessage: onChildMessage,
 				onTreeEvent: (event) => {
-					// Anchor boundary, three explicit cases:
-					//   root + my foreground child (card still open) → fold into
-					//     THIS card's meta counters — one subtree, one surface;
-					//   non-root → forward verbatim (depth + 1) to my parent;
-					//   root + background child, or a closed card's persistent
-					//     child → widget rows.
-					const foregroundEdge = params.run_in_background !== true;
-					if (!HAS_PARENT && foregroundEdge && !cardClosed) {
-						nestedFold.fold(event);
-						onUpdate?.({
-							content: [{ type: "text", text: streamed }],
-							details: liveDetails(agent.getLatestActivity()),
-						});
-						return;
+					switch (
+						resolveTreeAnchor({
+							hasParent: HAS_PARENT,
+							foregroundEdge: params.run_in_background !== true,
+							cardClosed,
+						})
+					) {
+						case "fold":
+							nestedFold.fold(event);
+							onUpdate?.({
+								content: [{ type: "text", text: streamed }],
+								details: liveDetails(agent.getLatestActivity()),
+							});
+							return;
+						case "forward":
+							tree.report(event.op === "add" ? { ...event, depth: event.depth + 1 } : event);
+							return;
+						case "widget":
+							ensureWidget(ctx); // a nested row may arrive before any local spawn built the widget
+							if (widget) applyTreeEvent(widget, event);
 					}
-					if (HAS_PARENT) {
-						tree.report(event.op === "add" ? { ...event, depth: event.depth + 1 } : event);
-						return;
-					}
-					ensureWidget(ctx); // a nested row may arrive before any local spawn built the widget
-					if (widget) applyTreeEvent(widget, event);
 				},
 				// A wake finished. Completed: its output must reach this spawner's
 				// context — symmetric with the first-completion notification, an
@@ -741,7 +741,12 @@ export default function (pi: ExtensionAPI) {
 						onBackgroundStarting: () =>
 							onUpdate?.({
 								content: [{ type: "text", text: `Starting ${agent.title}\u2026` }],
-								details: { runInBackground: true, title: agent.title, model: agent.model, thinking: agent.thinking },
+								details: {
+									runInBackground: true,
+									title: agent.title,
+									model: agent.model,
+									thinking: agent.thinking,
+								} satisfies SubagentDetails,
 							}),
 						// Background settled: wire widget + registry + the completion
 						// chain here (mechanisms stay on this side of the seam).
@@ -804,7 +809,7 @@ export default function (pi: ExtensionAPI) {
 							model: agent.model,
 							thinking: agent.thinking,
 							startedAt,
-						},
+						} satisfies SubagentDetails,
 					});
 					return {
 						content: [
@@ -819,7 +824,7 @@ export default function (pi: ExtensionAPI) {
 							model: agent.model,
 							thinking: agent.thinking,
 							startedAt,
-						},
+						} satisfies SubagentDetails,
 					};
 				}
 
@@ -851,7 +856,7 @@ export default function (pi: ExtensionAPI) {
 								sessionPath: outcome.sessionPath,
 								events: outcome.events,
 								nested: nestedFold.snapshot(),
-							},
+							} satisfies SubagentDetails,
 							isError: true,
 						};
 					}
@@ -879,7 +884,7 @@ export default function (pi: ExtensionAPI) {
 							thinking: agent.thinking,
 							events: outcome.events,
 							nested: nestedFold.snapshot(),
-						},
+						} satisfies SubagentDetails,
 					};
 				}
 			}

@@ -8,8 +8,8 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type CardIcon, type Component, errorIcon, stoppedIcon, successIcon } from "@everyx/pi-ui/card.js";
+import { formatDuration } from "@everyx/pi-ui/spinner.js";
 import { type CardBody, renderNoDetailsCard, renderNotificationCard } from "./card.js";
-import { formatDuration } from "./format.js";
 import type { NotificationDetails } from "./types.js";
 
 export type { RenderEvent, SubagentDetails } from "./types.js";

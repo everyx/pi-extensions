@@ -12,13 +12,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { CHROMIUM_BINARIES } from "../browsers.js";
 
 const RENDER_TIMEOUT_MS = 60_000;
 const VIRTUAL_TIME_BUDGET_MS = 5_000;
 const MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 
-/** Chromium-family binaries, in preference order. */
-const CANDIDATES = ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome"];
+/** Chromium-family binaries, in preference order — single-sourced (browsers.ts). */
+const CANDIDATES: readonly string[] = CHROMIUM_BINARIES;
 
 let cachedBinary: string | null | undefined;
 

@@ -60,3 +60,22 @@ export function createNestedFold() {
 		},
 	};
 }
+
+/** Where a tree-telemetry event lands — the 显示面统一规则 anchor, as a
+ *  decision table (SPEC: 显示面统一规则):
+ *  - "forward": non-root — report verbatim (depth + 1) to my parent;
+ *  - "fold": root + my foreground child while its card is open — the whole
+ *    subtree folds into THIS card's meta counters (one subtree, one surface);
+ *  - "widget": root + background child, or a closed card's persistent child
+ *    (a frozen card's onUpdate is a no-op — folding there would vanish). */
+export type TreeAnchor = "fold" | "forward" | "widget";
+
+export function resolveTreeAnchor(opts: {
+	hasParent: boolean;
+	foregroundEdge: boolean;
+	cardClosed: boolean;
+}): TreeAnchor {
+	if (opts.hasParent) return "forward";
+	if (opts.foregroundEdge && !opts.cardClosed) return "fold";
+	return "widget";
+}

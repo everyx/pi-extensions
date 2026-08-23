@@ -68,8 +68,8 @@ describe("countryFromLocale", () => {
 });
 
 describe("engineSearchUrl", () => {
-	it("google builds gl/hl/lr from locale + tbs from recency", () => {
-		const { url, localeParams } = engineSearchUrl("google", "zh-CN", "qdr:w");
+	it("google builds gl/hl/lr from locale + tbs from recency (raw filter in, qdr: out)", () => {
+		const { url, localeParams } = engineSearchUrl("google", "zh-CN", "week");
 		assert.equal(url, "https://www.google.com/search?q={q}");
 		assert.deepEqual(localeParams, { gl: "CN", hl: "zh-CN", lr: "lang_zh", tbs: "qdr:w" });
 	});

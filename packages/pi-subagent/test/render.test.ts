@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { safeTitle } from "../format.js";
+import { safeTitle } from "@everyx/pi-ui/width.js";
 import { renderNotification } from "../render.js";
 
 // Fold hints render through keyHint, which reads the real global theme.

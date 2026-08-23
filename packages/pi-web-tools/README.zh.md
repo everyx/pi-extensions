@@ -3,7 +3,7 @@
 Pi 的 Web 原语——`web_search` + `web_fetch`。
 
 - **`web_search`** — 搜索互联网。优先免费 search API（Exa / Tavily / Parallel），其次真实浏览器搜索（Google / Bing / 百度 / Yandex，经 BrowserSkill）。引擎默认集跟随系统语言（如中文系统补 Bing，走 cn.bing.com）；要本地化结果时显式传 `locale`；显式指定引擎时可用完整搜索操作符语法。
-- **`web_fetch`** — 抓取 URL：HTML 页面默认转为 Markdown（LLM / token friendly）；传 `raw: true` 获取原始 HTML（不做任何包装）。非 HTML（SVG/JSON/文本等一切文本）一律原样返回；超大内容截断并给出 /tmp 全文路径（非网页内容不内联预览）；响应 Content-Type 随结果元数据返回；图片（`image/*`，SVG 除外）以多模态 image block 返回——TUI 内联渲染、模型直接消费。BrowserSkill 可用时使用真实浏览器 UA。
+- **`web_fetch`** — 抓取 URL：HTML 页面默认转为 Markdown（LLM / token friendly）；传 `raw: true` 获取原始 HTML（不做任何包装）。非 HTML（SVG/JSON/文本等一切文本）一律原样返回；超大内容截断并给出 /tmp 全文路径（非网页内容不内联预览）；响应 Content-Type 随结果元数据返回；图片（`image/*`，SVG 除外）以多模态 image block 返回——TUI 内联渲染、模型直接消费。UA 从系统默认浏览器解析（xdg 探测 + 真实 `--version`，结果缓存）。
 
 两个原语，别无冗余——无内容存储、无 curator、无 PDF/视频提取。
 

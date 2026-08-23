@@ -26,7 +26,7 @@ function fakeAgent(overrides: Partial<SpawnSessionAgent> & { completion?: AgentC
 		stop: async () => {
 			calls.push("stop");
 		},
-		getEvents: () => [{ kind: "fake-event" }],
+		getEvents: () => [{ kind: "text", text: "fake event" }],
 		...rest,
 		calls,
 	};
@@ -46,7 +46,7 @@ describe("runSpawnSession", () => {
 		assert.equal(f.status, "completed");
 		assert.equal(f.output, "done output");
 		assert.ok(!f.resident);
-		assert.deepEqual(f.events, [{ kind: "fake-event" }]);
+		assert.deepEqual(f.events, [{ kind: "text", text: "fake event" }]);
 		// Idempotent teardown still runs on terminal agents (status quo parity).
 		assert.ok(agent.calls.includes("stop"));
 	});

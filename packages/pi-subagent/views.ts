@@ -10,7 +10,7 @@
 
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
-import type { NestedCounters } from "./nested-fold.js";
+import type { SubagentDetails } from "./types.js";
 
 /**
  * Card title for agent_stop / agent_send: the target's human title when the
@@ -27,10 +27,10 @@ export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, 
 	return joined;
 }
 
-export const spawnView = createToolView<Record<string, unknown>, Record<string, unknown>>({
+export const spawnView = createToolView<Record<string, unknown>, SubagentDetails>({
 	name: "agent_spawn",
 	title: (ctx) => {
-		const d = ctx.result?.data as { title?: string; task?: string } | undefined;
+		const d = ctx.result?.data;
 		return String((ctx.args as { title?: unknown }).title ?? d?.title ?? d?.task ?? "");
 	},
 	tail: (ctx) => {
@@ -38,25 +38,16 @@ export const spawnView = createToolView<Record<string, unknown>, Record<string, 
 		if (ctx.status === "processing") {
 			// starting… while nothing has streamed yet, working… once the
 			// agent is actually producing activity.
-			const d = ctx.result?.data as { events?: unknown[] } | undefined;
+			const d = ctx.result?.data;
 			return d?.events?.length ? "working\u2026" : "starting\u2026";
 		}
 		// Completed: "started" is a background spawn (task keeps running,
 		// tracked by the widget); a foreground agent is simply done.
-		const d = ctx.result?.data as { runInBackground?: boolean } | undefined;
+		const d = ctx.result?.data;
 		return d?.runInBackground ? "started" : "done";
 	},
 	meta: (ctx) => {
-		const d = ctx.result?.data as
-			| {
-					model?: string;
-					thinking?: string;
-					startedAt?: number;
-					endedAt?: number;
-					runInBackground?: boolean;
-					nested?: NestedCounters;
-			  }
-			| undefined;
+		const d = ctx.result?.data;
 		const args = ctx.args as { model?: unknown; thinking?: unknown } | undefined;
 		const parts: string[] = [];
 		const model = d?.model ?? args?.model;
@@ -88,7 +79,7 @@ export const spawnView = createToolView<Record<string, unknown>, Record<string, 
 	body: {
 		rows: {
 			of: (ctx) => {
-				const d = ctx.result?.data as { task?: string; events?: unknown[] } | undefined;
+				const d = ctx.result?.data;
 				// Mixed activity stream: the task (prompt) heads the flow, then
 				// the sub-agent session events in order — both scroll out of
 				// the fold as output grows (SPEC: prompt 在流头).
@@ -111,7 +102,7 @@ export const spawnView = createToolView<Record<string, unknown>, Record<string, 
 	// Session footer: recoverable on the card, never into LLM context
 	// (SPEC: footer 仅 session: <path>). Present on foreground completion;
 	// background spawn cards carry no session yet.
-	footer: (ctx) => (ctx.result?.data as { sessionPath?: string } | undefined)?.sessionPath,
+	footer: (ctx) => ctx.result?.data?.sessionPath,
 });
 
 export const stopView = createToolView<Record<string, unknown>, Record<string, unknown>>({

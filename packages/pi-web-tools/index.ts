@@ -28,7 +28,15 @@ import {
 	route,
 } from "./search/channels.js";
 import { systemLocale } from "./search/system-locale.js";
-import type { ChannelCapabilities, ChannelId, EngineId, SearchResultItem, WebSearchParams } from "./types.js";
+import type {
+	ChannelCapabilities,
+	ChannelId,
+	EngineId,
+	FetchToolData,
+	SearchResultItem,
+	SearchToolData,
+	WebSearchParams,
+} from "./types.js";
 import { fetchView, searchView } from "./views.js";
 
 const execFileAsync = promisify(execFile);
@@ -117,7 +125,7 @@ function finalizeResult(
 				count: result.length,
 				startedAt,
 				endedAt: Date.now(),
-			},
+			} satisfies SearchToolData,
 		},
 		isError: false,
 	};
@@ -285,7 +293,7 @@ async function executeFetch(
 				contentType: result.contentType,
 				startedAt,
 				endedAt: Date.now(),
-			},
+			} satisfies FetchToolData,
 		},
 		isError: false,
 	};

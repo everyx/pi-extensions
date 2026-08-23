@@ -130,8 +130,7 @@ agent-process.ts   — AgentProcess：一个常驻 rpc 子进程的语义封装
 registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 点对点投递 + 完成策略
 model.ts           — model spec → resolved model（纯函数）
 types.ts           — 共享协议类型（RenderEvent / SubagentDetails / NotificationDetails）
-format.ts          — 纯函数格式化工具（SPINNER / formatDuration / safeTitle / activityRow 等）
-render.ts          — TUI 渲染（工具卡 / 控制卡 / 通知卡）
+render.ts          — TUI 渲染（工具卡 / 控制卡 / 通知卡）；格式化直接取自 pi-ui（spinner.js/width.js 正典出口）
 widget.ts          — Agents 状态 widget
 preview.ts         — dev-only storybook：`npm run preview` 逐组件渲染预览（不进生产包）
 ```

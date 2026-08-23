@@ -17,6 +17,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { CHROMIUM_BINARIES } from "../browsers.js";
 import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
 import type { ChannelSearchContext, EngineId, SearchResultItem, WebSearchParams } from "../types.js";
 import { engineSearchUrl } from "./locale.js";
@@ -106,14 +107,8 @@ function launchCandidates(): { name: string; args: string[] }[] {
 	if (process.platform === "win32") {
 		return ["chrome", "msedge", "brave", "chromium", "arc"].map((n) => ({ name: n, args: [] }));
 	}
-	return [
-		"chromium",
-		"chromium-browser",
-		"google-chrome",
-		"google-chrome-stable",
-		"microsoft-edge",
-		"brave-browser",
-	].map((n) => ({ name: n, args: [] }));
+	// Single-sourced with headless rendering and UA probing (browsers.ts).
+	return CHROMIUM_BINARIES.map((n) => ({ name: n, args: [] }));
 }
 
 /** Try launching one candidate; resolves with the pid on success, undefined
@@ -315,8 +310,8 @@ function parseResults(raw: string): SearchResultItem[] {
 }
 
 /** Build a direct engine search URL (query + locale + recency as params). */
-function buildSearchUrl(params: WebSearchParams, engine: EngineId, recencyParam?: string): string {
-	const { url, localeParams } = engineSearchUrl(engine, params.locale, recencyParam);
+function buildSearchUrl(params: WebSearchParams, engine: EngineId): string {
+	const { url, localeParams } = engineSearchUrl(engine, params.locale, params.recency);
 	const searchParams = new URLSearchParams();
 	for (const [k, v] of Object.entries(localeParams ?? {})) searchParams.set(k, v);
 	// Translate the structured domain filters into engine operator syntax
@@ -346,20 +341,10 @@ export async function searchWithBsk(
 		throw new Error(`engine "yandex" does not support blocked_domains`);
 	}
 	// Direct navigation to the engine search URL: query + locale + recency
-	// as URL params (precise, no DOM dependence).
-	const recencyParam = params.recency
-		? engine === "google"
-			? `qdr:${params.recency[0]}`
-			: engine === "bing"
-				? params.recency
-				: undefined
-		: undefined;
-
+	// as URL params (precise, no DOM dependence). Recency passes through raw —
+	// each engine's translation lives in recency.ts (single source).
 	const results = await engineQueues[engine].run(async (sessionId) => {
-		const nav = await runBsk(
-			["navigate", "--session", sessionId, buildSearchUrl(params, engine, recencyParam)],
-			timeoutMs,
-		);
+		const nav = await runBsk(["navigate", "--session", sessionId, buildSearchUrl(params, engine)], timeoutMs);
 		if (!nav.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav.stderr}`);
 		const raw = await evaluate(sessionId, EXTRACT_SCRIPT, timeoutMs);
 		const results = parseResults(raw);

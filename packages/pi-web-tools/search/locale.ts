@@ -1,3 +1,6 @@
+import type { EngineId } from "../types.js";
+import { type RecencyFilter, recencyToBingFilters, recencyToGoogle } from "./recency.js";
+
 /**
  * pi-web-tools — engine priority within the enabled set (SPEC: 本地化).
  *
@@ -9,8 +12,6 @@
  * explicitly enabled via PI_WEB_TOOLS_ENGINES. Locale itself is explicit
  * (LLM-passed, never inferred from the query). Pure, unit-testable.
  */
-
-import type { EngineId } from "../types.js";
 
 /** BCP-47 → language-group engine priority, first group match wins (order
  * matters). Applied within the enabled engine set — see file header. */
@@ -73,7 +74,7 @@ export function viaLabel(channel?: string, engine?: string, locale?: string): st
 }
 
 /** Build a search URL for an engine + locale + optional recency. */
-export function engineSearchUrl(engine: EngineId, locale?: string, recency?: string): EngineUrl {
+export function engineSearchUrl(engine: EngineId, locale?: string, recency?: RecencyFilter): EngineUrl {
 	const lang = primaryLanguage(locale);
 	switch (engine) {
 		case "google": {
@@ -84,7 +85,7 @@ export function engineSearchUrl(engine: EngineId, locale?: string, recency?: str
 				params.hl = normalizedLocale(locale);
 				params.lr = `lang_${lang}`;
 			}
-			if (recency) params.tbs = recency;
+			if (recency) params.tbs = recencyToGoogle(recency);
 			return { url: `https://${engineHost("google")}/search?q={q}`, localeParams: params };
 		}
 		case "bing": {
@@ -102,15 +103,6 @@ export function engineSearchUrl(engine: EngineId, locale?: string, recency?: str
 			return { url: `https://${engineHost("yandex", locale)}/search/?text={q}`, localeParams: params };
 		}
 	}
-}
-
-/**
- * Bing web UI freshness filter: filters=ex1:"ez1"…"ez4"
- * (ez1=24h, ez2=week, ez3=month, ez4=year — scraper convention).
- */
-function recencyToBingFilters(recency: string): string {
-	const code = { day: "ez1", week: "ez2", month: "ez3", year: "ez4" }[recency] ?? "ez4";
-	return `ex1:"${code}"`;
 }
 
 /** Normalize a BCP-47 tag to the form engines expect ("zh-cn" → "zh-CN"). */

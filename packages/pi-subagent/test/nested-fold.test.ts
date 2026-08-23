@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentTreeEvent } from "../event-interpret.js";
-import { createNestedFold } from "../nested-fold.js";
+import { createNestedFold, resolveTreeAnchor } from "../nested-fold.js";
 
 const add = (id: string, status: "running" | "idle" = "running"): AgentTreeEvent => ({
 	op: "add",
@@ -61,5 +61,24 @@ describe("createNestedFold", () => {
 		f.fold(remove("a", "done"));
 		assert.equal(s.running, 1);
 		assert.equal(f.snapshot().done, 1);
+	});
+});
+
+describe("resolveTreeAnchor — 显示面统一规则 decision table", () => {
+	it("non-root always forwards, regardless of edge kind or card state", () => {
+		assert.equal(resolveTreeAnchor({ hasParent: true, foregroundEdge: true, cardClosed: false }), "forward");
+		assert.equal(resolveTreeAnchor({ hasParent: true, foregroundEdge: false, cardClosed: true }), "forward");
+	});
+
+	it("root + open foreground card folds the subtree into the card", () => {
+		assert.equal(resolveTreeAnchor({ hasParent: false, foregroundEdge: true, cardClosed: false }), "fold");
+	});
+
+	it("root + background child lands on the widget", () => {
+		assert.equal(resolveTreeAnchor({ hasParent: false, foregroundEdge: false, cardClosed: false }), "widget");
+	});
+
+	it("a closed card never folds — persistent children surface on the widget", () => {
+		assert.equal(resolveTreeAnchor({ hasParent: false, foregroundEdge: true, cardClosed: true }), "widget");
 	});
 });

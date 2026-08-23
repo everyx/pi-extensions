@@ -47,6 +47,13 @@ export function recencyToGoogle(filter: RecencyFilter): string {
 	return `qdr:${filter[0]}`; // day → qdr:d, week → qdr:w, month → qdr:m, year → qdr:y
 }
 
+/** Bing web UI freshness filter: filters=ex1:"ez1"…"ez4"
+ *  (ez1=24h, ez2=week, ez3=month, ez4=year — scraper convention). */
+export function recencyToBingFilters(filter: RecencyFilter): string {
+	const code = { day: "ez1", week: "ez2", month: "ez3", year: "ez4" }[filter] ?? "ez4";
+	return `ex1:"${code}"`;
+}
+
 /** Human phrase used to enrich query text for engines without a native recency param. */
 export function recencyToPhrase(filter: RecencyFilter): string {
 	switch (filter) {

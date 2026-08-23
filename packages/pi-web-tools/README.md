@@ -5,7 +5,7 @@
 Web primitives for Pi — `web_search` + `web_fetch`.
 
 - **`web_search`** — search the web. Free-tier search APIs first (Exa / Tavily / Parallel), then real-browser search (Google / Bing / Baidu / Yandex via BrowserSkill). Engine defaults follow the system language (e.g. a Chinese system adds Bing, served from cn.bing.com); pass `locale` explicitly for localized results; full search-operator syntax when you pick an engine explicitly.
-- **`web_fetch`** — fetch a URL: HTML pages convert to Markdown by default (LLM / token friendly), pass `raw: true` to get the source HTML as-is. Non-HTML (SVG/JSON/text — anything textual) is always returned as-is; oversized non-web content is stashed to /tmp with a pointer instead of an inline preview (the LLM pages through it via `read`). Images (`image/*`, except SVG) are returned as multimodal image blocks — rendered inline in the TUI and consumed by the model directly. The response Content-Type travels in the result metadata. Real-browser UA when BrowserSkill is available.
+- **`web_fetch`** — fetch a URL: HTML pages convert to Markdown by default (LLM / token friendly), pass `raw: true` to get the source HTML as-is. Non-HTML (SVG/JSON/text — anything textual) is always returned as-is; oversized non-web content is stashed to /tmp with a pointer instead of an inline preview (the LLM pages through it via `read`). Images (`image/*`, except SVG) are returned as multimodal image blocks — rendered inline in the TUI and consumed by the model directly. The response Content-Type travels in the result metadata. User-Agent resolves from the system's default browser (xdg detection + real `--version`, cached).
 
 Two primitives, nothing else — no content storage, no curator, no PDF/video extraction.
 

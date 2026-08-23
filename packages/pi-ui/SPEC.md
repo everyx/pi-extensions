@@ -11,6 +11,19 @@ pi 扩展的共享原语库，两族：**视图**（数据驱动卡片——工�
 - **形态（单行 / 可折行）由调用方表达**：自绘行走 `structRow`（一物理行，必适配）；可折行内容放 `Text` 组件（自动 wrap，bash 式完整显示）。
 - **数据层纯数据**：title/url/query 等原样传递，UI 层之外的任何 slice 截断都是错的——截断只发生在渲染出口一处。
 
+## 模块清单（导入出口）
+
+| 模块 | 职责 | 正典导出 |
+|---|---|---|
+| `width.ts` | 宽度安全唯一出口：visibleWidth / capPlain / structRow / clipTail / **safeTitle** | 全部 |
+| `context.ts` | LLM context 保护：stashOverflow（截断 + /tmp 落盘）+ truncationMarker | 全部 |
+| `spinner.ts` | Spinner 动画 + formatDuration/durationMeta；**兼容转发** width 的 clipTail/safeTitle（新代码一律从 `width.js` 导入） | 全部 |
+| `ticker.ts` | 共享动画时钟（多订阅最小间隔聚合） | — |
+| `widget.ts` | 前台状态指示器（Agents 条、进度 meta、idle 行） | StatusWidget 等 |
+| `card.ts` / `view.ts` | 视图族：卡片积木 + createToolView 声明工厂 | 见各自文件 |
+
+无 index 桶文件——按模块深路径导入，树摇友好且职责自明。
+
 ## 折叠语义
 
 折叠永不丢内容：预览预算内显示尾部 + 展开提示（对齐 bash 工具的输出预算）；展开后全量渲染。只有进 LLM context 的文本才做截断（见根 SPEC），用户始终可展开看全部。

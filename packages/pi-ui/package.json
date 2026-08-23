@@ -1,7 +1,7 @@
 {
 	"name": "@everyx/pi-ui",
 	"version": "0.0.0-development",
-	"description": "Shared TUI building blocks for pi extensions — spinner, card header, status widget, theme resolution.",
+	"description": "Shared TUI building blocks for pi extensions — spinner, card header, status widget, context stash, width safety.",
 	"keywords": [
 		"pi-package"
 	],

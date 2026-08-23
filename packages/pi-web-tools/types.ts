@@ -63,6 +63,27 @@ export interface ChannelSearchContext {
 	timeoutMs?: number;
 }
 
+/** web_search tool-result payload (`details.data`) — written by index.ts,
+ *  rendered by views.ts, mirrored by preview.ts fixtures. */
+export type SearchToolData = {
+	results?: SearchResultItem[];
+	channel?: ChannelId;
+	engine?: EngineId;
+	locale?: string;
+	count?: number;
+	startedAt?: number;
+	endedAt?: number;
+};
+
+/** web_fetch tool-result payload (`details.data`) — same triangle. */
+export type FetchToolData = {
+	title?: string;
+	content?: string;
+	contentType?: string;
+	startedAt?: number;
+	endedAt?: number;
+};
+
 /** web_fetch result. `content` is converted Markdown, the source verbatim,
  *  or a delivery marker (truncation pointer, not-inlined stash path, image
  *  note); error carries HTTP status. */

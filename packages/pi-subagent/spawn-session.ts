@@ -18,6 +18,7 @@
  */
 
 import type { AgentCompletion } from "./agent-process.js";
+import type { RenderEvent } from "./types.js";
 
 /** Structural view of what this module needs from an agent — narrow on
  *  purpose: tests build literal fakes instead of mocking AgentProcess. */
@@ -33,7 +34,7 @@ export interface SpawnSessionAgent {
 	spawnAndSend(prompt: string): Promise<{ ok: true } | { ok: false; error: string }>;
 	waitForCompletion(): Promise<AgentCompletion>;
 	stop(): Promise<void>;
-	getEvents(): unknown[];
+	getEvents(): RenderEvent[];
 }
 
 /** How a spawned session ended. `background-started` means the tool result
@@ -51,7 +52,7 @@ export type SpawnOutcome =
 			/** completed + persistent: the process stays resident (the caller
 			 *  was told via onResident); every other ending was torn down. */
 			resident: boolean;
-			events: unknown[];
+			events: RenderEvent[];
 			sessionPath?: string;
 			sessionId?: string;
 			startedAt: number;

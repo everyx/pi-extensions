@@ -21,6 +21,7 @@ import type { WidgetResult } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
 import { renderNotification } from "./render.js";
+import type { RenderEvent, SubagentDetails } from "./types.js";
 import { sendView, spawnView, stopView } from "./views.js";
 import { AgentWidget } from "./widget.js";
 
@@ -31,30 +32,6 @@ interface AgentParams {
 	model?: string;
 	thinking?: string;
 	run_in_background?: boolean;
-}
-
-interface RenderEvent {
-	kind: "thinking" | "tool" | "text";
-	name?: string;
-	args?: string;
-	text?: string;
-}
-
-interface SubagentDetails {
-	task?: string;
-	title?: string;
-	model?: string;
-	thinking?: string;
-	runInBackground?: boolean;
-	error?: string;
-	sessionPath?: string;
-	startedAt?: number;
-	endedAt?: number;
-	activity?: AgentActivity;
-	events?: RenderEvent[];
-	status?: string;
-	result?: string;
-	usage?: { durationMs?: number; tokens?: number; toolUses?: number };
 }
 
 // ── Views (single source: views.ts — the same templates production registers) ──

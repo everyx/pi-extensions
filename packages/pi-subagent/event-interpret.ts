@@ -25,8 +25,8 @@ import type { AgentMessage, RpcEvent } from "./protocol.js";
 /**
  * One unit of sub-agent activity — thinking, streamed text, or a tool call.
  * Produced here (the semantic layer), consumed by AgentProcess as the event
- * fold and the widget excerpt; consumers decide how to display it (activityRow
- * in render.ts assembles the "name: args" label).
+ * fold and the widget excerpt; consumers decide how to display it (the card
+ * body rows in views.ts assemble the "name: args" label).
  */
 export type AgentActivity =
 	| { kind: "thinking"; text: string }

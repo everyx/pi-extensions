@@ -21,25 +21,23 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { BROWSER_FAMILY_BINARIES } from "../browsers.js";
 
 const execFileAsync = promisify(execFile);
 
 export type BrowserId = "firefox" | "chrome" | "chromium" | "edge" | "unknown";
 
 /** Binary names to probe per browser family (first that exists wins). */
-const BROWSER_BINARIES: Record<Exclude<BrowserId, "unknown">, string[]> = {
-	firefox: ["firefox", "firefox-esr"],
-	chrome: ["google-chrome", "google-chrome-stable", "/opt/google/chrome/chrome"],
-	chromium: ["chromium", "chromium-browser"],
-	edge: ["microsoft-edge", "microsoft-edge-stable"],
-};
+// Single-sourced with launch/render candidates (browsers.ts) — one machine
+// survey serves all three consumers.
+const BROWSER_BINARIES: Record<Exclude<BrowserId, "unknown">, readonly string[]> = BROWSER_FAMILY_BINARIES;
 
 /** Map a .desktop id / binary name to a browser family. */
 export function browserIdFromName(name: string): BrowserId {
 	const n = name.toLowerCase();
 	if (n.includes("firefox")) return "firefox";
 	if (n.includes("chromium")) return "chromium";
-	if (n.includes("google-chrome") || n === "chrome") return "chrome";
+	if (n.includes("google-chrome") || n === "chrome" || n.includes("brave")) return "chrome";
 	if (n.includes("edge")) return "edge";
 	return "unknown";
 }

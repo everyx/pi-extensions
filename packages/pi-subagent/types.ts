@@ -9,6 +9,7 @@
  */
 
 import type { AgentActivity } from "./event-interpret.js";
+import type { NestedCounters } from "./nested-fold.js";
 
 /**
  * One step of the sub-agent's session as shown in the card body: a thinking
@@ -26,7 +27,7 @@ export type RenderEvent =
  * renderAgentCall / renderAgentResult read from here; index.ts populates
  * it in the execute callback.
  */
-export interface SubagentDetails {
+export type SubagentDetails = {
 	task?: string;
 	agentId?: string;
 	/** Agent title — used by the background-start status line (the tool header is empty for background). */
@@ -45,7 +46,11 @@ export interface SubagentDetails {
 	activity?: AgentActivity;
 	/** Ordered activity stream (thinking/tool events) for the card body. */
 	events?: RenderEvent[];
-}
+	/** Child pi session id (foreground completion — the card footer carries the path). */
+	sessionId?: string;
+	/** Descendant-spawn counters folded from this child's tree telemetry. */
+	nested?: NestedCounters;
+};
 
 /**
  * Notification-delivery details (rendering side). Populated by
