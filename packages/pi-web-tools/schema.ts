@@ -68,7 +68,7 @@ export const WebFetchParamsSchema = Type.Object({
 		Type.Boolean({
 			description:
 				"Return the raw source instead of converted Markdown (HTML stays HTML, " +
-				"non-prose bodies are wrapped in a content-typed code fence). " +
+				"nothing is ever wrapped or decorated). " +
 				"Default false: HTML pages are converted to Markdown; non-HTML (JSON/XML/plain text) " +
 				"is always returned as-is either way.",
 		}),

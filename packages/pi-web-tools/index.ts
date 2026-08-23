@@ -330,13 +330,11 @@ export default function (pi: ExtensionAPI) {
 		name: "web_fetch",
 		label: "Fetch a URL",
 		description:
-			"Fetch a URL and return its content — readable (HTML → Markdown) or the raw source. " +
-			"For authenticated pages, POST/API calls, or binary downloads, use bash curl instead.",
+			"Fetch a URL and return its content, converted to readable Markdown when applicable. " + "Plain http(s) GET.",
 		promptSnippet: "Fetch a URL (readable or raw source)",
 		promptGuidelines: [
-			"Use web_fetch to read the content of a specific URL (docs, articles, pages).",
+			"Use web_fetch to read the content of a specific URL.",
 			"Prefer web_fetch over bash curl for plain HTML pages — it returns clean Markdown.",
-			"Use bash curl when you need auth cookies, POST bodies, or binary output.",
 		],
 		parameters: WebFetchParamsSchema,
 		...fetchView,

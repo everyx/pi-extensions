@@ -63,12 +63,12 @@ export interface ChannelSearchContext {
 	timeoutMs?: number;
 }
 
-/** web_fetch result. `content` is converted Markdown or the raw source
- *  (non-prose bodies wrapped in a content-typed code fence); error carries
- *  HTTP status. */
+/** web_fetch result. `content` is converted Markdown, the source verbatim,
+ *  or a delivery marker (truncation pointer, not-inlined stash path, image
+ *  note); error carries HTTP status. */
 export interface WebFetchResult {
 	title: string;
-	/** Content — Markdown (HTML converted) or the source verbatim. Never decorated. */
+	/** Content — Markdown, verbatim source, or a delivery marker (see type doc). Never decorated. */
 	content: string;
 	/** Response Content-Type header, verbatim (e.g. "image/svg+xml; charset=utf-8"). */
 	contentType?: string;
