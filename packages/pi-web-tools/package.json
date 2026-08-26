@@ -22,8 +22,7 @@
 	"files": [
 		"*.ts",
 		"README.md",
-		"README.zh.md",
-		"LICENSE"
+		"README.zh.md"
 	],
 	"pi": {
 		"extensions": [

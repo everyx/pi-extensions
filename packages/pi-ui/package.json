@@ -19,8 +19,7 @@
 	},
 	"files": [
 		"*.ts",
-		"README.md",
-		"LICENSE"
+		"README.md"
 	],
 	"peerDependencies": {
 		"@earendil-works/pi-ai": "catalog:",

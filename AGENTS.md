@@ -3,6 +3,7 @@
 所有 pi 扩展的 pnpm workspace。设计意图与原则见根 [`SPEC.md`](SPEC.md)（新建包前先读）。
 
 - `packages/pi-subagent` — 极简子代理，具体设计见其 [`SPEC.md`](packages/pi-subagent/SPEC.md)
+- `packages/pi-sleep-guard` — 运行期阻断系统休眠，具体设计见其 [`SPEC.md`](packages/pi-sleep-guard/SPEC.md)
 - 新扩展在此新增一个 package
 
 ## 约定

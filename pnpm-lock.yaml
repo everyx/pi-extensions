@@ -54,6 +54,12 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/pi-sleep-guard:
+    dependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 'catalog:'
+        version: 0.84.0(ws@8.21.1)(zod@4.4.3)
+
   packages/pi-subagent:
     dependencies:
       '@earendil-works/pi-ai':
