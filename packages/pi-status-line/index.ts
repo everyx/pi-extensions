@@ -33,6 +33,16 @@ export default function (pi: ExtensionAPI) {
 		} catch {}
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			tuiRef = tui;
+			// Cache for entries-derived totals — granularity = entries source, not per display item
+			let cachedLen = -1;
+			let cached: {
+				input: number;
+				output: number;
+				cacheRead: number;
+				cacheWrite: number;
+				cost: number;
+				latestCacheHit: number | undefined;
+			} = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, latestCacheHit: undefined };
 			return {
 				invalidate() {},
 				dispose: footerData.onBranchChange(() => tui.requestRender()),
@@ -57,23 +67,32 @@ export default function (pi: ExtensionAPI) {
 						message?: { role: string; usage?: Record<string, number> };
 						usage?: Record<string, number>;
 					}> = (ctx.sessionManager as unknown as { getEntries(): typeof entries }).getEntries?.() ?? [];
-					let input = 0,
-						output = 0,
-						cacheRead = 0,
-						cacheWrite = 0,
-						cost = 0;
+					// Single cache for the whole entries-derived block — granularity = entries source
+					let input: number, output: number, cacheRead: number, cacheWrite: number, cost: number;
 					let latestCacheHit: number | undefined;
-					for (const e of entries) {
-						if (e.type === "message" && e.message?.role === "assistant" && e.message.usage) {
-							const u = e.message.usage as Record<string, number>;
-							input += u.input ?? 0;
-							output += u.output ?? 0;
-							cacheRead += u.cacheRead ?? 0;
-							cacheWrite += u.cacheWrite ?? 0;
-							cost += (u.cost as unknown as { total?: number })?.total ?? 0;
-							const pt = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
-							if (pt > 0) latestCacheHit = ((u.cacheRead ?? 0) / pt) * 100;
+					if (entries.length === cachedLen) {
+						({ input, output, cacheRead, cacheWrite, cost, latestCacheHit } = cached);
+					} else {
+						input = 0;
+						output = 0;
+						cacheRead = 0;
+						cacheWrite = 0;
+						cost = 0;
+						latestCacheHit = undefined;
+						for (const e of entries) {
+							if (e.type === "message" && e.message?.role === "assistant" && e.message.usage) {
+								const u = e.message.usage as Record<string, number>;
+								input += u.input ?? 0;
+								output += u.output ?? 0;
+								cacheRead += u.cacheRead ?? 0;
+								cacheWrite += u.cacheWrite ?? 0;
+								cost += (u.cost as unknown as { total?: number })?.total ?? 0;
+								const pt = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+								if (pt > 0) latestCacheHit = ((u.cacheRead ?? 0) / pt) * 100;
+							}
 						}
+						cached = { input, output, cacheRead, cacheWrite, cost, latestCacheHit };
+						cachedLen = entries.length;
 					}
 					const ctxUsage = (
 						ctx as unknown as { getContextUsage(): { percent: number | null; contextWindow: number } | null }
