@@ -18,13 +18,13 @@ export function estimateTokens(text: string): number {
 }
 
 export function formatTps(tps: number): string {
-	if (tps >= 100) return `${tps.toFixed(0)} tok/s`;
-	return `${tps.toFixed(1)} tok/s`;
+	if (tps >= 100) return `${tps.toFixed(0)}T/s`;
+	return `${tps.toFixed(1)}T/s`;
 }
 
 export function formatTtft(ms: number): string {
-	if (ms >= 1000) return `TTFT ${(ms / 1000).toFixed(1)}s`;
-	return `TTFT ${ms}ms`;
+	if (ms >= 1000) return `T${(ms / 1000).toFixed(1)}s`;
+	return `T${ms}ms`;
 }
 
 /** Sliding window that sums tokens inside windowMs. */
@@ -57,6 +57,27 @@ export class SlidingWindow {
 
 	clear(): void {
 		this.#samples = [];
+	}
+}
+
+/** Session-level TTFT average — sum/count, no debounce. */
+export class TtftAvg {
+	totalMs = 0;
+	count = 0;
+
+	push(ms: number): void {
+		this.totalMs += ms;
+		this.count++;
+	}
+
+	get avgMs(): number | null {
+		if (this.count === 0) return null;
+		return this.totalMs / this.count;
+	}
+
+	clear(): void {
+		this.totalMs = 0;
+		this.count = 0;
 	}
 }
 

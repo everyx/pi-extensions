@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { estimateTokens, formatTps, formatTtft, SlidingWindow, TurnMetrics } from "../tps.js";
+import { estimateTokens, formatTps, formatTtft, SlidingWindow, TtftAvg, TurnMetrics } from "../tps.js";
 
 describe("estimateTokens", () => {
 	it("empty → 0", () => assert.equal(estimateTokens(""), 0));
@@ -11,16 +11,16 @@ describe("estimateTokens", () => {
 });
 
 describe("formatTps", () => {
-	it("formats with unit", () => {
-		assert.equal(formatTps(42.123), "42.1 tok/s");
-		assert.equal(formatTps(123.4), "123 tok/s");
+	it("formats with unit — compact atomic like R (T/s)", () => {
+		assert.equal(formatTps(42.123), "42.1T/s");
+		assert.equal(formatTps(123.4), "123T/s");
 	});
 });
 
 describe("formatTtft", () => {
-	it("ms vs s", () => {
-		assert.equal(formatTtft(800), "TTFT 800ms");
-		assert.equal(formatTtft(1200), "TTFT 1.2s");
+	it("ms vs s — compact like R, no space (T prefix)", () => {
+		assert.equal(formatTtft(800), "T800ms");
+		assert.equal(formatTtft(1200), "T1.2s");
 	});
 });
 
@@ -75,5 +75,17 @@ describe("TurnMetrics", () => {
 		m.clear();
 		assert.equal(m.ttftMs, null);
 		assert.equal(m.liveTps(2000), null);
+	});
+});
+
+describe("TtftAvg", () => {
+	it("averages across turns", () => {
+		const a = new TtftAvg();
+		a.push(1000);
+		a.push(2000);
+		assert.equal(a.avgMs, 1500);
+	});
+	it("null when empty", () => {
+		assert.equal(new TtftAvg().avgMs, null);
 	});
 });

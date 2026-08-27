@@ -14,8 +14,8 @@ Integrated into footer via `setFooter` — `↑`/`↓` right after `↓`, single
 Tokens estimated as `chars/4` when provider counts unavailable (OpenAI heuristic); provider-precise counts are a future upgrade.
 
 ```
-footer:  ↑6.3k ↓119 42.1 tok/s TTFT 1.2s R113 ... 0.6%/1.0M (model)
-                                              ↑ tps    ↑ ttft
+footer:  ↑6.3k ↓119 T1.2s 42.1T/s R113 ... 0.6%/1.0M (model)
+                                              ↑ ttft   ↑ tps
 ```
 
 ## How it works

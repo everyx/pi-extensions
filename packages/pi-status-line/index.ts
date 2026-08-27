@@ -10,15 +10,27 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatTps, formatTtft, TurnMetrics } from "./tps.js";
+import { formatTps, formatTtft, TtftAvg, TurnMetrics } from "./tps.js";
 
 export default function (pi: ExtensionAPI) {
 	const metrics = new TurnMetrics();
+	const ttftAvg = new TtftAvg();
 	let tuiRef: { requestRender(): void } | null = null;
+	let hasEverStarted = false;
+	let ttftCountedForTurn = false;
 
 	// Install custom footer once at startup. Data comes from footerData
 	// (branch, extensionStatuses) and ctx (model, context, usage).
 	pi.on("session_start", async (_event, ctx) => {
+		// Resume: session already has assistant history → show placeholders immediately (no flicker)
+		// New instance (no assistant yet) stays clean like Pi default.
+		try {
+			const entries =
+				(
+					ctx.sessionManager as unknown as { getEntries(): Array<{ type: string; message?: { role: string } }> }
+				).getEntries?.() ?? [];
+			if (entries.some((e) => e.type === "message" && e.message?.role === "assistant")) hasEverStarted = true;
+		} catch {}
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			tuiRef = tui;
 			return {
@@ -84,12 +96,13 @@ export default function (pi: ExtensionAPI) {
 					const parts: string[] = [];
 					if (input) parts.push(`↑${fmt(input)}`);
 					if (output) parts.push(`↓${fmt(output)}`);
-					// TPS/TTFT right after output — same line, Pi Native
-					const now = Date.now();
-					const tps = metrics.liveTps(now);
-					if (tps !== null) parts.push(formatTps(tps));
-					const ttft = metrics.ttftMs;
-					if (ttft !== null) parts.push(formatTtft(ttft));
+					// TTFT (session avg) then TPS (live) right after output — same line, always visible after first turn
+					if (hasEverStarted) {
+						const avg = ttftAvg.avgMs;
+						parts.push(avg !== null ? formatTtft(avg) : "T--");
+						const tps = metrics.liveTps(Date.now());
+						parts.push(tps !== null ? formatTps(tps) : "0.0T/s");
+					}
 					if (cacheRead) parts.push(`R${fmt(cacheRead)}`);
 					if (cacheWrite) parts.push(`W${fmt(cacheWrite)}`);
 					if ((cacheRead > 0 || cacheWrite > 0) && latestCacheHit !== undefined)
@@ -155,6 +168,8 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("turn_start", async () => {
+		hasEverStarted = true;
+		ttftCountedForTurn = false;
 		metrics.startTurn(Date.now());
 		requestRender();
 	});
@@ -163,6 +178,14 @@ export default function (pi: ExtensionAPI) {
 		const delta = extractDelta(event);
 		if (!delta) return;
 		metrics.addDelta(delta, Date.now());
+		// TTFT avg: count once per turn on first token
+		if (!ttftCountedForTurn) {
+			const ttft = metrics.ttftMs;
+			if (ttft !== null) {
+				ttftAvg.push(ttft);
+				ttftCountedForTurn = true;
+			}
+		}
 		requestRender();
 	});
 
@@ -172,6 +195,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async () => {
 		metrics.clear();
+		ttftAvg.clear();
+		hasEverStarted = false;
+		ttftCountedForTurn = false;
 	});
 }
 

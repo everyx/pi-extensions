@@ -14,8 +14,8 @@ Pi 原生的状态栏扩展——通过 `ctx.ui.setFooter` 与 token 统计同�
 Token 暂按 `chars/4` 估算（provider 精确计数后续可接）。
 
 ```
-footer:  ↑6.3k ↓119 42.1 tok/s TTFT 1.2s R113 ... 0.6%/1.0M (model)
-                                              ↑ tps    ↑ ttft
+footer:  ↑6.3k ↓119 T1.2s 42.1T/s R113 ... 0.6%/1.0M (model)
+                                              ↑ ttft   ↑ tps
 ```
 
 ## 工作原理
