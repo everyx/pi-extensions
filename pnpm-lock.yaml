@@ -60,6 +60,15 @@ importers:
         specifier: 'catalog:'
         version: 0.84.0(ws@8.21.1)(zod@4.4.3)
 
+  packages/pi-status-line:
+    dependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 'catalog:'
+        version: 0.84.0(ws@8.21.1)(zod@4.4.3)
+      '@earendil-works/pi-tui':
+        specifier: 'catalog:'
+        version: 0.84.0
+
   packages/pi-subagent:
     dependencies:
       '@earendil-works/pi-ai':

@@ -1,0 +1,34 @@
+{
+	"name": "@everyx/pi-status-line",
+	"version": "0.0.0-development",
+	"description": "Pi-native status line — TPS and TTFT integrated into footer via ctx.ui.setFooter",
+	"keywords": [
+		"pi-package"
+	],
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
+	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/everyx/pi-extensions"
+	},
+	"scripts": {
+		"test": "tsx --test test/*.test.ts"
+	},
+	"files": [
+		"*.ts",
+		"README.md",
+		"README.zh.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "catalog:",
+		"@earendil-works/pi-tui": "catalog:"
+	}
+}

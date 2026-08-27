@@ -4,6 +4,7 @@
 
 - `packages/pi-subagent` — 极简子代理，具体设计见其 [`SPEC.md`](packages/pi-subagent/SPEC.md)
 - `packages/pi-sleep-guard` — 运行期阻断系统休眠，具体设计见其 [`SPEC.md`](packages/pi-sleep-guard/SPEC.md)
+- `packages/pi-status-line` — Pi 原生状态栏（TPS/TTFT），具体设计见其 [`SPEC.md`](packages/pi-status-line/SPEC.md)
 - 新扩展在此新增一个 package
 
 ## 约定
