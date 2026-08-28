@@ -18,6 +18,9 @@ export default function (pi: ExtensionAPI) {
 	let tuiRef: { requestRender(): void } | null = null;
 	let hasEverStarted = false;
 	let ttftCountedForTurn = false;
+	// Keep last displayed values — only update when new data arrives, no reset on tool gap
+	let lastTpsText: string | null = null;
+	let lastTtftText: string | null = null;
 
 	// Install custom footer once at startup. Data comes from footerData
 	// (branch, extensionStatuses) and ctx (model, context, usage).
@@ -118,9 +121,13 @@ export default function (pi: ExtensionAPI) {
 					// TTFT (session avg) then TPS (live) right after output — same line, always visible after first turn
 					if (hasEverStarted) {
 						const avg = ttftAvg.avgMs;
-						parts.push(avg !== null ? formatTtft(avg) : "T--");
+						if (avg !== null) lastTtftText = formatTtft(avg);
+						else if (!lastTtftText) lastTtftText = "T--";
+						parts.push(lastTtftText);
 						const tps = metrics.liveTps(Date.now());
-						parts.push(tps !== null ? formatTps(tps) : "0.0T/s");
+						if (tps !== null) lastTpsText = formatTps(tps);
+						else if (!lastTpsText) lastTpsText = "0.0T/s";
+						parts.push(lastTpsText);
 					}
 					if (cacheRead) parts.push(`R${fmt(cacheRead)}`);
 					if (cacheWrite) parts.push(`W${fmt(cacheWrite)}`);
@@ -217,6 +224,8 @@ export default function (pi: ExtensionAPI) {
 		ttftAvg.clear();
 		hasEverStarted = false;
 		ttftCountedForTurn = false;
+		lastTpsText = null;
+		lastTtftText = null;
 	});
 }
 
