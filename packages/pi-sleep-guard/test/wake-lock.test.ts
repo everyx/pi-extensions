@@ -78,18 +78,16 @@ describe("WakeLock", () => {
 		assert.equal(lock.active, false);
 	});
 
-	it("overlapping acquires ref-count onto a single holder", () => {
+	it("overlapping acquires collapse — one release drops it (idempotent)", () => {
 		const { lock, children } = harness();
 		lock.acquire();
 		lock.acquire();
 		assert.equal(children.length, 1);
 		lock.release();
-		assert.equal(lock.active, true, "still held by the second acquire");
-		lock.release();
-		assert.equal(lock.active, false);
+		assert.equal(lock.active, false, "idempotent: one release is enough");
 	});
 
-	it("release below zero never resurrects or throws", () => {
+	it("release when idle is a no-op", () => {
 		const { lock, children } = harness();
 		lock.release();
 		assert.equal(children.length, 0);

@@ -20,13 +20,13 @@
 
 | module | 职责 | 接口 |
 | --- | --- | --- |
-| `wake-lock.ts` | 平台锁：holder 子进程监督 + RAII | `buildHolder()` 纯决策表、`WakeLock` 引用计数锁 |
+| `wake-lock.ts` | 平台锁：holder 子进程监督 + RAII | `buildHolder()` 纯决策表、`WakeLock` 幂等锁 |
 | `index.ts` | 扩展入口：agent 生命周期 → 锁 | 默认导出 extension 工厂 |
 
 - `buildHolder(platform, {display, watcherPid})` 是纯函数决策表（表测试覆盖）；
   holder 一律带父 pid 自杀机制（caffeinate `-w` / `kill -0` 轮询 /
   PowerShell Get-Process 轮询），pi 崩溃 ⇒ holder 自动退出 ⇒ 永无孤儿锁。
-- `WakeLock` 引用计数：重叠的 agent run 共享一个 holder child。
+- `WakeLock` 幂等：重叠的 agent_start（如重试/压缩）复用同一 holder，一次 release 即释放，防止引用计数泄漏。
   spawn 失败/无后端 → 一次性警告 + 如实 no-op（能力缺失不静默），
   绝不阻塞 agent 本身。
 
@@ -48,6 +48,6 @@ inhibitor——OS 设计如此，文档如实声明。
 ## 测试
 
 `buildHolder` 决策表全平台分支（win32 断言解码后的 EncodedCommand 内容）、
-WakeLock 引用计数/泄漏边界/no-backend 警告一次性。真实 holder 行为属 OS
+WakeLock 幂等/空释放/no-backend 警告一次性。真实 holder 行为属 OS
 集成面，靠人工冒烟（`pmset -g assertions` / `systemd-inhibit --list` /
 `powercfg /requests` 可观测）。

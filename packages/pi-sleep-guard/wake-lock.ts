@@ -100,12 +100,13 @@ export interface WakeLockOptions {
 }
 
 /**
- * Ref-counted lock around one holder child process. Acquire/release may
- * interleave (overlapping agent runs); the child lives while refs > 0.
+ * Idempotent lock around one holder child process. Multiple overlapping
+ * acquires (e.g. agent retries/compaction) are collapsed — one release
+ * drops the holder. This prevents a leaked inhibitor when agent_start
+ * fires twice before agent_settled.
  */
 export class WakeLock {
 	#child: ChildProcess | null = null;
-	#refs = 0;
 	#warned = false;
 	readonly #platform: NodeJS.Platform;
 	readonly #display: boolean;
@@ -130,12 +131,10 @@ export class WakeLock {
 	}
 
 	acquire(): void {
-		this.#refs++;
 		if (this.#child) return;
 		const plan = buildHolder(this.#platform, { display: this.#display, watcherPid: process.pid });
 		if (!plan) {
 			this.#warnOnce({ reason: "no-backend", platform: this.#platform });
-			this.#refs--; // nothing to count on a dead platform; next release() must not go negative
 			return;
 		}
 		try {
@@ -156,8 +155,7 @@ export class WakeLock {
 	}
 
 	release(): void {
-		if (this.#refs > 0) this.#refs--;
-		if (this.#refs === 0 && this.#child) {
+		if (this.#child) {
 			this.#child.kill();
 			this.#child = null;
 		}
