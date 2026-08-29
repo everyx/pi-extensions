@@ -24,6 +24,7 @@
 		"@earendil-works/pi-ai": "^0.84.0",
 		"@earendil-works/pi-coding-agent": "^0.84.0",
 		"@earendil-works/pi-tui": "^0.84.0",
+		"@semantic-release/exec": "^7.1.0",
 		"@types/node": "^26.1.1",
 		"husky": "^9.1.7",
 		"lint-staged": "^17.2.0",
