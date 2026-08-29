@@ -1,0 +1,36 @@
+{
+	"$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+	"plugins": ["node-workspace"],
+	"packages": {
+		"packages/pi-subagent": {
+			"release-type": "node",
+			"component": "pi-subagent",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/pi-ui": {
+			"release-type": "node",
+			"component": "pi-ui",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/pi-web-tools": {
+			"release-type": "node",
+			"component": "pi-web-tools",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/pi-read-doc": {
+			"release-type": "node",
+			"component": "pi-read-doc",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/pi-sleep-guard": {
+			"release-type": "node",
+			"component": "pi-sleep-guard",
+			"changelog-path": "CHANGELOG.md"
+		},
+		"packages/pi-status-line": {
+			"release-type": "node",
+			"component": "pi-status-line",
+			"changelog-path": "CHANGELOG.md"
+		}
+	}
+}

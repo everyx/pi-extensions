@@ -1,6 +1,6 @@
 {
 	"name": "@everyx/pi-status-line",
-	"version": "0.0.0-development",
+	"version": "1.0.1",
 	"description": "Pi-native status line — TPS and TTFT integrated into footer via ctx.ui.setFooter",
 	"keywords": [
 		"pi-package"

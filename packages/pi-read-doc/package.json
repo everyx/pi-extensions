@@ -1,6 +1,6 @@
 {
 	"name": "@everyx/pi-read-doc",
-	"version": "0.0.0-development",
+	"version": "1.0.1",
 	"description": "Enhanced read for pi – office docs (docx/pdf/pptx/xlsx etc.) via anydoc, header-only, hosted→rapid fallback.",
 	"keywords": ["pi-package"],
 	"license": "MIT",

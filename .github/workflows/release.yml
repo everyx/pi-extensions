@@ -1,62 +1,52 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      dry-run:
-        description: Preview version bump without publishing
-        type: boolean
-        default: true
+  push:
+    branches: [master]
 
 permissions:
-  id-token: write
   contents: write
+  pull-requests: write
+  id-token: write
 
 jobs:
-  verify:
+  release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: googleapis/release-please-action@v4
+        id: release
         with:
-          node-version: 24
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - run: pnpm typecheck
-      - run: pnpm test
-  discover:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v7
-      - id: set-matrix
-        run: |
-          pkgs=$(ls -1 packages | jq -R -s -c 'split("\n") | map(select(length>0))')
-          echo "matrix=$pkgs" >> "$GITHUB_OUTPUT"
-  release:
-    needs: [verify, discover]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJson(needs.discover.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v7
+          token: ${{ secrets.GITHUB_TOKEN }}
+          command: manifest
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: master
+
+      # Only publish after release-please has created a release (post-merge).
+      - name: Checkout
+        if: ${{ steps.release.outputs.releases_created }}
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+
+      - name: Setup pnpm
+        if: ${{ steps.release.outputs.releases_created }}
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        if: ${{ steps.release.outputs.releases_created }}
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
-      - run: pnpm install --frozen-lockfile
-      - name: Semantic Release (${{ matrix.package }})
-        working-directory: packages/${{ matrix.package }}
-        run: npx semantic-release --tag-format "${{ matrix.package }}-v\${version}"${{ inputs.dry-run && ' --dry-run' || '' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install
+        if: ${{ steps.release.outputs.releases_created }}
+        run: pnpm install
+
+      # pnpm resolves workspace:* and catalog: to real versions at publish time.
+      # --provenance uses the OIDC id-token granted above.
+      - name: Publish to npm
+        if: ${{ steps.release.outputs.releases_created }}
+        run: pnpm publish -r --access public --no-git-checks --provenance

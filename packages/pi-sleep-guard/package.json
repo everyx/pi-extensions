@@ -1,6 +1,6 @@
 {
 	"name": "@everyx/pi-sleep-guard",
-	"version": "0.0.0-development",
+	"version": "1.0.1",
 	"description": "Keeps the machine awake while pi agents (main or sub-agents) are running; releases the moment every turn settles",
 	"keywords": [
 		"pi-package"
