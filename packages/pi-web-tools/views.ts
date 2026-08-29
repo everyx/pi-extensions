@@ -41,5 +41,5 @@ export const fetchView = createToolView<Record<string, unknown>, FetchToolData>(
 		const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
 		return dur ? [dur] : undefined;
 	},
-	body: { text: (ctx) => ctx.result?.data?.content ?? "" },
+	body: { text: (ctx) => (ctx.expanded ? (ctx.result?.data?.content ?? "") : "") },
 });

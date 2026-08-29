@@ -41,6 +41,7 @@ export interface ViewContext<Args, Data> {
 	args: Args;
 	result?: { data: Data; error?: string };
 	status: CardStatus;
+	expanded?: boolean;
 }
 
 /** Structured data a tool returns for rendering (rides execute's details). */
@@ -80,6 +81,8 @@ export interface ToolView<Args, Data> {
 	body?: ViewBody<Args, Data>;
 	/** Card footer line (muted, below the folded body). */
 	footer?: (ctx: ViewContext<Args, Data>) => string | undefined;
+	/** Preview direction for text bodies: head (write-like, first 10) vs tail (bash-like, last 5). */
+	preview?: "head" | "tail";
 }
 
 // ── status derivation (library, from framework state) ───────────
@@ -207,10 +210,12 @@ export function createToolView<Args, Data>(
 		args: Args,
 		status: CardStatus,
 		result?: { data: Data; error?: string },
+		expanded?: boolean,
 	): ViewContext<Args, Data> => ({
 		args,
 		status,
 		result,
+		expanded,
 	});
 
 	const renderCardFrom = (
@@ -221,7 +226,7 @@ export function createToolView<Args, Data>(
 		spinner: Spinner | undefined,
 		theme: Theme,
 	): Component => {
-		const ctx = makeCtx(args, status, result);
+		const ctx = makeCtx(args, status, result, expanded);
 		const tailText = view.tail?.(ctx);
 		const body = bodyRows(view, ctx);
 		return dataCard(
@@ -232,6 +237,7 @@ export function createToolView<Args, Data>(
 				tail: tailText ?? undefined,
 				meta: view.meta?.(ctx),
 				body,
+				preview: view.preview,
 				footer: view.footer?.(ctx),
 				error: result?.error,
 				expanded,
@@ -296,12 +302,13 @@ export function createToolView<Args, Data>(
 			const st = rc.state as Record<string, unknown> | undefined;
 			if (st) st.lastData = data; // let the call header see streamed data
 			if (status === "processing") {
-				const ctx = makeCtx(rc.args as Args, status, { data, error: details.error });
+				const ctx = makeCtx(rc.args as Args, status, { data, error: details.error }, options.expanded);
 				return dataCard(
 					{
 						status,
 						name: view.name,
 						body: bodyRows(view, ctx),
+						preview: view.preview,
 						footer: view.footer?.(ctx),
 						expanded: options.expanded,
 						bare: true,

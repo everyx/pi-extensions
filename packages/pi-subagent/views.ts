@@ -124,5 +124,6 @@ export const sendView = createToolView<Record<string, unknown>, Record<string, u
 		return "delivered";
 	},
 	// The message body shows on the card (folded at 5 rows like bash).
+	preview: "head",
 	body: { text: (ctx) => (ctx.result?.data as { message?: string } | undefined)?.message ?? "" },
 });
