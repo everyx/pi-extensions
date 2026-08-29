@@ -4,10 +4,13 @@
 
 My personal [pi](https://github.com/earendil-works/pi) extensions — each package a plain, independently publishable pi extension.
 
-| Package | What it is | npm |
-|---|---|---|
-| [`subagent`](./packages/pi-subagent/README.md) | Pi agents that work together — three primitives, a tree of named agents, no noise. | `@everyx/pi-subagent` |
-| [`web-tools`](./packages/pi-web-tools/SPEC.md) | Web primitives — `webSearch` + `fetch` (URL → Markdown). | `@everyx/pi-web-tools` |
+| Package | What it is |
+|---|---|
+| [`@everyx/pi-subagent`](./packages/pi-subagent/README.md) | Pi agents that work together — three primitives, a tree of named agents, no noise. |
+| [`@everyx/pi-web-tools`](./packages/pi-web-tools/README.md) | Web primitives — `webSearch` + `fetch` (URL → Markdown), channel-routed + rate-limited. |
+| [`@everyx/pi-sleep-guard`](./packages/pi-sleep-guard/README.md) | Block system sleep while any pi agent runs — per-process caffeinate/systemd-inhibit. |
+| [`@everyx/pi-status-line`](./packages/pi-status-line/README.md) | Pi-native footer — TPS/TTFT inline after `↓` (`T/s`). |
+| [`@everyx/pi-read-doc`](./packages/pi-read-doc/README.md) | Enhanced read — office docs (Word/Excel/PowerPoint/PDF) via anydoc → markdown, hosted→rapid fallback. |
 
 ## Layout
 
