@@ -1,15 +1,38 @@
 {
 	"name": "@everyx/pi-read-doc",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Enhanced read for pi – office docs (docx/pdf/pptx/xlsx etc.) via anydoc, header-only, hosted→rapid fallback.",
-	"keywords": ["pi-package"],
+	"keywords": [
+		"pi-package"
+	],
 	"license": "MIT",
-	"publishConfig": { "access": "public" },
+	"publishConfig": {
+		"access": "public"
+	},
 	"type": "module",
-	"scripts": { "test": "tsx --test test/*.test.ts" },
-	"repository": { "type": "git", "url": "https://github.com/everyx/pi-extensions" },
-	"files": ["*.ts", "README.md"],
-	"pi": { "extensions": ["./index.ts"] },
-	"dependencies": { "@everyx/pi-ui": "workspace:*", "@firecrawl/anydoc": "^0.2.4" },
-	"peerDependencies": { "@earendil-works/pi-coding-agent": "catalog:", "@earendil-works/pi-tui": "catalog:", "typebox": "catalog:" }
+	"scripts": {
+		"test": "tsx --test test/*.test.ts"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/everyx/pi-extensions"
+	},
+	"files": [
+		"*.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"dependencies": {
+		"@everyx/pi-ui": "workspace:*",
+		"@firecrawl/anydoc": "^0.2.4"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "catalog:",
+		"@earendil-works/pi-tui": "catalog:",
+		"typebox": "catalog:"
+	}
 }
