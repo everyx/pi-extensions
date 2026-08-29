@@ -13,3 +13,4 @@ Enhanced `read` for office documents — Word/Excel/PowerPoint/PDF/ODT/RTF/EPUB/
 pi install npm:@everyx/pi-read-doc
 # then in settings.json: "defaultTools": ["read","read_doc",...]
 ```
+

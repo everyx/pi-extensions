@@ -32,3 +32,4 @@ This package is the home for all footer optimizations (`context%`, `cost`, etc.)
 ## Config
 
 None yet. Display thresholds and estimation strategy are future knobs.
+

@@ -43,3 +43,4 @@ dies — a crash can never leave an orphan blocking sleep.
 
 - `PI_SLEEP_GUARD_DISPLAY=1` — also block display off (default: system sleep
   only, the screen may blank normally).
+
