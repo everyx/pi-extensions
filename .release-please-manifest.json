@@ -1,8 +1,8 @@
 {
-	"packages/pi-subagent": "1.3.1",
-	"packages/pi-ui": "1.0.1",
-	"packages/pi-web-tools": "1.0.1",
-	"packages/pi-read-doc": "1.0.1",
-	"packages/pi-sleep-guard": "1.0.1",
-	"packages/pi-status-line": "1.0.1"
+	"packages/pi-subagent": "1.3.2",
+	"packages/pi-ui": "1.0.2",
+	"packages/pi-web-tools": "1.0.2",
+	"packages/pi-read-doc": "1.0.2",
+	"packages/pi-sleep-guard": "1.0.2",
+	"packages/pi-status-line": "1.0.2"
 }
