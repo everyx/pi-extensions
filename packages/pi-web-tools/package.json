@@ -11,7 +11,7 @@
 	},
 	"type": "module",
 	"scripts": {
-		"test": "PI_WEB_TOOLS_NO_IMPERS=1 tsx --test test/*.test.ts",
+		"test": "PI_WEB_TOOLS_NO_IMPERS=1 PI_WEB_TOOLS_NO_BSK=1 tsx --test test/*.test.ts",
 		"preview": "tsx preview.ts"
 	},
 	"repository": {

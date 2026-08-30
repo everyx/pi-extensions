@@ -35,11 +35,20 @@ export function pickEngine(locale?: string): EngineId {
 	return parseLocale(locale).language === "zh" ? "baidu" : "google";
 }
 
+/** Env gate mirroring PI_WEB_TOOLS_NO_IMPERS: disables the real-browser
+ *  channel (hermetic tests / offline) BEFORE any CLI probe — no browser
+ *  window, no bsk daemon. Test scripts set it so the default suite never
+ *  pops a Chromium; opt-in browser tests clear it (PI_WEB_TOOLS_TEST_BSK). */
+export function bskDisabled(): boolean {
+	return process.env.PI_WEB_TOOLS_NO_BSK === "1";
+}
+
 /** Whether the bsk CLI is installed — probed lazily (never at module load).
  *  Only positive results cache: installing bsk mid-session activates the
  *  fuse on the next request instead of needing a restart. */
 let bskAvailabilityCache = false;
 export async function isBskAvailable(): Promise<boolean> {
+	if (bskDisabled()) return false;
 	if (bskAvailabilityCache) return true;
 	bskAvailabilityCache = (await runBsk(["--version"], 5_000)).ok;
 	return bskAvailabilityCache;

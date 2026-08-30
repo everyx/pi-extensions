@@ -215,6 +215,9 @@ API key 环境变量（有则升级、无则降级，全部可选）：
 | `FIRECRAWL_API_KEY` | Firecrawl keyed 升档（与 pi-read-doc OCR 共享池，搜索尽量不碰） |
 | `PI_WEB_TOOLS_NO_IMPERS=1` | 强制退化层（hermetic 测试 / 离线）；首次使用 impers 会下载
   libcurl-impersonate v2.0.0（版本 pin，失败自动降 Tier 2） |
+| `PI_WEB_TOOLS_NO_BSK=1` | 禁用 bsk 真实浏览器通道（探测前短路——不弹窗、不起 daemon；默认测试套件强制） |
+| `PI_WEB_TOOLS_TEST_BSK=1` | opt-in：运行真浏览器测试（bsk 会打开本机 Chromium）；需同时清掉 NO_BSK |
+  （test/browser.test.ts 在 opt-in 时自行清除 NO_BSK） |
 
 无 `PI_WEB_TOOLS_ENGINES`、无系统语言探测——可用性就是环境事实，变更即时生效（每请求检测）。
 
