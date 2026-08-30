@@ -3,8 +3,9 @@
  *
  * Uses ctx.ui.setFooter to render TPS/TTFT inline with token stats on the
  * same line (↑↓ right after output), rather than setStatus which always
- * creates a separate third line. Layout 1:1 replicates official footer
- * (pwd + statsLeft + rightSide with padding, dim styling, width truncation).
+ * creates a separate third line. Layout mirrors the official footer
+ * (pwd + statsLeft + rightSide with padding, dim styling, width truncation) —
+a simplified variant without the extension-statuses line or (sub) suffix.
  */
 
 import { isAbsolute, relative, resolve, sep } from "node:path";

@@ -19,7 +19,8 @@
 	},
 	"files": [
 		"*.ts",
-		"README.md"
+		"README.md",
+		"README.zh.md"
 	],
 	"pi": {
 		"extensions": [

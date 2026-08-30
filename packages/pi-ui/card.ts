@@ -189,11 +189,11 @@ function contentBlock(styled: string, color: (line: string) => string, expanded:
 // ── Card assembly (folding built in) ─────────────────────────────
 
 export interface CardBody {
-	/** Failure reason — dim folded block below the body. */
+	/** Failure reason — dim folded block, rendered after extra (above a message body). */
 	error?: string;
 	/** Plain content line — folded block (toolOutput color). */
 	message?: string;
-	/** Extra body components appended in order (e.g. activity streams). */
+	/** Extra body components appended first (e.g. activity streams). */
 	extra?: BodyComponent[];
 }
 

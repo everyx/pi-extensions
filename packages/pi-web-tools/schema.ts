@@ -29,7 +29,8 @@ export function buildWebSearchSchema(engines: EngineId[]) {
 		}),
 		recency: Type.Optional(
 			StringEnum(["day", "week", "month", "year"], {
-				description: "Only results from this time window. Omit for no time restriction.",
+				description:
+					"Only results from this time window. Unsupported by baidu/yandex — omit recency (or use auto) there.",
 			}),
 		),
 		allowed_domains: Type.Optional(
@@ -45,18 +46,18 @@ export function buildWebSearchSchema(engines: EngineId[]) {
 		locale: Type.Optional(
 			Type.String({
 				description:
-					"BCP-47 locale (e.g. zh-CN, en-US, ru-RU). Pass it when you want results " +
-					"localized to a language/region (e.g. zh-CN for Chinese results — the " +
-					"engine then serves from the local edition, like cn.bing.com). Omit for " +
-					"global results.",
+					"BCP-47 locale (e.g. zh-CN, en-US, ru-RU) for localized results. Routes to a " +
+					"real-browser engine that serves the local edition (zh-CN → cn.bing.com). " +
+					"Omit for global results.",
 			}),
 		),
 		engine: Type.Optional(
 			StringEnum(engineValues, {
 				description:
 					"auto (default): pick the best engine automatically. google/bing/baidu/yandex: " +
-					"search with that engine — enables its native operator syntax in query and " +
-					"locale-based localization. The listed engines are the ones enabled in this install.",
+					"search a real browser engine with its native operator syntax — operator and " +
+					"locale support varies by engine (baidu has no locale handling). The listed " +
+					"engines are the ones enabled in this install.",
 			}),
 		),
 	});

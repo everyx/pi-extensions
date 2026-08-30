@@ -1,9 +1,10 @@
 /**
  * pi-ui — shared formatting primitives for pi extension UI.
  *
- * Spinner (wall-clock driven frames), duration formatting, text clipping
- * and title sanitization — used by tool cards, widgets and notification
- * surfaces across extensions.
+ * Spinner (wall-clock driven frames) and duration formatting — used by
+ * tool cards, widgets and notification surfaces across extensions.
+ * (Text clipping / title sanitization live in width.ts; spinner.ts
+ * re-exports them for back-compat.)
  */
 
 /** Spinner frame interval (80ms — matches Pi's native loader cadence).

@@ -1,7 +1,7 @@
 {
 	"name": "@everyx/pi-web-tools",
 	"version": "1.0.2",
-	"description": "Web primitives for pi – webSearch + fetch (URL → Markdown). Minimal web capability for Pi.",
+	"description": "Web primitives for pi – search and URL fetch (URL → Markdown). Minimal web capability for Pi.",
 	"keywords": [
 		"pi-package"
 	],

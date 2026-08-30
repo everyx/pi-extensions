@@ -17,11 +17,10 @@ import { type CardIcon, type Component, dataCard, renderHeader, type StyledRow, 
 import { SPINNER_TICK_MS, Spinner } from "./spinner.js";
 import { ticker } from "./ticker.js";
 
-/** Structural subset of pi's ToolRenderContext (not exported at the entry). */
-/** Structural match of pi's ToolRenderContext (not exported at the entry). */
+/** Structural match of pi's ToolRenderContext (pi does not export it). */
 interface RenderContext {
 	args: unknown;
-	state?: { spinner?: unknown };
+	state?: { spinner?: unknown; startedAt?: number; lastData?: unknown; animation?: unknown };
 	toolCallId: string;
 	invalidate: () => void;
 	lastComponent: unknown;

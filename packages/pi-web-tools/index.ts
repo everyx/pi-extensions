@@ -316,10 +316,10 @@ export default function (pi: ExtensionAPI) {
 		label: "Search the Web",
 		description:
 			"Search the web and return a list of results (title, url, snippet). " +
-			"Each result carries the source text. engine: auto picks the best engine; " +
-			"google/bing/baidu/yandex search with that engine and enable its native operator " +
-			'syntax (site:, filetype:, intitle:, -exclude, "exact", OR). ' +
-			"allowed_domains/blocked_domains work for every engine.",
+			"Each result carries the source text. engine: auto picks the best channel; an " +
+			"explicit engine (google/bing/baidu/yandex) searches a real browser with its native " +
+			'operator syntax (site:, filetype:, intitle:, -exclude, "exact", OR). ' +
+			"Support varies by engine: blocked_domains errors on yandex; recency errors on baidu/yandex.",
 		promptSnippet: "Search the web",
 		promptGuidelines: [
 			"Use web_search for anything that requires current or external information.",

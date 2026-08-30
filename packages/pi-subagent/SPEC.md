@@ -122,7 +122,7 @@ session: /path/...jsonl
 ### 架构
 
 ```
-index.ts           — 工具注册（agent_spawn / agent_stop / agent_send）+ schema + 通知投递
+index.ts           — 工具注册（agent_spawn / agent_stop / agent_send）+ 路由粘合
 protocol.ts        — 纯函数 JSONL 协议层
 rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + 事件流 + 退出）
 event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数）
@@ -132,9 +132,14 @@ tree-display.ts    — 子树显示面（显示面统一规则锚点：fold/forw
 registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 点对点投递 + 完成策略
 model.ts           — model spec → resolved model（纯函数）
 types.ts           — 共享协议类型（RenderEvent / SubagentDetails / NotificationDetails）
-render.ts          — TUI 渲染（工具卡 / 控制卡 / 通知卡）；格式化直接取自 pi-ui（spinner.js/width.js 正典出口）
+render.ts          — 通知卡渲染器（消息面）；格式化直接取自 pi-ui（spinner.js/width.js 正典出口）
 widget.ts          — Agents 状态 widget
-preview.ts         — dev-only storybook：`npm run preview` 逐组件渲染预览（不进生产包）
+name-gen.ts        — 短人名代理 id（测试）
+spawn-session.ts   — 子代理会话目 isolated 目录 bootstrap
+nested-fold.ts     — 前景卡子树 telemetry 计数
+views.ts           — 三张工具卡 view（单一来源）
+card.ts            — 通知卡包装（通过 pi-ui）
+preview.ts         — dev-only storybook（随包发布但无运行时影响）
 ```
 
 ### RPC 协议

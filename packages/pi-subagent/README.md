@@ -25,7 +25,7 @@ Pi has no built‑in sub‑agents. So heavy, parallel, or context‑heavy work c
 - **Inherit or override** — a child inherits your model and thinking level by default; override it per child. A cheap model for recon, a strong one for the build.
 - **No hidden limits** — no token ceiling, no deadline, no concurrency cap by default. An optional `timeoutMs` adds a guardrail when you want one.
 - **Reviewable** — every session persists and is never deleted; attach any result with `pi --session <path>`.
-- **Zero deps & nestable** — only `peerDependencies`. A child is a full pi instance, so it can spawn another child.
+- **Nestable** — a child is a full pi instance, so it can spawn another child.
 - **Token economy** — the system side stays lean:
   - **System prompt** — three tools and terse guidance inject roughly 2–3KB of system prompt (token count drifts with the tokenizer).
   - **Notification** — the LLM sees only minimal structured data; decoration (title, usage, session path) stays in the render layer.
@@ -44,7 +44,7 @@ pi-subagent, [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagen
 | Default limits | None (optional `timeoutMs`) | Graceful turn limits | turn / usage budgets |
 | Observability | pi‑native cards + widget + `pi --session` | FleetView + conversation viewer | FleetView inspector + fleet |
 | Nesting | Built‑in, no depth cap | Opt‑in, depth cap | Recursion guard |
-| Extras | Token economy, zero runtime deps, no orphans on reload/crash | Memory, worktree isolation, schedule, cross‑extension RPC, event bus | Missions/scheduling, watchdog, worktree, intercom, chain orchestration |
+| Extras | Token economy, minimal runtime deps, no orphans on reload/crash | Memory, worktree isolation, schedule, cross‑extension RPC, event bus | Missions/scheduling, watchdog, worktree, intercom, chain orchestration |
 | Best for | Owning your own composition | A turnkey sub‑agent system | Built‑in roles + workflow orchestration |
 
 ## Install
@@ -108,7 +108,7 @@ The directory lives **outside** pi's standard session tree so `pi -r` (resume) s
 | Param | Type | Default | Meaning |
 |---|---|---|---|
 | `prompt` | string | **required** | Self‑contained task description for the sub‑agent. |
-| `title` | string (3–5 words) | **required** | Labels the tool card, notification card, widget row, and session name — like Claude Code's `description` / Codex's `task_name`. |
+| `title` | string (3–5 words) | optional | Labels the tool card, notification card, widget row, and session name — omitted, it is derived from the first prompt line. |
 | `model` | string | inherited | Override the sub‑agent's model. Specified but not registered → **error, no silent fallback**. |
 | `thinking` | `"off"`…`"max"` | inherited | Override thinking level; omit to run at your current session's level. |
 | `tools` | string[] | all | Whitelist of tool names visible to the sub‑agent — anything else is invisible. |

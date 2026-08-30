@@ -32,10 +32,10 @@ pi 的 footer（`Footer` 组件，`render(width): string[]`）内置拼
 ## 行为
 
 ```
-turn_start ──► 记录 t0，清空旧 TPS/TTFT
+turn_start ──► 记录 t0（TTFT 起点）；显示值保持到新一轮第一个 token 到来才覆盖
 message_update (text/thinking delta) ──► 估算 tokens（含 reasoning），推滑动窗口，requestRender
 message_end ──► 刷新最终值
-turn_end 之后持久化保留（下一 turn_start 再覆盖），仅 session_shutdown 清空
+turn_end 之后持久化保留（等下一轮第一个 token 再覆盖），仅 session_shutdown 清空
 ```
 
 `extractDelta` 取 `assistantMessageEvent.delta`（`text_delta` / `thinking_delta` 均计入分子，对齐业界 output+reasoning）。

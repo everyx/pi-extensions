@@ -128,7 +128,7 @@ function styleRow(row: WidgetRow, theme: Theme): string {
  * Lifetime progress: while the widget is alive it counts every tracked item
  * (`total`) and how each ended (`done`/`failed`/`stopped`), rendered by
  * metaLine() after the title as a paren group: `done 2/5 · 1 running ·
- * 1 failed` (dot-separated, abnormal counts colored). A remove() without a
+ * 1 failed` (dot-separated, failure colored). A remove() without a
  * result is not counted.
  */
 export class StatusWidget {

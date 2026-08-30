@@ -7,7 +7,7 @@
 | 包 | 是什么 |
 |---|---|
 | [`@everyx/pi-subagent`](./packages/pi-subagent/README.zh.md) | Pi 的协作式子代理——三原语、有名有姓、互通消息，调度权在你。 |
-| [`@everyx/pi-web-tools`](./packages/pi-web-tools/README.zh.md) | Web 原语——`webSearch` + `fetch`（URL → Markdown），通道路由 + 限流。 |
+| [`@everyx/pi-web-tools`](./packages/pi-web-tools/README.zh.md) | Web 原语——搜索 + URL 抓取（URL → Markdown），通道路由 + 限流。 |
 | [`@everyx/pi-sleep-guard`](./packages/pi-sleep-guard/README.zh.md) | 运行时阻断休眠——任意 pi 进程运行时 `caffeinate`/`systemd-inhibit` 持锁。 |
 | [`@everyx/pi-status-line`](./packages/pi-status-line/README.zh.md) | Pi 原生状态栏——`↓` 后同行 `TPS/TTFT`（`T/s`）。 |
 | [`@everyx/pi-read-doc`](./packages/pi-read-doc/README.zh.md) | 增强 read——Office 文档（Word/Excel/PowerPoint/PDF）经 anydoc 转 Markdown，hosted→rapid 回退。 |

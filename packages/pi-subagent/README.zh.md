@@ -25,7 +25,7 @@ Pi 没有内置 sub-agent。于是重活、并行的活、吃上下文的活，�
 - **继承或覆盖** — 子 agent 默认继承你的模型与推理强度，也可逐个覆盖。便宜模型做侦察，强模型做实现。
 - **无隐藏限制** — 默认无 token 上限、无超时、无并发上限。需要时用可选 `timeoutMs` 加一道护栏。
 - **可复盘** — 每个会话持久化、永不删除；任何结果都能 `pi --session <path>` 回看。
-- **零依赖 + 可嵌套** — 仅 peerDependencies。子 agent 是完整 pi 实例，天然能再 spawn 孙 agent。
+- **可嵌套** — 子 agent 是完整 pi 实例，天然能再 spawn 孙 agent。
 - **Token 经济** — 系统侧保持克制：
   - **系统提示** — 三个工具 + 简短指南，注入约 2–3KB 系统提示（token 数随 tokenizer 略有出入）。
   - **通知** — LLM 只看到最小结构化数据；装饰（title、用量、会话路径）留在渲染层，永不进入 LLM 上下文。
@@ -108,7 +108,7 @@ Pi 调用 `agent_send` 向运行中的 agent 注入重定向消息（当前 turn
 | 参数 | 类型 | 默认值 | 含义 |
 |---|---|---|---|
 | `prompt` | string | **必填** | 子 agent 的自包含任务描述。 |
-| `title` | string（3-5 词） | **必填** | 作为工具卡、通知卡、widget 行和会话名的标识——对齐 Claude Code 的 `description` / Codex 的 `task_name`。 |
+| `title` | string（3-5 词） | 可选 | 作为工具卡、通知卡、widget 行和会话名的标识——省略时由 prompt 首行推导。 |
 | `model` | string | 继承 | 覆盖子 agent 的模型。指定但注册表中找不到 → **报错，不静默降级**。 |
 | `thinking` | `"off"`…`"max"` | 继承 | 覆盖推理强度；省略则用当前会话的级别。 |
 | `tools` | string[] | 全部 | 子 agent 可见的工具白名单——白名单之外全部不可见。 |

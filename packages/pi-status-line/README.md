@@ -11,7 +11,7 @@ Integrated into footer via `setFooter` — `↑`/`↓` right after `↓`, single
 | **TPS** | `output+reasoning` tokens / pure decode time (`firstToken → now`), live 1s sliding window, `<250ms` debounced |
 | **TTFT** | `turn_start → firstToken` |
 
-Tokens estimated as `chars/4` when provider counts unavailable (OpenAI heuristic); provider-precise counts are a future upgrade.
+Tokens estimated as `chars/4` (OpenAI heuristic); provider-precise counts are a future upgrade.
 
 ```
 footer:  ↑6.3k ↓119 T1.2s 42.1T/s R113 ... 0.6%/1.0M (model)
@@ -20,9 +20,9 @@ footer:  ↑6.3k ↓119 T1.2s 42.1T/s R113 ... 0.6%/1.0M (model)
 
 ## How it works
 
-- `turn_start` records `t0` and clears stale values.
+- `turn_start` records `t0` (TTFT start); displayed values persist until the new turn's first token arrives.
 - Each `message_update` text delta is estimated, pushed into a 1s `SlidingWindow`, and both statuses re-rendered.
-- `turn_end` persists — values stay visible until next `turn_start` overwrites (only `session_shutdown` clears).
+- Values stay visible until the next turn's first token overwrites them (only `session_shutdown` clears).
 - Engine: `tps.ts` is pure (`estimateTokens` / `SlidingWindow` / `TurnMetrics`), testable without pi.
 
 ## Future
