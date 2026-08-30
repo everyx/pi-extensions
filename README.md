@@ -36,7 +36,3 @@ Link its directory from `~/.pi/agent/extensions/…`, then restart pi:
 ```bash
 ln -sf $PWD/packages/pi-subagent ~/.pi/agent/extensions/subagent
 ```
-
-## Releasing
-
-Each package releases independently with semantic-release. Tags are namespaced per package (`pi-subagent-v1.2.0`). Trigger the [Release workflow](.github/workflows/release.yml) manually (default is a `--dry-run` preview); it runs one job per package.

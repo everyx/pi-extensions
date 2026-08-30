@@ -10,7 +10,7 @@
 | [`@everyx/pi-web-tools`](./packages/pi-web-tools/README.zh.md) | Web 原语——`webSearch` + `fetch`（URL → Markdown），通道路由 + 限流。 |
 | [`@everyx/pi-sleep-guard`](./packages/pi-sleep-guard/README.zh.md) | 运行时阻断休眠——任意 pi 进程运行时 `caffeinate`/`systemd-inhibit` 持锁。 |
 | [`@everyx/pi-status-line`](./packages/pi-status-line/README.zh.md) | Pi 原生状态栏——`↓` 后同行 `TPS/TTFT`（`T/s`）。 |
-| [`@everyx/pi-read-doc`](./packages/pi-read-doc/README.md) | 增强 read——Office 文档（Word/Excel/PowerPoint/PDF）经 anydoc 转 Markdown，hosted→rapid 回退。 |
+| [`@everyx/pi-read-doc`](./packages/pi-read-doc/README.zh.md) | 增强 read——Office 文档（Word/Excel/PowerPoint/PDF）经 anydoc 转 Markdown，hosted→rapid 回退。 |
 
 ## 布局
 
@@ -36,7 +36,3 @@ pnpm test         # 跑每个包的测试
 ```bash
 ln -s $PWD/packages/pi-subagent ~/.pi/agent/extensions/subagent
 ```
-
-## 发布
-
-每个包经 semantic-release 独立发布，tag 按包命名空间隔离（如 `pi-subagent-v1.2.0`）。手动触发 [Release workflow](.github/workflows/release.yml)（默认 `--dry-run` 预览），每个包一个 job。

@@ -11,4 +11,4 @@
 
 - 工具链只在根（biome / tsconfig / husky / lint-staged），各包不复制
 - pi 依赖版本在 `pnpm-workspace.yaml` 的 `catalog:` 单一来源，包内 `peerDependencies` 用 `catalog:`
-- `.github/workflows/` 由根管理：CI 全 workspace，release 在包目录逐个触发
+- `.github/workflows/` 由根管理：CI 全 workspace；release 走 release-please manifest（版本 PR 统一 bump，合并后 `pnpm publish -r --provenance`）
