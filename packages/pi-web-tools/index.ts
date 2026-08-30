@@ -182,7 +182,10 @@ async function executeFetch(
 		details: {
 			data: {
 				title: result.title,
-				content: result.content,
+				// UI expand (ctrl+o) renders the FULL text; the LLM side keeps
+				// the capped preview + stash pointer (details never reaches the
+				// model — pi's UI-only channel, same pattern as read-doc).
+				content: result.fullContent ?? result.content,
 				contentType: result.contentType,
 				startedAt,
 				endedAt: Date.now(),

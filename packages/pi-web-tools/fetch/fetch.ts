@@ -141,6 +141,7 @@ async function fuseRender(url: string, signal?: AbortSignal): Promise<WebFetchRe
 				content: previewWithPointer(content, stashPath),
 				contentType: "text/markdown",
 				outputPath: stashPath,
+				fullContent: text,
 			};
 		}
 	}
@@ -295,6 +296,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 			content: stashPath ? notInlined(Buffer.byteLength(text, "utf8"), contentType, stashPath) : capped,
 			contentType,
 			outputPath: stashPath,
+			fullContent: text,
 		};
 	}
 
@@ -306,6 +308,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 			content: previewWithPointer(content, stashPath),
 			contentType: page.contentType || undefined,
 			outputPath: stashPath,
+			fullContent: extracted.markdown,
 		};
 	}
 
@@ -327,6 +330,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 			content: previewWithPointer(content, stashPath),
 			contentType: page.contentType || undefined,
 			outputPath: stashPath,
+			fullContent: extracted.markdown,
 		};
 	}
 

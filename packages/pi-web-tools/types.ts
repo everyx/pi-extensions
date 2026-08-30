@@ -57,6 +57,8 @@ export type SearchToolData = {
 /** web_fetch tool-result payload (`details.data`) — same triangle. */
 export type FetchToolData = {
 	title?: string;
+	/** FULL fetched text for the expanded view (ctrl+o) — UI-only channel;
+	 *  the LLM-visible text is the capped preview in the tool `content`. */
 	content?: string;
 	contentType?: string;
 	startedAt?: number;
@@ -76,5 +78,8 @@ export interface WebFetchResult {
 	image?: { data: string; mimeType: string };
 	/** /tmp path of the full text when content was truncated; the LLM can read it. */
 	outputPath?: string;
+	/** Full fetched text before the LLM-side cap — feeds the UI expanded view
+	 *  (details channel, never the LLM context); set when the cap bit in. */
+	fullContent?: string;
 	error?: string;
 }
