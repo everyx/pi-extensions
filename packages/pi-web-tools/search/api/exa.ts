@@ -4,16 +4,20 @@
  * Dual mode (SPEC: Exa MCP 零配置 + API key 双模):
  *   - no EXA_API_KEY  → MCP endpoint (mcp.exa.ai, JSON-RPC web_search_exa).
  *     The official exa-js SDK requires an API key, so this mode stays on a
- *     hand-rolled MCP call (SSE response).
- *   - with key        → official SDK (exa-js).
+ *     hand-rolled MCP call (SSE response). Free tier: 3 qps / 150 calls/day;
+ *     bare queries only (query + numResults) — gated by exaSupports().
+ *   - with key        → official SDK (exa-js), full param surface incl.
+ *     userLocation (Exa's market param — the Bing mkt/cc equivalent per
+ *     exa's own migration guide).
  */
 
 import Exa from "exa-js";
-import { isoToRelativeAge } from "../../date.ts";
-import { fetchWithTimeout } from "../../http.ts";
-import { createRateLimiter } from "../../rate-limit.ts";
-import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../../types.ts";
-import { recencyToExa } from "../recency.ts";
+import { isoToRelativeAge } from "../../date.js";
+import { fetchWithTimeout } from "../../http.js";
+import { createRateLimiter } from "../../rate-limit.js";
+import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../../types.js";
+import { parseLocale } from "../bcp47.js";
+import { recencyToExa } from "../recency.js";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
 const DEFAULT_RESULTS = 5;
@@ -26,8 +30,12 @@ export function exaApiKey(): string | null {
 	return key && key.length > 0 ? key : null;
 }
 
-export function isExaAvailable(): boolean {
-	return true; // MCP mode works without a key
+/** Whether this channel can honor the request as-is. Keyless MCP only
+ *  exposes query + numResults — filtered/localized requests need the keyed
+ *  REST surface, so keyless skips them instead of silently dropping filters. */
+export function exaSupports(params: WebSearchParams): boolean {
+	if (exaApiKey()) return true;
+	return !params.allowed_domains?.length && !params.blocked_domains?.length && !params.recency && !params.locale;
 }
 
 interface ExaMcpRpcResponse {
@@ -40,19 +48,27 @@ interface ExaMcpRpcResponse {
 
 export async function searchWithExa(params: WebSearchParams, ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
 	const key = exaApiKey();
-	return key ? searchExaSdk(params, key) : searchExaMcp(params, ctx);
+	if (!key) {
+		if (!exaSupports(params)) {
+			throw new Error("internal error: keyless Exa cannot honor filtered queries");
+		}
+		return searchExaMcp(params, ctx);
+	}
+	return searchExaSdk(params, key);
 }
 
 // ── key mode: official SDK (exa-js) ─────────────────────────────
 
 async function searchExaSdk(params: WebSearchParams, apiKey: string): Promise<SearchResultItem[]> {
 	const exa = new Exa(apiKey);
+	const { country } = parseLocale(params.locale);
 	const response = await exa.search(params.query, {
 		type: "auto",
 		numResults: DEFAULT_RESULTS,
 		...(params.allowed_domains?.length ? { includeDomains: params.allowed_domains } : {}),
 		...(params.blocked_domains?.length ? { excludeDomains: params.blocked_domains } : {}),
 		...(params.recency ? { startPublishedDate: recencyToExa(params.recency) } : {}),
+		...(country ? { userLocation: country } : {}),
 		contents: { highlights: true },
 	});
 

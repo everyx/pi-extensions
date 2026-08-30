@@ -38,9 +38,9 @@ describe("parsePageState", () => {
 });
 
 describe("EXTRACT_SCRIPT", () => {
-	it("stays a self-executing JSON-producing snippet covering redirect decoding", () => {
+	it("stays a self-executing JSON-producing snippet with dedup + engine-page skips", () => {
 		assert.ok(EXTRACT_SCRIPT.includes("querySelectorAll('h3, h2')"));
-		assert.ok(EXTRACT_SCRIPT.includes("bing\\.com\\/ck\\/"), "bing redirect decoding present");
 		assert.ok(EXTRACT_SCRIPT.includes("JSON.stringify(out)"));
+		assert.ok(EXTRACT_SCRIPT.includes("google\\.com\\/search|baidu\\.com\\/s"), "engine-page skip present");
 	});
 });

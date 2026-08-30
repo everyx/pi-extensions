@@ -20,20 +20,36 @@ import { promisify } from "node:util";
 import { CHROMIUM_BINARIES } from "../browsers.js";
 import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
 import type { ChannelSearchContext, EngineId, SearchResultItem, WebSearchParams } from "../types.js";
+import { parseLocale } from "./bcp47.js";
 import { EXTRACT_SCRIPT, isCaptchaState, parseExtraction, parsePageState, STATE_PROBE_SCRIPT } from "./extract.js";
-import { engineSearchUrl } from "./locale.js";
+import { recencyToTbs } from "./recency.js";
 
 const execFileAsync = promisify(execFile);
 
 const BSK = "bsk";
 
+/** Fuse engines: zh queries route to baidu (mainland content), everything
+ *  else to google. No system-locale sniffing — the LLM's locale param and
+ *  query language are the only signals. */
+export function pickEngine(locale?: string): EngineId {
+	return parseLocale(locale).language === "zh" ? "baidu" : "google";
+}
+
+/** Whether the bsk CLI is installed — probed lazily (never at module load).
+ *  Only positive results cache: installing bsk mid-session activates the
+ *  fuse on the next request instead of needing a restart. */
+let bskAvailabilityCache = false;
+export async function isBskAvailable(): Promise<boolean> {
+	if (bskAvailabilityCache) return true;
+	bskAvailabilityCache = (await runBsk(["--version"], 5_000)).ok;
+	return bskAvailabilityCache;
+}
+
 // One serial queue per engine: a burst of queued searches shares a single
 // bsk session (open lazily, close when the queue drains).
 const engineQueues: Record<EngineId, SerialQueue<string>> = {
 	google: createSerialQueue(openSession, closeSession),
-	bing: createSerialQueue(openSession, closeSession),
 	baidu: createSerialQueue(openSession, closeSession),
-	yandex: createSerialQueue(openSession, closeSession),
 };
 
 // Browser lifecycle: when WE launched the Chromium instance (no browser was
@@ -223,44 +239,36 @@ async function evaluate(sessionId: string, expression: string, timeoutMs: number
 	return stdout;
 }
 
-/** Extract search results from the page (engine-agnostic: h2/h3-wrapped titles).
- *
- * Paid ads and engine-generated AI summaries are excluded (SPEC: bsk 排除广告
- * 与 AI 总结): Google marks ads with data-text-ad / adurl, Bing puts them in
- * .b_ad / li[class*='ad']; AI blocks carry ai-* / data-ai-* style markers
- * (Google AI Overview, Bing AI summary, Baidu AI 搜索).
- */
-
-/** Build a direct engine search URL (query + locale + recency as params). */
+/** Build a direct engine search URL (query + locale + recency as params).
+ *  google: gl/hl/lr locale params + tbs freshness; baidu is natively
+ *  Chinese — no locale params, and no freshness param exists. */
 function buildSearchUrl(params: WebSearchParams, engine: EngineId): string {
-	const { url, localeParams } = engineSearchUrl(engine, params.locale, params.recency);
+	const host = engine === "google" ? "www.google.com" : "www.baidu.com";
+	const path = engine === "google" ? "/search?q={q}" : "/s?wd={q}";
 	const searchParams = new URLSearchParams();
-	for (const [k, v] of Object.entries(localeParams ?? {})) searchParams.set(k, v);
+	if (engine === "google" && params.locale) {
+		const { language, country } = parseLocale(params.locale);
+		if (country) searchParams.set("gl", country);
+		searchParams.set("hl", country ? `${language}-${country}` : language);
+		searchParams.set("lr", `lang_${language}`);
+	}
+	if (engine === "google" && params.recency) searchParams.set("tbs", recencyToTbs(params.recency));
 	// Translate the structured domain filters into engine operator syntax
 	// (SPEC: bsk → site: / -site:).
 	let query = params.query;
 	for (const d of params.allowed_domains ?? []) query += ` site:${d}`;
 	for (const d of params.blocked_domains ?? []) query += ` -site:${d}`;
-	return url.replace("{q}", encodeURIComponent(query)) + (searchParams.size ? `&${searchParams}` : "");
+	const qs = searchParams.size ? `&${searchParams}` : "";
+	return `https://${host}${path.replace("{q}", encodeURIComponent(query))}${qs}`;
 }
 
-export async function searchWithBsk(
-	params: WebSearchParams,
-	engine: EngineId,
-	ctx: ChannelSearchContext,
-): Promise<SearchResultItem[]> {
+export async function searchWithBsk(params: WebSearchParams, ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
+	const engine = pickEngine(params.locale);
 	const timeoutMs = ctx.timeoutMs ?? 30_000;
-	// recency exists on google (qdr:) and bing (filters) only; baidu/yandex
-	// have no freshness param — request it explicitly rather than silently
-	// dropping it (SPEC: 能力缺失不静默).
-	if (params.recency && engine !== "google" && engine !== "bing") {
-		throw new Error(`engine "${engine}" does not support recency`);
-	}
-	// -site: (blocked_domains) exists on google/bing; baidu parses it (with
-	// engine-side limits); yandex has no such operator — explicit error
-	// instead of silently treating it as plain query text.
-	if (params.blocked_domains?.length && engine === "yandex") {
-		throw new Error(`engine "yandex" does not support blocked_domains`);
+	// baidu has no freshness param — an explicit error beats silently
+	// dropping the filter (SPEC: 能力缺失不静默).
+	if (params.recency && engine === "baidu") {
+		throw new Error(`engine "baidu" does not support recency`);
 	}
 	// Direct navigation to the engine search URL: query + locale + recency
 	// as URL params (precise, no DOM dependence). Recency passes through raw —

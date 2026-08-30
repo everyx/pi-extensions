@@ -43,10 +43,10 @@ describe("createRateLimiter", () => {
 	});
 
 	it("qps maps to a 1000/qps minimum interval", () => {
-		// Research-backed provider limits: exa mcp 3, tavily 1, parallel 10.
+		// Research-backed provider limits: exa mcp 3, tinyfish 2, tavily 1.
 		assert.equal(1000 / 3, 333.3333333333333);
+		assert.equal(1000 / 2, 500);
 		assert.equal(1000 / 1, 1000);
-		assert.equal(1000 / 10, 100);
 	});
 });
 

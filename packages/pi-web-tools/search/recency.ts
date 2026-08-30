@@ -14,6 +14,11 @@ const DAYS: Record<RecencyFilter, number> = {
 	year: 365,
 };
 
+/** Minutes N — TinyFish `recency_minutes` (1..5256000). */
+export function recencyToMinutes(filter: RecencyFilter): number {
+	return DAYS[filter] * 24 * 60;
+}
+
 /** ISO date (YYYY-MM-DD) N days ago — for APIs that take startPublishedDate / after_date. */
 export function recencyToStartDate(filter: RecencyFilter, now: Date = new Date()): string {
 	const d = new Date(now.getTime() - DAYS[filter] * 86_400_000);
@@ -25,24 +30,13 @@ export function recencyToTavily(filter: RecencyFilter): string {
 	return filter; // Tavily accepts day | week | month | year verbatim
 }
 
-/** Parallel `after_date` (ISO date). */
-export function recencyToParallel(filter: RecencyFilter, now?: Date): string {
-	return recencyToStartDate(filter, now);
-}
-
 /** Exa `startPublishedDate` (ISO date). */
 export function recencyToExa(filter: RecencyFilter, now?: Date): string {
 	return recencyToStartDate(filter, now);
 }
 
-/** Google `tbs=qdr:` time window (bsk channel). */
-export function recencyToGoogle(filter: RecencyFilter): string {
+/** Google-style `tbs=qdr:` time window — Firecrawl `/search` `tbs` param and
+ *  the bsk channel's google navigation share the same format. */
+export function recencyToTbs(filter: RecencyFilter): string {
 	return `qdr:${filter[0]}`; // day → qdr:d, week → qdr:w, month → qdr:m, year → qdr:y
-}
-
-/** Bing web UI freshness filter: filters=ex1:"ez1"…"ez4"
- *  (ez1=24h, ez2=week, ez3=month, ez4=year — scraper convention). */
-export function recencyToBingFilters(filter: RecencyFilter): string {
-	const code = { day: "ez1", week: "ez2", month: "ez3", year: "ez4" }[filter] ?? "ez4";
-	return `ex1:"${code}"`;
 }

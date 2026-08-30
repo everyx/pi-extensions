@@ -2,7 +2,7 @@
  * pi-web-tools — shared types.
  *
  * The LLM-visible surface is exactly two primitives (web_search / web_fetch).
- * Everything else (channels, engines, routing) is internal — see SPEC.md.
+ * Everything else (channels, routing) is internal — see README.
  */
 
 export interface SearchResultItem {
@@ -15,36 +15,23 @@ export interface SearchResultItem {
 	author?: string;
 }
 
-/** Channels. "bsk" is the real-browser channel (BrowserSkill CLI). */
-export type ChannelId = "exa" | "tavily" | "parallel" | "bsk";
+/** Search channels in fuse order — api providers first, the real-browser
+ *  channel (BrowserSkill CLI) last as the no-key fuse. */
+export type ChannelId = "tinyfish" | "exa" | "tavily" | "firecrawl" | "bsk";
 
-/** Real-browser search engines (bsk channel). */
-export type EngineId = "google" | "bing" | "baidu" | "yandex";
-
-/** Capabilities a channel may or may not support (SPEC: 通道能力矩阵). */
-export interface ChannelCapabilities {
-	/** structured domain filtering (allowed/blocked_domains params) */
-	domains: boolean;
-	/** structured recency filter */
-	recency: boolean;
-	/** BCP-47 locale param support */
-	locale: boolean;
-}
-
-/** Capabilities a web_search call actually requests. */
-export interface RequestedCapabilities {
-	domains: boolean;
-	recency: boolean;
-	locale: boolean;
-}
+/** Real-browser engines for the bsk fuse — picked from the request's locale
+ *  (zh → baidu, else google). No system-locale or config input. */
+export type EngineId = "google" | "baidu";
 
 export interface WebSearchParams {
 	query: string;
 	recency?: "day" | "week" | "month" | "year";
 	allowed_domains?: string[];
 	blocked_domains?: string[];
+	/** BCP-47 ("zh-CN") — prefer this language/region. Best-effort: each
+	 *  channel maps it to its native market/language boost; absent → the
+	 *  query's language leads. */
 	locale?: string;
-	engine?: "auto" | EngineId;
 }
 
 export interface ChannelSearchContext {
@@ -59,6 +46,7 @@ export interface ChannelSearchContext {
 export type SearchToolData = {
 	results?: SearchResultItem[];
 	channel?: ChannelId;
+	/** Set only when the bsk fuse served the search. */
 	engine?: EngineId;
 	locale?: string;
 	count?: number;

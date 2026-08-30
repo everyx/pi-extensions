@@ -4,7 +4,7 @@
  * The DOM side (EXTRACT_SCRIPT / STATE_PROBE_SCRIPT) runs inside the real
  * browser page and reduces it to JSON; the Node side (parseExtraction /
  * isCaptchaState / parsePageState) interprets that JSON. Both halves live
- * here so fixture tests hit the same rules the four engines exercise —
+ * here so fixture tests hit the same rules the fuse engines exercise —
  * changing a selector heuristic no longer requires a live-browser smoke run
  * to know what its output means.
  */
@@ -45,29 +45,10 @@ export const EXTRACT_SCRIPT = String.raw`
 				}
 			}
 		}
-		// Bing wraps results in /ck/a?u=<base64url> redirects — recover the real
-		// URL. u is "a1" + base64url(URL); try plain first, then without the a1.
-		if (/bing\.com\/ck\//.test(href)) {
-			const m = href.match(/[?&]u=([^&]+)/);
-			if (m) {
-				for (const candidate of [m[1], m[1].replace(/^a1/, "")]) {
-					try {
-						const b64 = candidate.replace(/-/g, "+").replace(/_/g, "/");
-						const decoded = decodeURIComponent(atob(b64));
-						if (decoded.startsWith("http")) {
-							href = decoded;
-							break;
-						}
-					} catch {
-						// try next candidate
-					}
-				}
-			}
-		}
 		const title = (titleEl.textContent || '').trim();
 		if (!title || !href.startsWith('http') || seen.has(href) || isAdOrAi(titleEl, a)) return;
 		// Skip the engine's own pages (local packs / "more results").
-		if (/google\.com\/search|bing\.com\/search|baidu\.com\/s|yandex\.com\/search/.test(href)) return;
+		if (/google\.com\/search|baidu\.com\/s/.test(href)) return;
 		seen.add(href);
 		let snippet = '';
 		let n = titleEl;

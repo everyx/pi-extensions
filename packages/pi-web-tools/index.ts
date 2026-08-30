@@ -1,99 +1,25 @@
 /**
  * pi-web-tools — extension entry: registers web_search + web_fetch.
  *
- * Channels (SPEC 通道架构): free search APIs (Exa/Tavily/Parallel, key-gated)
- * → real browser (bsk). The enabled set — which api channels and which
- * traditional engines are usable — is resolved once at startup from
- * PI_WEB_TOOLS_ENGINES (or the system locale's default set) and mirrored
- * into the engine enum (SPEC: 枚举即事实). Engines only surface when bsk is
- * installed, so the LLM never sees a dead option. LLM sees only results or
- * a terse error; engine echo and diagnostics live in details (UI-visible).
+ * web_search routes across HTTP search providers in fuse order
+ * (tinyfish → exa → tavily → firecrawl) and falls through on failure; the
+ * real-browser channel (bsk) is the last-resort fuse, not an equal peer.
+ * Availability is environment-driven (key presence / bsk CLI), never
+ * configured. The LLM sees results or a terse error; channel echo,
+ * hints and diagnostics live in details (UI-visible). SPEC.md is the doc.
  */
 
-import { execFile, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { webFetch } from "./fetch/fetch.js";
 import { buildWebSearchSchema, type WebFetchParams, WebFetchParamsSchema } from "./schema.js";
-import { exaApiKey, isExaAvailable, searchWithExa } from "./search/api/exa.js";
-import { isParallelAvailable, searchWithParallel } from "./search/api/parallel.js";
-import { isTavilyAvailable, searchWithTavily } from "./search/api/tavily.js";
-import { searchWithBsk } from "./search/browser.js";
-import {
-	orderedCandidates,
-	parseEnginesConfig,
-	requestedCapabilities,
-	resolveApiChannels,
-	resolveEngines,
-	route,
-} from "./search/channels.js";
-import { systemLocale } from "./search/system-locale.js";
-import type {
-	ChannelCapabilities,
-	ChannelId,
-	EngineId,
-	FetchToolData,
-	SearchResultItem,
-	SearchToolData,
-	WebSearchParams,
-} from "./types.js";
+import { searchWithExa } from "./search/api/exa.js";
+import { searchWithFirecrawl } from "./search/api/firecrawl.js";
+import { searchWithTavily } from "./search/api/tavily.js";
+import { searchWithTinyfish } from "./search/api/tinyfish.js";
+import { pickEngine, searchWithBsk } from "./search/browser.js";
+import { candidatesFor } from "./search/channels.js";
+import type { ChannelId, FetchToolData, SearchResultItem, SearchToolData, WebSearchParams } from "./types.js";
 import { fetchView, searchView } from "./views.js";
-
-const execFileAsync = promisify(execFile);
-
-// ── Enabled set (resolved once at startup — SPEC: 启动时静态定) ────
-
-/** The enabled api channels + bsk engines. Config wins; else system-locale
- * defaults. Mirrored into the engine enum so the LLM only sees usable
- * engines (SPEC: 枚举即事实) — engines additionally require bsk to be
- * installed, otherwise they'd be dead options at call time. */
-function isBskInstalledSync(): boolean {
-	try {
-		execFileSync("bsk", ["--version"], { timeout: 5_000, stdio: "ignore" });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-const systemLocaleValue = systemLocale();
-const enginesConfig = parseEnginesConfig(process.env.PI_WEB_TOOLS_ENGINES);
-const ENABLED = {
-	api: resolveApiChannels(enginesConfig),
-	engines: isBskInstalledSync() ? resolveEngines(enginesConfig, systemLocaleValue) : [],
-};
-
-// ── Channel availability ─────────────────────────────────────────
-
-async function isBskAvailable(): Promise<boolean> {
-	try {
-		await execFileAsync("bsk", ["--version"], { timeout: 5_000 });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-async function detectAvailableChannels(
-	enabled: { api: ChannelId[]; engines: EngineId[] } = ENABLED,
-): Promise<{ available: ChannelId[]; capabilities: Partial<Record<ChannelId, ChannelCapabilities>> }> {
-	const channels: ChannelId[] = [];
-	const capabilities: Partial<Record<ChannelId, ChannelCapabilities>> = {};
-	// api channels: enabled set ∩ key availability (SPEC: api 组 key 驱动).
-	if (enabled.api.includes("exa") && isExaAvailable()) {
-		channels.push("exa");
-		// Keyless Exa goes through MCP, which exposes only query + numResults
-		// (researched) — no domains/recency/locale. With a key (REST) it's full.
-		if (!exaApiKey()) {
-			capabilities.exa = { domains: false, recency: false, locale: false };
-		}
-	}
-	if (enabled.api.includes("tavily") && isTavilyAvailable()) channels.push("tavily");
-	if (enabled.api.includes("parallel") && isParallelAvailable()) channels.push("parallel");
-	// bsk: only when at least one engine is enabled (SPEC: 启用集非空才有 bsk).
-	if (enabled.engines.length > 0 && (await isBskAvailable())) channels.push("bsk");
-	return { available: channels, capabilities };
-}
 
 // ── Result formatting (LLM-facing, token friendly) ───────────────
 
@@ -107,11 +33,13 @@ function formatResults(result: SearchResultItem[]): string {
 		})
 		.join("\n");
 }
+
 /** build the final tool result. */
 function finalizeResult(
 	result: SearchResultItem[],
-	candidate: { channel: ChannelId; engine?: EngineId },
-	locale: string | undefined,
+	channel: ChannelId,
+	engine: SearchToolData["engine"],
+	params: WebSearchParams,
 	startedAt: number,
 ): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: boolean } {
 	return {
@@ -119,9 +47,9 @@ function finalizeResult(
 		details: {
 			data: {
 				results: result,
-				channel: candidate.channel,
-				...(candidate.engine ? { engine: candidate.engine } : {}),
-				...(locale ? { locale } : {}),
+				channel,
+				...(engine ? { engine } : {}),
+				...(params.locale ? { locale: params.locale } : {}),
 				count: result.length,
 				startedAt,
 				endedAt: Date.now(),
@@ -133,17 +61,19 @@ function finalizeResult(
 
 // ── web_search ───────────────────────────────────────────────────
 
+type ToolResult = {
+	content: { type: "text"; text: string }[];
+	details: Record<string, unknown>;
+	isError: boolean;
+};
+
 async function executeSearch(
 	params: WebSearchParams,
 	signal: AbortSignal | undefined,
 	onUpdate:
 		| ((update: { content: { type: "text"; text: string }[]; details: Record<string, unknown> }) => void)
 		| undefined,
-): Promise<{
-	content: { type: "text"; text: string }[];
-	details: Record<string, unknown>;
-	isError: boolean;
-}> {
+): Promise<ToolResult> {
 	const startedAt = Date.now();
 	if (!params.query?.trim()) {
 		return {
@@ -153,85 +83,48 @@ async function executeSearch(
 		};
 	}
 
-	const { available, capabilities } = await detectAvailableChannels();
-	const routeOptions = { capabilities, engines: ENABLED.engines };
-
-	// Explicit engine: honor the intent — no auto-fallback on failure.
-	if (params.engine && params.engine !== "auto") {
-		const routed = route(params, available, routeOptions);
-		if ("error" in routed) {
-			return {
-				content: [{ type: "text", text: routed.error }],
-				details: { error: routed.error, hint: routed.hint, unsatisfied: routed.unsatisfied, available },
-				isError: true,
-			};
-		}
-		// The channel is known once routed — surface it on the live card
-		// immediately (via …), even though the result count lands later.
-		onUpdate?.({
-			content: [{ type: "text", text: `Searching "${params.query}" via ${routed.channel}\u2026` }],
-			details: { query: params.query, channel: routed.channel, engine: routed.engine },
-		});
-		try {
-			const result = await runChannel(routed.channel, params, routed.engine, signal);
-			return finalizeResult(result, { channel: routed.channel, engine: routed.engine }, params.locale, startedAt);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			return {
-				content: [{ type: "text", text: message }],
-				details: {
-					error: message,
-					channel: routed.channel,
-					engine: routed.engine,
-					query: params.query,
-					startedAt,
-					endedAt: Date.now(),
-				},
-				isError: true,
-			};
-		}
-	}
-
-	// engine auto: try candidates in order; on failure fall through to the
-	// next usable channel (SPEC: 静默降级). All failures → terse error.
-	const candidates = orderedCandidates(params, available, routeOptions);
+	// Walk the fuse order; a channel that cannot honor the request's filters
+	// is not a candidate (SPEC: 能力缺失不静默，跳过而非降级).
+	const candidates = await candidatesFor(params);
 	if (candidates.length === 0) {
-		const requested = requestedCapabilities(params);
-		const unsatisfied = Object.entries(requested)
-			.filter(([, v]) => v)
-			.map(([k]) => k);
-		const error = `No available channel supports the requested capabilities: ${unsatisfied.join(", ")}.`;
 		return {
-			content: [{ type: "text", text: error }],
-			details: { error, unsatisfied, available },
+			content: [{ type: "text", text: "No search channel is available." }],
+			details: { error: "No search channel is available.", query: params.query },
 			isError: true,
 		};
 	}
 
-	const failures: { channel: string; error: string }[] = [];
-	for (const candidate of candidates) {
+	const failures: { channel: string; error: string; hint?: string }[] = [];
+	for (const channel of candidates) {
 		// Surface the channel being tried on the live card (updates if a
 		// failure falls through to the next candidate).
 		onUpdate?.({
-			content: [{ type: "text", text: `Searching "${params.query}" via ${candidate.channel}\u2026` }],
-			details: { query: params.query, channel: candidate.channel, engine: candidate.engine },
+			content: [{ type: "text", text: `Searching "${params.query}" via ${channel}\u2026` }],
+			details: { query: params.query, channel },
 		});
 		try {
-			const result = await runChannel(candidate.channel, params, candidate.engine, signal);
-			return finalizeResult(result, candidate, params.locale, startedAt);
+			const result = await runChannel(channel, params, signal);
+			return finalizeResult(
+				result,
+				channel,
+				channel === "bsk" ? pickEngine(params.locale) : undefined,
+				params,
+				startedAt,
+			);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			failures.push({ channel: candidate.channel, error: message });
+			// Config guidance travels in details (UI), never in LLM text
+			// (SPEC 错误分层: LLM 不含安装/配置指引).
+			const maybeHint = (err as { hint?: unknown }).hint;
+			const hint = typeof maybeHint === "string" ? maybeHint : undefined;
+			failures.push({ channel, error: message, ...(hint ? { hint } : {}) });
 		}
 	}
 
-	const last = failures[failures.length - 1];
-	const message = last
-		? `All search channels failed: ${failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`
-		: "Search failed.";
+	const message = `All search channels failed: ${failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`;
 	return {
-		content: [{ type: "text", text: last ? last.error : message }],
-		details: { error: message, failures, available, query: params.query, startedAt, endedAt: Date.now() },
+		content: [{ type: "text", text: failures[failures.length - 1]?.error ?? message }],
+		details: { error: message, failures, query: params.query, startedAt, endedAt: Date.now() },
 		isError: true,
 	};
 }
@@ -239,19 +132,19 @@ async function executeSearch(
 async function runChannel(
 	channel: ChannelId,
 	params: WebSearchParams,
-	engine: "google" | "bing" | "baidu" | "yandex" | undefined,
 	signal: AbortSignal | undefined,
 ): Promise<SearchResultItem[]> {
 	switch (channel) {
+		case "tinyfish":
+			return searchWithTinyfish(params, { signal });
 		case "exa":
 			return searchWithExa(params, { signal });
 		case "tavily":
 			return searchWithTavily(params, { signal });
-		case "parallel":
-			return searchWithParallel(params, { signal });
+		case "firecrawl":
+			return searchWithFirecrawl(params, { signal });
 		case "bsk":
-			if (!engine) throw new Error("internal error: bsk channel requires an engine");
-			return searchWithBsk(params, engine, { signal });
+			return searchWithBsk(params, { signal });
 	}
 }
 
@@ -314,20 +207,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "web_search",
 		label: "Search the Web",
-		description:
-			"Search the web and return a list of results (title, url, snippet). " +
-			"Each result carries the source text. engine: auto picks the best channel; an " +
-			"explicit engine (google/bing/baidu/yandex) searches a real browser with its native " +
-			'operator syntax (site:, filetype:, intitle:, -exclude, "exact", OR). ' +
-			"Support varies by engine: blocked_domains errors on yandex; recency errors on baidu/yandex.",
+		description: "Search the web for current or external information.",
 		promptSnippet: "Search the web",
-		promptGuidelines: [
-			"Use web_search for anything that requires current or external information.",
-			"Re-query with a different query when results are insufficient or you need different coverage.",
-			"Use engine with operator syntax when you need site:, filetype:, intitle: filters; otherwise let auto pick the cheapest channel.",
-			"Pass locale (BCP-47) when you want results localized to a language/region — e.g. zh-CN for Chinese results, ru-RU for Russian. Omit for global results.",
-		],
-		parameters: buildWebSearchSchema(ENABLED.engines),
+		promptGuidelines: ["Write the query in the language whose results you want."],
+		parameters: buildWebSearchSchema(),
 		...searchView,
 		async execute(_toolCallId, raw, signal, onUpdate) {
 			return executeSearch(raw as WebSearchParams, signal, onUpdate);

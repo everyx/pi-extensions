@@ -102,7 +102,7 @@ Run with \`cargo run\` and visit /hello/world.`;
 type StreamCard =
 	| {
 			kind: "search";
-			args: { query: string; engine?: string };
+			args: { query: string; locale?: string };
 			details: unknown;
 			isPartial: boolean;
 			isError?: boolean;
@@ -260,7 +260,7 @@ const pathA: LifecyclePath = {
 	height: 0,
 };
 
-// Path B — web_search failure: pending → error (no channel / bad engine).
+// Path B — web_search failure: pending → error (fuse hit a captcha wall).
 const pathB: LifecyclePath = {
 	title: "B · web_search failure — searching → failed",
 	phases: [
@@ -271,8 +271,8 @@ const pathB: LifecyclePath = {
 			stream: [
 				{
 					kind: "search",
-					args: { query: "nonexistent query", engine: "yandex" },
-					details: { query: "nonexistent query", channel: "bsk", engine: "yandex" },
+					args: { query: "nonexistent query", locale: "zh-CN" },
+					details: { query: "nonexistent query", channel: "bsk", engine: "baidu" },
 					isPartial: true,
 				},
 			],
@@ -284,12 +284,12 @@ const pathB: LifecyclePath = {
 			stream: [
 				{
 					kind: "search",
-					args: { query: "nonexistent query", engine: "yandex" },
+					args: { query: "nonexistent query", locale: "zh-CN" },
 					details: {
-						error: "yandex returned no usable results (captcha wall).",
+						error: "baidu returned no usable results (captcha wall).",
 						data: {
 							channel: "bsk",
-							engine: "yandex",
+							engine: "baidu",
 							count: 0,
 							startedAt: 1_752_000_000_000,
 							endedAt: 1_752_000_004_200,

@@ -6,8 +6,16 @@
 
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
-import { viaLabel } from "./search/locale.js";
 import type { FetchToolData, SearchToolData } from "./types.js";
+
+/** Meta label for the channel a search went through. The bsk fuse is labeled
+ *  by the engine domain it navigated (via baidu.com); api channels by name
+ *  (via exa). */
+function viaLabel(data: SearchToolData): string | undefined {
+	if (!data.channel) return undefined;
+	if (data.channel === "bsk" && data.engine) return `via ${data.engine}.com`;
+	return `via ${data.channel}`;
+}
 
 export const searchView = createToolView<Record<string, unknown>, SearchToolData>({
 	name: "web_search",
@@ -16,7 +24,7 @@ export const searchView = createToolView<Record<string, unknown>, SearchToolData
 	meta: (ctx) => {
 		const d = ctx.result?.data ?? {};
 		return [
-			viaLabel(d.channel, d.engine, d.locale),
+			viaLabel(d),
 			// A failed search reports no result count — it's 0 by definition.
 			ctx.status !== "error" && d.count != null ? `${d.count} results` : undefined,
 			durationMeta(ctx.status, d.startedAt, d.endedAt),

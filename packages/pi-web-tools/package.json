@@ -1,7 +1,7 @@
 {
 	"name": "@everyx/pi-web-tools",
 	"version": "1.0.2",
-	"description": "Web primitives for pi – search and URL fetch (URL → Markdown). Minimal web capability for Pi.",
+	"description": "Web primitives for pi — search and URL fetch (URL → Markdown). Multi-provider search with keyless-first quota escalation and a real-browser fallback fuse.",
 	"keywords": [
 		"pi-package"
 	],
@@ -40,12 +40,10 @@
 		"@everyx/pi-ui": "workspace:*",
 		"@google/genai": "^2.16.0",
 		"@mozilla/readability": "^0.6.0",
-		"@tavily/core": "^0.7.7",
 		"exa-js": "^2.16.3",
 		"fromnow": "^3.0.1",
 		"linkedom": "^0.18.13",
 		"openai": "^7.4.0",
-		"parallel-web": "^1.1.0",
 		"turndown": "^7.2.4"
 	},
 	"devDependencies": {
