@@ -12,17 +12,24 @@ import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import type { SubagentDetails } from "./types.js";
 
+/** Add "@" exactly once — ids may already carry it ("@parent", "@max").
+ * Display layers must go through this so the literal @-form never doubles
+ * into "@@parent". */
+export function atId(id: string): string {
+	return id.startsWith("@") ? id : `@${id}`;
+}
+
 /**
- * Card title for agent_stop / agent_send: the target's human title when the
- * result carried one, else the target id from the result, else from args.
+ * Card title for agent_stop / agent_send: `@id — title` — the target's human
+ * title when the result carried one, else the at-prefixed target id, else
+ * from args. The @-prefix is applied exactly once (via atId).
  */
-/** Card title for agent_spawn / agent_stop / agent_send: `@id — title`. */
 export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, idKey: string): string {
 	const data = (ctx.result?.data as ({ title?: string } & Record<string, unknown>) | undefined) ?? {};
 	const args = ctx.args as Record<string, unknown> | undefined;
 	const id = data[idKey] ?? args?.[idKey];
 	const title = data.title;
-	const idPart = id ? `@${id}` : "";
+	const idPart = id ? atId(String(id)) : "";
 	const joined = title && idPart ? `${idPart} — ${title}` : (title ?? idPart);
 	return joined;
 }

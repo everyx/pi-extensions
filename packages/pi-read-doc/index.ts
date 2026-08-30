@@ -45,8 +45,14 @@ function quotaPath(): string {
 function monthKey(d = new Date()): string {
 	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
+/**
+ * Local calendar date (YYYY-MM-DD). The quota month boundary is user-facing
+ * (1k pages/month resets on the local month), so the local calendar — not
+ * UTC — governs; monthKey() must stay on the same calendar (loadQuota
+ * slices updatedAt with monthKey()).
+ */
 function dateKey(d = new Date()): string {
-	return d.toISOString().slice(0, 10);
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 async function loadQuota(): Promise<number> {
 	try {

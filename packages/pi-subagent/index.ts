@@ -38,7 +38,7 @@ import { renderNotification } from "./render.js";
 import { runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
 import { createSubtreeDisplay } from "./tree-display.js";
 import type { SubagentDetails } from "./types.js";
-import { sendView, spawnView, stopView } from "./views.js";
+import { atId, sendView, spawnView, stopView } from "./views.js";
 import { AgentWidget } from "./widget.js";
 
 // ─── Running background agents registry ─────────────────────
@@ -804,9 +804,11 @@ export default function (pi: ExtensionAPI) {
 			const agent = registry.lookup(agentId);
 
 			if (!agent) {
+				// Card title needs the id: details.agentId drives titleFrom (the
+				// args key is snake_case agent_id, which titleFrom does not read).
 				return {
 					content: [{ type: "text", text: `agent ${params.agent_id} not found or already finished.` }],
-					details: { error: `agent ${params.agent_id} not found or already finished` },
+					details: { agentId, error: `agent ${params.agent_id} not found or already finished` },
 					isError: true,
 				};
 			}
@@ -892,7 +894,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			onUpdate?.({
-				content: [{ type: "text", text: `Sending to ${target}\u2026` }],
+				content: [{ type: "text", text: `Sending to ${atId(target)}\u2026` }],
 				details: { to: target },
 			});
 			const r = await handleMessage(pi, registry, { to: target, from: MY_AGENT_ID, message }, true);
@@ -904,7 +906,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			return {
-				content: [{ type: "text", text: `${r.verb} to @${target}.` }],
+				content: [{ type: "text", text: `${r.verb} to ${atId(target)}.` }],
 				// Card title shows @id — target title (uniform with agent_stop).
 				details: {
 					to: target,

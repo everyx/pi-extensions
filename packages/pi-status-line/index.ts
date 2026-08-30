@@ -52,13 +52,19 @@ export default function (pi: ExtensionAPI) {
 				render(width: number): string[] {
 					// --- pwd line (official logic) ---
 					let pwd: string = ctx.sessionManager.getCwd();
-					try {
-						const r = resolve(pwd);
-						const h = resolve(process.env.HOME || process.env.USERPROFILE || "");
-						const rel = relative(h, r);
-						const inside = rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-						if (inside) pwd = rel === "" ? "~" : `~${sep}${rel}`;
-					} catch {}
+					// Official footer guards a missing HOME (container/service shells):
+					// resolve("") falls back to cwd, which would collapse every path
+					// to "~". Skip shortening when there is no home directory.
+					const home = process.env.HOME || process.env.USERPROFILE;
+					if (home) {
+						try {
+							const r = resolve(pwd);
+							const h = resolve(home);
+							const rel = relative(h, r);
+							const inside = rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+							if (inside) pwd = rel === "" ? "~" : `~${sep}${rel}`;
+						} catch {}
+					}
 					const branch = footerData.getGitBranch();
 					if (branch) pwd = `${pwd} (${branch})`;
 					const sessionName = (ctx.sessionManager as unknown as { getSessionName(): string | null }).getSessionName?.();
@@ -152,13 +158,11 @@ export default function (pi: ExtensionAPI) {
 					}
 					const statsLeftW = visibleWidth(statsLeft);
 					const modelId = (ctx as unknown as { model?: { id: string } }).model?.id ?? "no-model";
-					const isReasoning = (ctx as unknown as { model?: { reasoning: boolean } }).model?.reasoning ?? false;
-					const thinkingLevel = isReasoning ? "high" : "off";
-					let rightSide = (ctx as unknown as { model?: { reasoning: boolean } }).model?.reasoning
-						? thinkingLevel === "off"
-							? `${modelId} • thinking off`
-							: `${modelId} • ${thinkingLevel}`
-						: modelId;
+					// Real session thinking level — pi exposes it on ExtensionContext;
+					// the official footer shows `thinkingLevel || "off"`. Fabricating
+					// "high" from model.reasoning would misreport low/medium sessions.
+					const thinkingLevel = ctx.thinkingLevel ?? "off";
+					let rightSide = thinkingLevel === "off" ? modelId : `${modelId} • ${thinkingLevel}`;
 					const provider = (ctx as unknown as { model?: { provider: string } }).model?.provider;
 					if (provider && footerData.getAvailableProviderCount() > 1) {
 						const withProv = `(${provider}) ${rightSide}`;
