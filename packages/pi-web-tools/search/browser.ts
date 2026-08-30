@@ -273,6 +273,7 @@ export async function searchWithBsk(params: WebSearchParams, ctx: ChannelSearchC
 	// Direct navigation to the engine search URL: query + locale + recency
 	// as URL params (precise, no DOM dependence). Recency passes through raw —
 	// each engine's translation lives in recency.ts (single source).
+	// (fetch fuse — bsk render for web_fetch — lives below)
 	const results = await engineQueues[engine].run(async (sessionId) => {
 		const nav = await runBsk(["navigate", "--session", sessionId, buildSearchUrl(params, engine)], timeoutMs);
 		if (!nav.ok) throw new Error(`real-browser channel: navigate ${engine} failed: ${nav.stderr}`);
@@ -290,4 +291,41 @@ export async function searchWithBsk(params: WebSearchParams, ctx: ChannelSearchC
 	});
 
 	return results;
+}
+
+// ── fetch fuse (web_fetch 链尾: bsk 真实浏览器渲染) ───────────────
+
+/** Real-browser text extraction for fetched pages — the fetch analogue of
+ *  EXTRACT_SCRIPT (title + body text, capped): JS runs in the real page,
+ *  stdout carries the JSON. */
+export const FETCH_CONTENT_SCRIPT = `(() => {
+	const title = document.title || "";
+	const body = document.body ? document.body.innerText : "";
+	return JSON.stringify({ title: title, body: body.slice(0, 200000) });
+})()`;
+
+// One serial queue for fetches (distinct from the per-engine search queues —
+// fetch has no engine; the queue just serializes bsk sessions).
+const fetchQueue = createSerialQueue(openSession, closeSession);
+
+/** Render a URL in the real browser and return its body text; null when bsk
+ *  is unavailable or navigation/extraction failed (caller advances or falls
+ *  back). */
+export async function fetchUrlWithBsk(url: string, timeoutMs = 30_000): Promise<string | null> {
+	if (!(await isBskAvailable())) return null;
+	try {
+		return await fetchQueue.run(async (sessionId) => {
+			const nav = await runBsk(["navigate", "--session", sessionId, url], timeoutMs);
+			if (!nav.ok) return null;
+			const raw = await evaluate(sessionId, FETCH_CONTENT_SCRIPT, timeoutMs);
+			try {
+				const parsed = JSON.parse(raw) as { title?: string; body?: string };
+				return (parsed.body ?? raw.trim()).trim() || null;
+			} catch {
+				return raw.trim() || null;
+			}
+		});
+	} catch {
+		return null;
+	}
 }

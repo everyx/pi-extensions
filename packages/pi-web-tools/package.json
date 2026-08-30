@@ -11,9 +11,8 @@
 	},
 	"type": "module",
 	"scripts": {
-		"test": "tsx --test test/*.test.ts",
-		"preview": "tsx preview.ts",
-		"update:ua": "node scripts/update-fallback-ua.mjs"
+		"test": "PI_WEB_TOOLS_NO_IMPERS=1 tsx --test test/*.test.ts",
+		"preview": "tsx preview.ts"
 	},
 	"repository": {
 		"type": "git",
@@ -37,6 +36,7 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.115.0",
+		"impers": "0.1.1",
 		"@everyx/pi-ui": "workspace:*",
 		"@google/genai": "^2.16.0",
 		"@mozilla/readability": "^0.6.0",
@@ -47,7 +47,6 @@
 		"turndown": "^7.2.4"
 	},
 	"devDependencies": {
-		"@types/turndown": "^5.0.6",
-		"caniuse-lite": "^1.0.30001809"
+		"@types/turndown": "^5.0.6"
 	}
 }

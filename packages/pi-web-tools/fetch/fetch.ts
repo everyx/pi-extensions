@@ -1,21 +1,24 @@
 /**
  * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
  *
- *   - UA: system default browser version → standard UA string (see ua.ts),
- *     cached per process.
- *   - Browser-like request headers (Accept: text/markdown content negotiation),
- *     timeout, SPA empty-body detection, error normalization (HTTP status →
- *     error field, not a throw).
+ *   - Direct fetch tiers: impers — full browser impersonation (TLS JA3/JA4 +
+ *     HTTP/2 SETTINGS + header values/order, captured from real Chrome) —
+ *     with a degraded plain-fetch fallback (fixed UA + md negotiation, zero
+ *     native deps); fuse renderers (tinyfish fetch → bsk) cover anti-bot and
+ *     CSR pages.
+ *   - Accept: text/markdown content negotiation, timeout, SPA empty-body
+ *     detection, error normalization (HTTP status → error field, not a throw).
  */
 
 import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi-coding-agent";
 import { stashOverflow } from "@everyx/pi-ui/context.js";
 import { fetchWithTimeout } from "../http.js";
+import { fetchUrlWithBsk } from "../search/browser.js";
 import type { WebFetchResult } from "../types.js";
-import { renderPage } from "./headless.js";
+import { impersFetchRaw } from "./api/impers-fetch.js";
+import { fetchWithTinyfish } from "./api/tinyfish-fetch.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
 import { adaptUrl } from "./sites/index.js";
-import { resolveUserAgent } from "./ua.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -26,6 +29,13 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const ACCEPT = "text/markdown, text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8";
 /** For raw fetches: request the HTML source, not a negotiated markdown body. */
 const ACCEPT_HTML = "text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8";
+
+/** Degraded-tier UA: a generic modern Chrome, pinned by us (the old
+ *  system-browser detection and ua.ts died with the header mimicry — impers
+ *  now owns UA + sec-ch-ua + TLS as one captured bundle; what remains only
+ *  needs an honest browser-shaped constant). */
+const FALLBACK_UA =
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
 /** Host-memory physics, not policy: the download buffer cap. The body is read
  *  as a stream with a running count (Content-Length is untrusted — chunked
@@ -75,6 +85,37 @@ function isImageContent(contentType: string): boolean {
 	return contentType.startsWith("image/") && !contentType.includes("svg+xml");
 }
 
+/** Shared tail for both transport tiers: bytes → image/text result, honest
+ *  on every edge (never fabricates content from a failed fetch). */
+async function finishPage(
+	status: number,
+	contentType: string,
+	bytes: Uint8Array | null | undefined,
+	tooLarge: boolean,
+	error?: string,
+): Promise<FetchPageResult> {
+	if (error) return { ok: false, status, contentType, error };
+	if (tooLarge) return { ok: true, status, contentType, tooLarge: true };
+	if (!bytes || bytes.length === 0) return { ok: false, status: 0, contentType, error: "Empty response" };
+	if (isImageContent(contentType)) {
+		// The TUI renders image blocks at cell size (no byte limit) and the
+		// model consumes them multimodally — so route images there. resizeImage
+		// shrinks/quality-steps anything past the ~4.5MB base64 budget; null
+		// means undecodable — fall through to honest noise like any binary.
+		const mime = contentType.split(";")[0].trim();
+		const resized = await resizeImage(bytes, mime).catch(() => null);
+		if (resized) {
+			return {
+				ok: true,
+				status,
+				contentType,
+				image: { data: resized.data, mimeType: resized.mimeType, note: formatDimensionNote(resized) },
+			};
+		}
+	}
+	return { ok: true, status, contentType, text: new TextDecoder().decode(bytes) };
+}
+
 /** Two consumption models, mapped from pi's own tools (bash / read):
  *  - Web-page markdown = "read an article" — capped preview + pointer (the
  *    LLM judges relevance from the preview, reads on via the path).
@@ -82,6 +123,30 @@ function isImageContent(contentType: string): boolean {
  *    file, a lossy preview is only duplicate cost. On overflow the full text
  *    is stashed and the result points at it; the read tool's offset/limit
  *    paging takes over from there. Binaries never enter context as noise. */
+/** Fuse renderers for the web_fetch chain (SPEC: GET → tinyfish fetch → bsk).
+ *  Both render in a real browser and return clean text — results flow through
+ *  the same stash/preview path as locally extracted markdown. Returns null
+ *  when every renderer is unavailable or failed (caller shows its own error). */
+async function fuseRender(url: string, signal?: AbortSignal): Promise<WebFetchResult | null> {
+	const candidates: Array<() => Promise<string | null>> = [
+		() => fetchWithTinyfish(url, signal),
+		() => fetchUrlWithBsk(url),
+	];
+	for (const render of candidates) {
+		const text = await render();
+		if (text) {
+			const { text: content, stashPath } = stashOverflow(text, url);
+			return {
+				title: firstLineAsTitle(text),
+				content: previewWithPointer(content, stashPath),
+				contentType: "text/markdown",
+				outputPath: stashPath,
+			};
+		}
+	}
+	return null;
+}
+
 function previewWithPointer(content: string, stashPath?: string): string {
 	return stashPath ? `${content}\n\n(output truncated — full output: ${stashPath})` : content;
 }
@@ -96,26 +161,55 @@ function isHtmlContent(contentType: string): boolean {
 	return contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 }
 
-/** Direct HTTP fetch with browser-like headers + timeout. */
-async function fetchPage(url: string, ua: string, signal?: AbortSignal, preferHtml = false): Promise<FetchPageResult> {
-	let response: Response;
+/** Direct HTTP GET over two transport tiers (SPEC: impers → degraded).
+ *  Tier 1: impers — full browser impersonation (TLS + HTTP/2 + headers as
+ *  one captured Chrome bundle) when the native lib is loadable. Tier 2
+ *  (degraded): honest plain fetch, fixed UA + md negotiation — keeps simple
+ *  pages working with zero native deps (offline / PI_WEB_TOOLS_NO_IMPERS=1).
+ *  No content-type gating — every gate is a policy decision that limits the
+ *  caller. Text passes through readable; true binaries lossy-decode into
+ *  recognizable noise (the contentType field says what it is); budget stays
+ *  bounded by the stash cap downstream. */
+async function fetchPage(url: string, signal?: AbortSignal, preferHtml = false): Promise<FetchPageResult> {
+	const accept = preferHtml ? ACCEPT_HTML : ACCEPT;
+
+	// Tier 1 — full impersonation (null = unavailable → fall through).
+	const imp = await impersFetchRaw(url, {
+		signal,
+		timeoutMs: DEFAULT_TIMEOUT_MS,
+		accept,
+		maxBytes: MAX_DOWNLOAD_BYTES,
+	});
+	if (imp) {
+		if (!imp.ok) {
+			return {
+				ok: false,
+				status: imp.status,
+				contentType: imp.contentType || "",
+				error: imp.error || `Failed to fetch ${url}`,
+			};
+		}
+		return finishPage(imp.status, imp.contentType || "", imp.bytes, Boolean(imp.tooLarge));
+	}
+
+	// Tier 2 — degraded plain fetch.
 	try {
-		response = await fetchWithTimeout(
+		const response = await fetchWithTimeout(
 			url,
-			{
-				headers: {
-					"User-Agent": ua,
-					Accept: preferHtml ? ACCEPT_HTML : ACCEPT,
-					"Accept-Language": "en-US,en;q=0.9",
-					"Cache-Control": "no-cache",
-					"Sec-Fetch-Dest": "document",
-					"Sec-Fetch-Mode": "navigate",
-					"Sec-Fetch-Site": "none",
-					"Upgrade-Insecure-Requests": "1",
-				},
-			},
+			{ headers: { "User-Agent": FALLBACK_UA, Accept: accept, "Accept-Language": "en-US,en;q=0.9" } },
 			{ signal, timeoutMs: DEFAULT_TIMEOUT_MS },
 		);
+		const contentType = response.headers.get("content-type") ?? "";
+		if (!response.ok) {
+			return {
+				ok: false,
+				status: response.status,
+				contentType,
+				error: `HTTP ${response.status}: ${response.statusText}`,
+			};
+		}
+		const bytes = await readBodyCapped(response);
+		return finishPage(response.status, contentType, bytes, bytes === null);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		// undici wraps connection-level failures as "fetch failed" with the
@@ -124,43 +218,6 @@ async function fetchPage(url: string, ua: string, signal?: AbortSignal, preferHt
 		const code = (err as { cause?: { code?: string } }).cause?.code;
 		return { ok: false, status: 0, error: code ? `${message} (${code})` : message };
 	}
-
-	const contentType = response.headers.get("content-type") ?? "";
-	if (!response.ok) {
-		return {
-			ok: false,
-			status: response.status,
-			contentType,
-			error: `HTTP ${response.status}: ${response.statusText}`,
-		};
-	}
-	// No content-type gating — every gate is a policy decision that limits the
-	// caller. Text passes through readable; true binaries lossy-decode into
-	// recognizable noise (the contentType field says what it is); what the
-	// caller does with either is its call. Budget stays bounded by the stash
-	// cap downstream.
-	const bytes = await readBodyCapped(response);
-	if (!bytes) {
-		return { ok: true, status: response.status, contentType, tooLarge: true };
-	}
-	if (isImageContent(contentType)) {
-		// The TUI renders image blocks at cell size (no byte limit) and the
-		// model consumes them multimodally — so route images there. resizeImage
-		// shrinks/quality-steps anything past the ~4.5MB base64 budget; null
-		// means undecodable — fall through to honest noise like any binary.
-		const mime = contentType.split(";")[0].trim();
-		const resized = await resizeImage(new Uint8Array(bytes), mime).catch(() => null);
-		if (resized) {
-			return {
-				ok: true,
-				status: response.status,
-				contentType,
-				image: { data: resized.data, mimeType: resized.mimeType, note: formatDimensionNote(resized) },
-			};
-		}
-	}
-	const text = new TextDecoder().decode(bytes);
-	return { ok: true, status: response.status, contentType, text };
 }
 
 export interface WebFetchOptions {
@@ -176,18 +233,23 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 		return { title: "", content: "", error: `Unsupported URL: ${url} (only http/https)` };
 	}
 
-	const ua = await resolveUserAgent();
 	// Site adapters rewrite content URLs (e.g. GitHub blob → raw); fall back
 	// to the original URL when the rewrite target is unavailable.
 	const targetUrl = adaptUrl(url) ?? url;
 	// raw asks for the source, so prefer an HTML (not negotiated-markdown) body.
-	let page = await fetchPage(targetUrl, ua, signal, raw);
+	let page = await fetchPage(targetUrl, signal, raw);
 	if (targetUrl !== url && (!page.ok || !page.text)) {
-		page = await fetchPage(url, ua, signal, raw);
+		page = await fetchPage(url, signal, raw);
 	}
 
-	// Direct HTTP failure → normalized error.
+	// Direct HTTP failure → normalized error. 404/410 mean the page genuinely
+	// does not exist — a renderer cannot resurrect it. Everything else
+	// (anti-bot walls, transient 5xx, network failure) advances the fuse.
 	if (!page.ok) {
+		if (page.status !== 404 && page.status !== 410) {
+			const rendered = await fuseRender(url, signal);
+			if (rendered) return rendered;
+		}
 		return {
 			title: "",
 			content: "",
@@ -248,21 +310,13 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	}
 
 	// Extraction failed or was incomplete + JS framework markers → CSR page.
-	// Render it locally so the LLM gets real content instead of a placeholder.
+	// Render it in a real browser so the LLM gets real content instead of a
+	// placeholder — remotely first (tinyfish fetch), then the user's own
+	// browser session (bsk). Local headless rendering was removed: same
+	// capability, one implementation (SPEC).
 	if (isLikelyJSRendered(page.text ?? "")) {
-		const rendered = await renderPage(url);
-		if (rendered) {
-			const renderedExtract = htmlToMarkdown(rendered);
-			if (renderedExtract.markdown && !renderedExtract.error) {
-				const { text: content, stashPath } = stashOverflow(renderedExtract.markdown, url);
-				return {
-					title: renderedExtract.title,
-					content: previewWithPointer(content, stashPath),
-					contentType: page.contentType || undefined,
-					outputPath: stashPath,
-				};
-			}
-		}
+		const rendered = await fuseRender(url, signal);
+		if (rendered) return rendered;
 	}
 
 	// Non-CSR partial extraction: return what we have (status quo).

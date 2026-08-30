@@ -137,15 +137,18 @@ candidatesFor(params): Promise<ChannelId[]>   // 链序 ∩ 可用（key/CLI）�
 
 ## web_fetch 行为规格
 
-### UA 策略
+### 传输层（2026-08 改：手写头部模拟 → impers 全指纹）
 
 ```
-UA 来源优先级：
-1. 系统默认浏览器（xdg 检测）→ --version 读真实版本 → 标准 UA 模板构造（
-   firefox: rv 匹配版本；chrome/chromium/edge: Chrome/major.0.0.0）——缓存复用
-2. 默认浏览器不可用 → 探测已安装的 chrome/chromium/firefox/edge 二进制构造
-3. 兜底 → 固定 FALLBACK_UA 常量（发版前 `pnpm update:ua` 用 caniuse-lite
-   数据 pin 市占率最高浏览器的常用版本）
+Tier 1（主力）impers：完整浏览器模拟（TLS JA3/JA4 + HTTP/2 SETTINGS/伪头序 +
+   头部值与序，来自真实 Chrome 捕获）。UA/sec-ch-ua*/Accept-Encoding 等全部
+   由模拟档案统一给出——曾自维护的 UA 探测（xdg）+ sec-ch-ua 派生已删除：
+   版本/平台不一致本身就是 bot 信号，而"三处自维护"注定漂移（curl_cffi
+   文档明言手写头部难对值难对序）。
+   仅保留两个刻意覆盖：Accept（md 协商，功能）/ Cache-Control: no-cache（新鲜度）。
+Tier 2（退化）诚实 plain fetch：固定 FALLBACK_UA + md 协商，零原生依赖——
+   离线 / PI_WEB_TOOLS_NO_IMPERS=1 / lib 下载失败时,普通静态页仍可用
+   （对齐 mcp-server-fetch 的诚实代理哲学，不做任何伪装）。
 ```
 
 ### 请求行为
@@ -183,14 +186,22 @@ UA 来源优先级：
   渲染（要源码就不是要渲染结果）；站点 URL 重写（如 GitHub blob→raw）仍
   保留——那是 URL 语义改写，非格式变换。raw 路径不解析 title（一律空——
   raw = 纯原文，不做任何解析；默认路径才会提取 frontmatter title）。
-- **CSR 页**（壳空 + JS 渲染）：本地 headless 渲染后返回真实内容给 LLM，
-  渲染不可用才回落占位——定位是 LLM friendly 抓取工具，不给占位。
+- **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/429/5xx）：**远程真实渲染保险丝**
+  tinyfish fetch → bsk 真浏览器（LLM 拿真实内容不给占位）。本地 headless 已移除——
+  同能力一份实现，也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝
+  （页面确实不存在，渲染器无法复活）。
+- **请求头由 impers 全权负责**（Tier 1）：值、序、TLS 三层都来自真实捕获，
+  不再手写（手写版的缺陷：值对序不对/版本平台漂移/TLS 不可达——已删除）。
+  修头动机史（openai/codex#18456：Cloudflare 按 UA 403 `reqwest/*` 是真实
+  HTTP 层判据）已由 impers 覆盖并超出。退化层（Tier 2）是诚实默认头。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；
   超时与外部取消区分。
 - **GitHub blob 直取文件**：`github.com/…/blob/<ref>/<path>` 重写为 raw 内容
   （LLM 要文件而非界面）；raw 不可用回退原 URL。
-- **无第三方 fallback**（不引入 r.jina.ai 类中转服务）；复杂抓取
-  （认证/交互页）归 LLM 自行用 bash curl 等。
+- **主路径零中转**：静态友好页始终直取（无 r.jina.ai 类常驻中转）；仅当直取
+  失败（反爬/CSR）才走 tinyfish fetch——它本身就是转发渲染（诚实地位，非隐蔽）；
+  认证/交互页归 bsk（用户真实会话）或 LLM 自行 bash curl。（2026-08 加入
+  tinyfish fetch 前的既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订。）
 
 ## 配置
 
@@ -202,6 +213,8 @@ API key 环境变量（有则升级、无则降级，全部可选）：
 | `EXA_API_KEY` | Exa 全参数 keyed 模式（无 key = MCP keyless 裸 query） |
 | `TAVILY_API_KEY` | 启用 Tavily |
 | `FIRECRAWL_API_KEY` | Firecrawl keyed 升档（与 pi-read-doc OCR 共享池，搜索尽量不碰） |
+| `PI_WEB_TOOLS_NO_IMPERS=1` | 强制退化层（hermetic 测试 / 离线）；首次使用 impers 会下载
+  libcurl-impersonate v2.0.0（版本 pin，失败自动降 Tier 2） |
 
 无 `PI_WEB_TOOLS_ENGINES`、无系统语言探测——可用性就是环境事实，变更即时生效（每请求检测）。
 

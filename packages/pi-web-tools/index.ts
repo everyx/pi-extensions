@@ -220,8 +220,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "web_fetch",
 		label: "Fetch a URL",
-		description:
-			"Fetch a URL and return its content, converted to readable Markdown when applicable. " + "Plain http(s) GET.",
+		description: "Fetch a URL and return its content, converted to readable Markdown when applicable.",
 		promptSnippet: "Fetch a URL (readable or raw source)",
 		promptGuidelines: ["Prefer web_fetch over bash curl for plain HTML pages — it returns clean Markdown."],
 		parameters: WebFetchParamsSchema,
