@@ -187,7 +187,7 @@ interface SendParams {
 // Shared agent_spawn parameter fields — the root session gets the full set;
 // sub-agents get a foreground-only subset (see buildSpawnParamsSchema).
 const SpawnPromptField = Type.String({
-	description: "The task for the sub-agent (self-contained: it starts with zero context).",
+	description: "The task for the sub-agent.",
 });
 const SpawnTitleField = Type.Optional(
 	Type.String({
@@ -419,19 +419,15 @@ export default function (pi: ExtensionAPI) {
 		name: "agent_spawn",
 		label: "Agent Spawn",
 		description: HAS_PARENT
-			? "Spawn an isolated sub-agent in your own context window. The sub-agent starts with " +
-				"zero context, so the prompt must be self-contained: include file paths, constraints, " +
-				"and the expected output shape. The call blocks until it finishes and returns the output. " +
-				"Background spawns are root-only — your lifetime ends when this call returns; persistent " +
-				"helpers are fine and live as long as you do."
-			: "Spawn an isolated sub-agent in its own context window. The sub-agent starts with " +
-				"zero context, so the prompt must be self-contained: include file paths, constraints, " +
-				"and the expected output shape. Foreground (run_in_background: false) blocks until it " +
-				"finishes and returns the output directly. Background (run_in_background: true) returns " +
-				"an agent id immediately; the completion notification carries the result (status + " +
-				"agent id + final output) — you can intervene with agent_stop / agent_send while it " +
-				"runs. persistent: true keeps it resident (idle) after completion — message it later " +
-				"to continue the same context.",
+			? "Spawn an isolated sub-agent in your own context window. The call blocks until it " +
+				"finishes and returns the output. Background spawns are root-only — your lifetime " +
+				"ends when this call returns; persistent helpers are fine and live as long as you do."
+			: "Spawn an isolated sub-agent in its own context window. Foreground (run_in_background: " +
+				"false) blocks until it finishes and returns the output directly. Background " +
+				"(run_in_background: true) returns an agent id immediately; the completion notification " +
+				"carries the result (status + agent id + final output) — you can intervene with " +
+				"agent_stop / agent_send while it runs. persistent: true keeps it resident (idle) " +
+				"after completion — message it later to continue the same context.",
 		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
 		promptGuidelines: HAS_PARENT
 			? [
@@ -439,7 +435,6 @@ export default function (pi: ExtensionAPI) {
 					"For independent parallel work, issue several foreground agent_spawn calls together — they run concurrently.",
 					"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
 					"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
-					"Keep a persistent helper for iterative work within this task: spawn once with persistent: true, then agent_send it follow-ups — it lives as long as your session does.",
 				]
 			: [
 					"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
@@ -447,7 +442,6 @@ export default function (pi: ExtensionAPI) {
 					"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
 					"Never poll a background agent — its completion notification carries the result.",
 					"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
-					"Keep a persistent agent for follow-ups: spawn once with persistent: true, then agent_send it new instructions — the context stays alive (idle until woken).",
 				],
 		parameters: SpawnParamsSchema,
 
@@ -862,16 +856,11 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "agent_send",
 		label: "Send Message",
-		description:
-			"Send a message to another agent. `to` is the agent id agent_spawn gave you (a spawn " +
-			'result or completion notification carries it), or "@parent" to message the session ' +
-			"that spawned you. Messages wake idle persistent agents and queue on running ones — " +
-			"the message lands in the target's context.",
+		description: "Send a message to another agent — a sub-agent or your parent.",
 		promptSnippet: "Send a message to a sub-agent or your parent",
 		promptGuidelines: [
 			"Send follow-up instructions to a persistent agent with agent_send — its context is intact and it wakes to handle the message.",
 			"A sub-agent blocked on missing information should agent_send @parent a concise question; the parent replies the same way.",
-			"Message ids are the ones you got from agent_spawn (the notification carries agent_id).",
 		],
 		parameters: SendParamsSchema,
 

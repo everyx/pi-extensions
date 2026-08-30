@@ -223,10 +223,7 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Fetch a URL and return its content, converted to readable Markdown when applicable. " + "Plain http(s) GET.",
 		promptSnippet: "Fetch a URL (readable or raw source)",
-		promptGuidelines: [
-			"Use web_fetch to read the content of a specific URL.",
-			"Prefer web_fetch over bash curl for plain HTML pages — it returns clean Markdown.",
-		],
+		promptGuidelines: ["Prefer web_fetch over bash curl for plain HTML pages — it returns clean Markdown."],
 		parameters: WebFetchParamsSchema,
 		...fetchView,
 		async execute(_toolCallId, raw, signal) {

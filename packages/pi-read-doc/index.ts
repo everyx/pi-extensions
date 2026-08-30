@@ -87,7 +87,7 @@ export function extOf(path: string): string {
 }
 
 const ReadDocSchema = Type.Object({
-	path: Type.String({ description: "Path to the document (office/pdf) to read" }),
+	path: Type.String(),
 });
 
 type ReadDocData = { content: string; convertedVia: "anydoc" | "anydoc:hosted" | "rapid" | "raw"; ext: string };
@@ -162,7 +162,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Read a document",
 		description: "Read office documents as markdown (Word/Excel/PowerPoint/PDF/ODT/RTF/EPUB/CSV).",
 		promptSnippet: "Read office documents as markdown",
-		promptGuidelines: ["For office documents, use read_doc to get markdown."],
+		promptGuidelines: ["For office documents, use read_doc instead of read."],
 		parameters: ReadDocSchema,
 		...readDocView,
 		async execute(_id, raw, _signal) {
@@ -227,11 +227,13 @@ export default function (pi: ExtensionAPI) {
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				const code = (e as { code?: string })?.code;
+				// LLM text stays terse; the config path (hosted OCR key, local
+				// rapidocr) is a UI-side hint — the LLM cannot act on it.
 				const hint =
-					code === "needsOcr" ? " (scanned pages, try hosted with FIRECRAWL_API_KEY or rapidocr locally)" : "";
+					code === "needsOcr" ? "Scanned pages: run hosted OCR (FIRECRAWL_API_KEY) or local rapidocr; see docs." : "";
 				return {
-					content: [{ type: "text" as const, text: msg + hint }],
-					details: { error: msg, code },
+					content: [{ type: "text" as const, text: msg }],
+					details: { error: msg, code, ...(hint ? { hint } : {}) },
 					isError: true as const,
 				};
 			}
