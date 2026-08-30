@@ -14,3 +14,20 @@ pi install npm:@everyx/pi-read-doc
 # then in settings.json: "defaultTools": ["read","read_doc",...]
 ```
 
+## Configuration
+
+Everything is optional — the extension works with zero setup (text PDFs and
+all office formats convert locally).
+
+| Env var | Effect |
+|---|---|
+| `FIRECRAWL_API_KEY` | Lifts the keyless tier of **hosted OCR** — scanned pages (`needsOcr`) go to Firecrawl Parse instead of falling back to local `rapidocr` (pdf only). Keyless works out of the box with per-IP rate limits; setting the key raises them. The keyed pool is shared with pi-web-tools search. |
+
+```bash
+export FIRECRAWL_API_KEY="fc-..."   # or add it to your launcher's env file
+```
+
+Scanned-page OCR is self-capped at 1,000 pages/month locally
+(`~/.pi/read-doc.json`, calendar-month reset) — a self-defense budget, not an
+upstream quota; any price overage stops at that line.
+

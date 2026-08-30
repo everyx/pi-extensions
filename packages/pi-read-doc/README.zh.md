@@ -12,3 +12,17 @@
 ```bash
 pi install npm:@everyx/pi-read-doc
 ```
+
+## 配置
+
+全部可选——零配置即可用（文本 PDF 与全部 Office 格式本地转换）。
+
+| 环境变量 | 作用 |
+|---|---|
+| `FIRECRAWL_API_KEY` | 提升 **hosted OCR** 的免费层额度——扫图页（`needsOcr`）走 Firecrawl Parse，而非回落本地 `rapidocr`（仅 pdf）。keyless 开箱可用（per-IP 限速），设 key 升额；keyed 池与 pi-web-tools 搜索共享。 |
+
+```bash
+export FIRECRAWL_API_KEY="fc-..."   # 或加进你的启动器 env 文件
+```
+
+扫图 OCR 本地自限 1000 页/月（`~/.pi/read-doc.json`，日历月重置）——成本自卫预算，非上游额度；超支也在该线停下。
