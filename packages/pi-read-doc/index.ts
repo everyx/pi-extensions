@@ -10,8 +10,9 @@
 
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { Type } from "typebox";
 
@@ -21,8 +22,13 @@ import { createRateLimiter } from "./rate-limit.js";
 const hostedLimiter = createRateLimiter(2); // 2 qps for Parse
 const QUOTA_LIMIT = 1000;
 
+// User-scoped extension state lives at the pi config root (~/.pi/), not
+// inside pi's managed agent dir (settings/trust/auth…): quota is a
+// user-level consumption counter, and we deliberately do NOT follow
+// PI_CODING_AGENT_DIR (an agent dir may point at sandbox/tmp — a counter
+// should not wander). CONFIG_DIR_NAME honors a custom configDir.
 function quotaPath(): string {
-	return join(getAgentDir(), "pi-read-doc.json");
+	return join(homedir(), CONFIG_DIR_NAME, "read-doc.json");
 }
 function monthKey(d = new Date()): string {
 	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -49,7 +55,7 @@ async function loadQuota(): Promise<number> {
 async function saveQuota(n: number): Promise<void> {
 	try {
 		const p = quotaPath();
-		await mkdir(getAgentDir(), { recursive: true });
+		await mkdir(dirname(quotaPath()), { recursive: true });
 		const quota = { updatedAt: dateKey(), used: n };
 		await writeFile(p, JSON.stringify({ quota }, null, 2), "utf-8");
 	} catch {}

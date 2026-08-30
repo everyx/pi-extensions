@@ -13,6 +13,16 @@ function withKey(fn: () => Promise<void>): Promise<void> {
 	return fn().finally(() => delete process.env.TINYFISH_API_KEY);
 }
 
+/** The keyless path must be tested with the variable *absent* — a developer
+ *  shell may have it set, and env leaks break the assertion. */
+function withoutKey(fn: () => Promise<void>): Promise<void> {
+	const prev = process.env.TINYFISH_API_KEY;
+	delete process.env.TINYFISH_API_KEY;
+	return fn().finally(() => {
+		if (prev) process.env.TINYFISH_API_KEY = prev;
+	});
+}
+
 function stubFetch(
 	body: unknown,
 	capture: { url?: string; headers?: Record<string, string>; body?: string } = {},
@@ -26,19 +36,20 @@ function stubFetch(
 }
 
 describe("tinyfish fetch adapter", () => {
-	it("POSTs the URL with markdown format, keyless by default", async () => {
-		const capture: { url?: string; headers?: Record<string, string>; body?: string } = {};
-		stubFetch({ results: [{ url: "https://a.dev", title: "T", text: "# Hello" }] }, capture);
+	it("POSTs the URL with markdown format, keyless by default", () =>
+		withoutKey(async () => {
+			const capture: { url?: string; headers?: Record<string, string>; body?: string } = {};
+			stubFetch({ results: [{ url: "https://a.dev", title: "T", text: "# Hello" }] }, capture);
 
-		const text = await fetchWithTinyfish("https://a.dev");
-		assert.ok(capture.url, "fetch was called");
-		assert.equal(capture.url, "https://api.fetch.tinyfish.ai");
-		assert.match(capture.headers?.["Content-Type"] ?? "", /application\/json/);
-		assert.equal(capture.headers?.["X-API-Key"], undefined, "keyless first");
-		const body = JSON.parse(capture.body ?? "{}");
-		assert.deepEqual(body, { urls: ["https://a.dev"], format: "markdown" });
-		assert.equal(text, "# Hello");
-	});
+			const text = await fetchWithTinyfish("https://a.dev");
+			assert.ok(capture.url, "fetch was called");
+			assert.equal(capture.url, "https://api.fetch.tinyfish.ai");
+			assert.match(capture.headers?.["Content-Type"] ?? "", /application\/json/);
+			assert.equal(capture.headers?.["X-API-Key"], undefined, "keyless first");
+			const body = JSON.parse(capture.body ?? "{}");
+			assert.deepEqual(body, { urls: ["https://a.dev"], format: "markdown" });
+			assert.equal(text, "# Hello");
+		}));
 
 	it("sends X-API-Key when set (shared with the search channel)", async () => {
 		await withKey(async () => {

@@ -18,5 +18,5 @@ Enhanced `read` for office documents: `read_doc <path>` returns clean Markdown.
 
 - `QUOTA_LIMIT = 1000` 页/月，按 **OCR 页数**计费（每文档 `pages || 1`），gate 是 `used < limit`。
 - 月界用**本地日历**（用户可感知的月度体验）；上游 Firecrawl 按订阅周年日重置、不可对齐，本地月只是固定近似。
-- 持久化 `~/.pi/agent/pi-read-doc.json`（`getAgentDir()`，含 PI_CODING_AGENT_DIR 覆盖）：`{ quota: { updatedAt: "YYYY-MM-DD", used } }`。
+- 持久化 `~/.pi/read-doc.json`（`homedir() + CONFIG_DIR_NAME`，默认 `.pi`；**不跟随** PI_CODING_AGENT_DIR——quota 是用户级消费计数，agent dir 可指向沙箱/临时目录，计数不应随行）：`{ quota: { updatedAt: "YYYY-MM-DD", used } }`。
 - 限流内部模块 `rate-limit.ts`（sleep-before 语义，与 pi-web-tools 的 sleep-after 有意区分，不合并）。
