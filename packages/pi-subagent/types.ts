@@ -24,8 +24,8 @@ export type RenderEvent =
 
 /**
  * Tool-output details for the Agent tool (carried in pi's `details` field).
- * renderAgentCall / renderAgentResult read from here; index.ts populates
- * it in the execute callback.
+ * Populated by index.ts in the tool execute callbacks; consumed by the card
+ * views (views.ts) and the notification card (render.ts).
  */
 export type SubagentDetails = {
 	task?: string;
@@ -54,7 +54,7 @@ export type SubagentDetails = {
 
 /**
  * Notification-delivery details (rendering side). Populated by
- * notifyCompletion() in index.ts, consumed by renderNotification().
+ * notifyCompletion() in notification.ts, consumed by renderNotification().
  * The LLM sees only the JSON `content` block; `details` never enter
  * context (verified against pi's convertToLlm).
  */

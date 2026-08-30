@@ -22,11 +22,11 @@ import type { AgentMessage, RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
 import type { RenderEvent } from "./types.js";
 
-export type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
+type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
 
-export type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
+type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
 
-export interface AgentStats {
+interface AgentStats {
 	tokens: number;
 	toolUses: number;
 	durationMs: number;
@@ -50,13 +50,13 @@ export interface AgentProcessOptions {
 	tools?: string[];
 	/** Short task title (notification card). */
 	title: string;
-	/** Sequential short id ("a1", "a2", …) assigned by the registry. */
+	/** Short human-readable id ("max", "zoe") assigned by the registry (name-gen.ts). */
 	agentId: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
 	sessionDir?: string;
 	/** Total wall-clock timeout for the whole task (incl. multi-turn).
-	 *  Omitted = no limit (the default): the child runs until it finishes,
-	 *  is stopped, or hits an explicit token limit. */
+	 *  Omitted = no limit (the default): the child runs until it finishes
+	 *  or is stopped — there is no token limit (SPEC: token 无任何限制). */
 	timeoutMs?: number;
 	/** After an abort, how long to wait for the child to settle before hard-stopping it. */
 	abortSettleGraceMs?: number;
@@ -76,13 +76,13 @@ export interface AgentProcessOptions {
 	env?: NodeJS.ProcessEnv;
 }
 
-export interface AgentProcessDeps {
+interface AgentProcessDeps {
 	/** Test seam: override client creation (defaults to a real RpcClient). */
 	createClient?: (options: RpcClientOptions) => RpcClient;
 }
 
-export const DEFAULT_ABORT_SETTLE_GRACE_MS = 30_000;
-export const STOP_GRACE_MS = 5_000;
+const DEFAULT_ABORT_SETTLE_GRACE_MS = 30_000;
+const STOP_GRACE_MS = 5_000;
 
 // The only task-level limit is the opt-in timeoutMs: the Agent tool passes
 // it when the caller wants a bound — the default is no limit (a Pi extension
@@ -250,7 +250,7 @@ export class AgentProcess {
 	 */
 	async waitForCompletion(): Promise<AgentCompletion> {
 		// No deadline when timeoutMs is omitted — the child runs until it
-		// settles, is stopped, or hits an explicit token limit. `deadline` stays
+		// settles or is stopped (no token limit exists). `deadline` stays
 		// undefined so `remaining` is undefined and awaitSettled waits forever
 		// (its own `timeoutMs !== undefined` guard skips the timer).
 		const deadline = this.timeoutMs === undefined ? undefined : Date.now() + this.timeoutMs;

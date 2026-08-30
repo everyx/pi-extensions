@@ -68,7 +68,7 @@ async function saveQuota(n: number): Promise<void> {
 	try {
 		const p = quotaPath();
 		await mkdir(getAgentDir(), { recursive: true });
-		const quota = { updatedAt: dateKey(), used: n, limit: QUOTA_LIMIT };
+		const quota = { updatedAt: dateKey(), used: n };
 		await writeFile(p, JSON.stringify({ quota }, null, 2), "utf-8");
 	} catch {}
 }
@@ -113,7 +113,6 @@ const readDocView = createToolView<Record<string, unknown>, ReadDocData>({
 	title: (ctx: { args: Record<string, unknown> }) => String(ctx.args.path ?? ""),
 	tail: (ctx: { status: string }) =>
 		ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working…" : undefined,
-	meta: undefined,
 	body: {
 		text: (ctx: { expanded?: boolean; result?: { data?: ReadDocData } }) =>
 			ctx.expanded ? (ctx.result?.data?.content ?? "") : "",

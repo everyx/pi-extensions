@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	API_CHANNELS,
-	channelCapabilities,
 	DEFAULT_CHANNEL_ORDER,
 	defaultEnginesFor,
 	ENGINE_IDS,
@@ -23,40 +22,17 @@ import {
 } from "../search/channels.js";
 import type { WebSearchParams } from "../types.js";
 
-describe("channelCapabilities", () => {
-	it("exa/parallel have no operators/locale", () => {
-		assert.deepEqual(channelCapabilities("exa"), { domains: true, recency: true, locale: false, operators: false });
-		assert.deepEqual(channelCapabilities("parallel"), {
-			domains: true,
-			recency: true,
-			locale: false,
-			operators: false,
-		});
-	});
-	it("tavily supports operators but no locale (country is not domain-level localization)", () => {
-		assert.deepEqual(channelCapabilities("tavily"), { domains: true, recency: true, locale: false, operators: true });
-	});
-	it("bsk is the full-capability channel", () => {
-		assert.deepEqual(channelCapabilities("bsk"), { domains: true, recency: true, locale: true, operators: true });
-	});
-});
-
 describe("requestedCapabilities", () => {
 	it("plain query requests nothing", () => {
 		assert.deepEqual(requestedCapabilities({ query: "hello" }), {
 			domains: false,
 			recency: false,
 			locale: false,
-			operators: false,
 		});
 	});
 	it("domains param requests domains", () => {
 		assert.deepEqual(requestedCapabilities({ query: "q", allowed_domains: ["github.com"] }).domains, true);
 		assert.deepEqual(requestedCapabilities({ query: "q", blocked_domains: ["reddit.com"] }).domains, true);
-	});
-	it("engine != auto requests operators (the gate)", () => {
-		assert.deepEqual(requestedCapabilities({ query: "q", engine: "google" }).operators, true);
-		assert.deepEqual(requestedCapabilities({ query: "q", engine: "auto" }).operators, false);
 	});
 });
 
@@ -125,7 +101,8 @@ describe("route", () => {
 		const result = route({ query: "q", engine: "google" }, ["exa", "tavily"]);
 		assert.ok("error" in result);
 		assert.match(result.error, /real-browser channel/);
-		assert.deepEqual(result.unsatisfied, ["operators"]);
+		// These are routing errors, not capability failures — no unsatisfied list.
+		assert.equal(result.unsatisfied, undefined);
 	});
 
 	it("engine gate errors when the engine is not in the enabled set — terse error, guidance in hint", () => {
@@ -187,8 +164,8 @@ describe("route", () => {
 });
 
 describe("satisfies", () => {
-	it("bsk satisfies everything; exa lacks locale/operators", () => {
-		const full = { domains: true, recency: true, locale: true, operators: true };
+	it("bsk satisfies everything; exa lacks locale", () => {
+		const full = { domains: true, recency: true, locale: true };
 		assert.equal(satisfies("bsk", full), true);
 		assert.equal(satisfies("exa", full), false);
 	});
@@ -211,7 +188,7 @@ describe("route + params shapes", () => {
 	});
 
 	it("runtime capability overrides apply (keyless Exa MCP has no domains)", () => {
-		const mcpExa = { domains: false, recency: false, locale: false, operators: false };
+		const mcpExa = { domains: false, recency: false, locale: false };
 		const staticResult = route({ query: "q", blocked_domains: ["x.com"] }, ["exa", "bsk"]);
 		assert.ok("channel" in staticResult);
 		assert.equal(staticResult.channel, "exa");

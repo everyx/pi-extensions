@@ -1,7 +1,7 @@
 /**
  * pi-subagent — spawn isolated sub‑agent pi instances + in-tree messaging.
  *
- * Architecture (issue #10/#13):
+ * Architecture:
  *   index.ts          — tool registration (agent_spawn / agent_stop / agent_send) + routing glue
  *   protocol.ts       — pure JSONL protocol layer + in-tree routing (tested)
  *   rpc-client.ts     — stateful thin JSONL client (spawn + transport)
@@ -9,8 +9,15 @@
  *   agent-process.ts  — AgentProcess: one resident `pi --mode rpc` child, semantic API
  *   registry.ts       — AgentRegistry: lifecycle + completion policy + routing (tested)
  *   model.ts          — model-spec → ResolvedModel (testable)
+ *   name-gen.ts       — short human-readable agent ids (tested)
+ *   spawn-session.ts  — isolated session-dir bootstrap for child agents
  *   nested-fold.ts    — foreground-card nested-subtree meta counters (tested)
- *   render.ts         — TUI rendering + notification card renderer
+ *   tree-display.ts   — live agent-tree widget integration (subtree fold)
+ *   notification.ts   — completion-notification payloads (notifyCompletion)
+ *   types.ts          — shared tool-output / notification shapes
+ *   views.ts          — tool card views (single source for the three cards)
+ *   card.ts           — notification card wrappers (via pi-ui)
+ *   render.ts         — notification card renderer (message surface)
  *   widget.ts         — Agents status widget
  *
  * Every sub‑agent is a resident `pi --mode rpc` child with a persisted
@@ -728,7 +735,7 @@ export default function (pi: ExtensionAPI) {
 								? outcome.output || "Sub-agent failed."
 								: outcome.stoppedByControl
 									? outcome.output || "Sub-agent stopped."
-									: `${outcome.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time/token limit; the output above is partial)`;
+									: `${outcome.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time limit; the output above is partial)`;
 						return {
 							content: [{ type: "text", text: truncateForContext(message) }],
 							details: {

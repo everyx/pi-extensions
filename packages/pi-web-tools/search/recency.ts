@@ -7,19 +7,12 @@
 
 export type RecencyFilter = "day" | "week" | "month" | "year";
 
-export const RECENCY_FILTERS: readonly RecencyFilter[] = ["day", "week", "month", "year"];
-
 const DAYS: Record<RecencyFilter, number> = {
 	day: 1,
 	week: 7,
 	month: 30,
 	year: 365,
 };
-
-/** Days covered by a recency filter (for APIs that take a day count). */
-export function recencyToDays(filter: RecencyFilter): number {
-	return DAYS[filter];
-}
 
 /** ISO date (YYYY-MM-DD) N days ago — for APIs that take startPublishedDate / after_date. */
 export function recencyToStartDate(filter: RecencyFilter, now: Date = new Date()): string {
@@ -52,18 +45,4 @@ export function recencyToGoogle(filter: RecencyFilter): string {
 export function recencyToBingFilters(filter: RecencyFilter): string {
 	const code = { day: "ez1", week: "ez2", month: "ez3", year: "ez4" }[filter] ?? "ez4";
 	return `ex1:"${code}"`;
-}
-
-/** Human phrase used to enrich query text for engines without a native recency param. */
-export function recencyToPhrase(filter: RecencyFilter): string {
-	switch (filter) {
-		case "day":
-			return "past 24 hours";
-		case "week":
-			return "past week";
-		case "month":
-			return "past month";
-		case "year":
-			return "past year";
-	}
 }

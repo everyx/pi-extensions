@@ -37,7 +37,7 @@ function applyTreeEvent(widget: AgentWidget, event: AgentTreeEvent): void {
 	}
 }
 
-export interface SubtreeDisplay {
+interface SubtreeDisplay {
 	/** Anchor + deliver one telemetry event to its single surface. */
 	onTreeEvent(event: AgentTreeEvent): void;
 	/** Freeze the card (execute returned): from here folding would vanish —

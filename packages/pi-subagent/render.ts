@@ -12,8 +12,6 @@ import { formatDuration } from "@everyx/pi-ui/spinner.js";
 import { type CardBody, renderNoDetailsCard, renderNotificationCard } from "./card.js";
 import type { NotificationDetails } from "./types.js";
 
-export type { RenderEvent, SubagentDetails } from "./types.js";
-
 function formatTokens(n: number): string {
 	return n.toLocaleString("en-US");
 }
@@ -48,11 +46,10 @@ export function renderNotification(
 	// Persistent agent completed: resident (idle) — muted marker in the meta.
 	if (d.idle) metaParts.push("idle");
 
-	const body: CardBody = {};
-	const result = d.result?.trim();
-	if (result) {
-		body.events = [{ kind: "text", text: result }];
-	}
+	// Result text rides pi-ui's message channel (folded block, toolOutput color).
+	// The old events channel died with pi-subagent's own renderCard — pi-ui's
+	// renderCardUi only renders extra/error/message.
+	const body: CardBody = d.result?.trim() ? { message: d.result.trim() } : {};
 
 	return renderNotificationCard(
 		{

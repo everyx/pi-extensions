@@ -39,9 +39,3 @@ export async function fetchWithTimeout(url: string, init: RequestInit, options: 
 		options.signal?.removeEventListener("abort", onAbort);
 	}
 }
-
-/** Normalize an unknown thrown value into a message. */
-export function errorMessage(err: unknown): string {
-	if (err instanceof Error) return err.message;
-	return String(err);
-}

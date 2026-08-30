@@ -237,9 +237,6 @@ function extractDelta(event: unknown): string | null {
 	if (!event || typeof event !== "object") return null;
 	const e = event as Record<string, unknown>;
 	const ame = e.assistantMessageEvent as { type?: string; delta?: string } | undefined;
-	if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
-		if (ame.type === "text_delta" || ame.type === "thinking_delta") return ame.delta;
-		return ame.delta;
-	}
+	if (ame && typeof ame.delta === "string" && ame.delta.length > 0) return ame.delta;
 	return null;
 }

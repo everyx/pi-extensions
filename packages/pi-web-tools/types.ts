@@ -15,11 +15,6 @@ export interface SearchResultItem {
 	author?: string;
 }
 
-/** Result of web_search: a flat list of source items. */
-export interface WebSearchResult {
-	results: SearchResultItem[];
-}
-
 /** Channels. "bsk" is the real-browser channel (BrowserSkill CLI). */
 export type ChannelId = "exa" | "tavily" | "parallel" | "bsk";
 
@@ -34,8 +29,6 @@ export interface ChannelCapabilities {
 	recency: boolean;
 	/** BCP-47 locale param support */
 	locale: boolean;
-	/** native search-operator syntax in query (site:/filetype:/…) */
-	operators: boolean;
 }
 
 /** Capabilities a web_search call actually requests. */
@@ -43,8 +36,6 @@ export interface RequestedCapabilities {
 	domains: boolean;
 	recency: boolean;
 	locale: boolean;
-	/** true when the user passed a non-auto engine (operators gated behind it) */
-	operators: boolean;
 }
 
 export interface WebSearchParams {

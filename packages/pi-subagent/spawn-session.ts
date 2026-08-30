@@ -60,7 +60,7 @@ export type SpawnOutcome =
 	  };
 
 /** Intent-level callbacks. All optional; mechanisms live in the caller. */
-export interface SpawnSessionHooks {
+interface SpawnSessionHooks {
 	/** Foreground, before the spawn settles — the initial "Working…" card. */
 	onWorking?(): void;
 	/** Background, before the spawn settles — the starting spinner line. */

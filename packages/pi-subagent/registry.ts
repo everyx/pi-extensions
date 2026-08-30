@@ -49,7 +49,7 @@ export interface WidgetSurface {
 	dispose(): void;
 }
 
-export interface AgentRegistryDeps {
+interface AgentRegistryDeps {
 	/** Deliver a completion notification (index.ts wraps pi.sendMessage). */
 	notify: (agent: RegisteredAgent, completion: AgentCompletion) => Promise<void> | void;
 	/** Lazy widget access — null in non-TUI modes. */

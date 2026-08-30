@@ -30,7 +30,6 @@ export interface RpcClientOptions {
 	/** Test seam: executable to spawn (default "pi"). When set, `args` are used verbatim (no --mode rpc). */
 	command?: string;
 	onEvent?: (event: RpcEvent) => void;
-	onStderr?: (text: string) => void;
 	/** Called once when the child exits (any reason). */
 	onExit?: () => void;
 }
@@ -91,7 +90,6 @@ export class RpcClient {
 		proc.stderr.on("data", (chunk: Buffer) => {
 			const text = chunk.toString();
 			if (this.stderr.length < MAX_STDERR) this.stderr += text.slice(0, MAX_STDERR - this.stderr.length);
-			options.onStderr?.(text);
 		});
 		// Stream errors (e.g. write-after-end during shutdown races) must never
 		// crash the host as unhandled 'error' events — fail pending commands.

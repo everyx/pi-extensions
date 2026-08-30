@@ -75,5 +75,4 @@ export const WebFetchParamsSchema = Type.Object({
 	),
 });
 
-export type WebSearchParams = import("./types.js").WebSearchParams;
 export type WebFetchParams = { url: string; raw?: boolean };

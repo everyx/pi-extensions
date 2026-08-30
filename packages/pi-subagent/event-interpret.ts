@@ -195,7 +195,7 @@ export function interpretEvent(raw: RpcEvent): AgentEvent[] {
 }
 
 /** Validate an untrusted tree-event payload, op by op. Undefined = malformed. */
-export function parseTreeEvent(value: unknown): AgentTreeEvent | undefined {
+function parseTreeEvent(value: unknown): AgentTreeEvent | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	const v = value as Record<string, unknown>;
 	if (typeof v.id !== "string" || !v.id) return undefined;

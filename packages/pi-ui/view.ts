@@ -34,10 +34,10 @@ interface RenderContext {
 	isError: boolean;
 }
 
-export type CardStatus = "processing" | "success" | "error" | "stop";
+type CardStatus = "processing" | "success" | "error" | "stop";
 
 /** Everything a template function may need. `result` is absent while running. */
-export interface ViewContext<Args, Data> {
+interface ViewContext<Args, Data> {
 	args: Args;
 	result?: { data: Data; error?: string };
 	status: CardStatus;
@@ -45,14 +45,14 @@ export interface ViewContext<Args, Data> {
 }
 
 /** Structured data a tool returns for rendering (rides execute's details). */
-export interface ViewResultData {
+interface ViewResultData {
 	data?: unknown;
 	error?: string;
 	status?: "success" | "error" | "stop";
 }
 
 /** Body template: text, a list of result rows, or a styled activity stream. */
-export type ViewBody<Args, Data> =
+type ViewBody<Args, Data> =
 	| { text: (ctx: ViewContext<Args, Data>) => string }
 	| { list: { of: (ctx: ViewContext<Args, Data>) => unknown[]; fields: string[] } }
 	| {
@@ -68,7 +68,7 @@ export type ViewBody<Args, Data> =
 			};
 	  };
 
-export interface ToolView<Args, Data> {
+interface ToolView<Args, Data> {
 	/** Header name slot (bold) — `web_search`, `Agent`. */
 	name: string;
 	/** Header title slot (quoted) — query, url, task name. */

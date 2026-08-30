@@ -11,15 +11,15 @@
 import type { ChannelCapabilities, ChannelId, EngineId, RequestedCapabilities, WebSearchParams } from "../types.js";
 import { enginePriorityForLocale, primaryLanguage } from "./locale.js";
 
-/** SPEC 通道能力矩阵 (code-ified). "operators" = native query-operator syntax.
+/** SPEC 通道能力矩阵 (code-ified).
  * tavily's locale is a bare `country` param — not the domain-level
  * localization the spec promises, so it stays out of the locale path
  * (auto + locale routes to bsk, the only real localization). */
 export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapabilities> = {
-	exa: { domains: true, recency: true, locale: false, operators: false },
-	tavily: { domains: true, recency: true, locale: false, operators: true }, // site:/布尔/引号
-	parallel: { domains: true, recency: true, locale: false, operators: false },
-	bsk: { domains: true, recency: true, locale: true, operators: true }, // 真实引擎全操作符
+	exa: { domains: true, recency: true, locale: false },
+	tavily: { domains: true, recency: true, locale: false },
+	parallel: { domains: true, recency: true, locale: false },
+	bsk: { domains: true, recency: true, locale: true },
 };
 
 /**
@@ -82,10 +82,6 @@ export function resolveApiChannels(config: { api: ChannelId[] } | undefined): Ch
 	return [...API_CHANNELS];
 }
 
-export function channelCapabilities(channel: ChannelId): ChannelCapabilities {
-	return CHANNEL_CAPABILITIES[channel];
-}
-
 /**
  * Effective capabilities for a channel at runtime.
  *
@@ -106,8 +102,6 @@ export function requestedCapabilities(params: WebSearchParams): RequestedCapabil
 		domains: !!params.allowed_domains?.length || !!params.blocked_domains?.length,
 		recency: !!params.recency,
 		locale: !!params.locale,
-		// engine != auto is the operator gate (SPEC: 操作符设计 — engine 门控).
-		operators: !!params.engine && params.engine !== "auto",
 	};
 }
 
@@ -119,8 +113,8 @@ export interface RouteResult {
 
 export interface RouteFailure {
 	error: string;
-	/** Capabilities no available channel satisfied (for the error message). */
-	unsatisfied: string[];
+	/** Capabilities no available channel satisfied — only capability failures carry this. */
+	unsatisfied?: string[];
 	/** Config guidance — details-only, never into LLM context (SPEC: 错误分层). */
 	hint?: string;
 }
@@ -160,14 +154,12 @@ export function route(
 		if (!available.includes("bsk")) {
 			return {
 				error: `engine "${params.engine}" requires the real-browser channel (bsk), which is not available.`,
-				unsatisfied: ["operators"],
 			};
 		}
 		if (engines && !engines.includes(params.engine)) {
 			return {
 				error: `engine "${params.engine}" is not enabled.`,
 				hint: `set PI_WEB_TOOLS_ENGINES to include "${params.engine}"`,
-				unsatisfied: ["operators"],
 			};
 		}
 		return { channel: "bsk", engine: params.engine };
@@ -212,10 +204,7 @@ function capabilitiesCover(
 ): boolean {
 	const caps = effectiveCapabilities(channel, overrides);
 	return (
-		(!requested.domains || caps.domains) &&
-		(!requested.recency || caps.recency) &&
-		(!requested.locale || caps.locale) &&
-		(!requested.operators || caps.operators)
+		(!requested.domains || caps.domains) && (!requested.recency || caps.recency) && (!requested.locale || caps.locale)
 	);
 }
 

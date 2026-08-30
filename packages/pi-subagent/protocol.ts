@@ -26,19 +26,19 @@ export interface RpcCommandPrompt {
 	streamingBehavior?: "steer" | "followUp";
 }
 
-export interface RpcCommandAbort {
+interface RpcCommandAbort {
 	type: "abort";
 }
 
-export interface RpcCommandGetLastAssistantText {
+interface RpcCommandGetLastAssistantText {
 	type: "get_last_assistant_text";
 }
 
-export interface RpcCommandGetState {
+interface RpcCommandGetState {
 	type: "get_state";
 }
 
-export interface RpcCommandGetSessionStats {
+interface RpcCommandGetSessionStats {
 	type: "get_session_stats";
 }
 
@@ -51,7 +51,7 @@ export type RpcCommand =
 
 // ─── Responses and events we read from stdout ──────────────
 
-export interface RpcResponseSuccess<T = unknown> {
+interface RpcResponseSuccess<T = unknown> {
 	id?: string;
 	type: "response";
 	command: string;
@@ -59,7 +59,7 @@ export interface RpcResponseSuccess<T = unknown> {
 	data?: T;
 }
 
-export interface RpcResponseError {
+interface RpcResponseError {
 	id?: string;
 	type: "response";
 	command: string;
@@ -72,7 +72,7 @@ export type RpcResponse = RpcResponseSuccess | RpcResponseError;
 /** Session events (agent_settled, agent_end, message_update, …) plus extension_* messages. */
 export type RpcEvent = { type: string } & Record<string, unknown>;
 
-export type ParsedLine = { kind: "response"; response: RpcResponse } | { kind: "event"; event: RpcEvent };
+type ParsedLine = { kind: "response"; response: RpcResponse } | { kind: "event"; event: RpcEvent };
 
 // ─── In-tree messaging (agent_send) ────────────────────────
 

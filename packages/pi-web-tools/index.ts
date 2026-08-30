@@ -85,7 +85,7 @@ async function detectAvailableChannels(
 		// Keyless Exa goes through MCP, which exposes only query + numResults
 		// (researched) — no domains/recency/locale. With a key (REST) it's full.
 		if (!exaApiKey()) {
-			capabilities.exa = { domains: false, recency: false, locale: false, operators: false };
+			capabilities.exa = { domains: false, recency: false, locale: false };
 		}
 	}
 	if (enabled.api.includes("tavily") && isTavilyAvailable()) channels.push("tavily");

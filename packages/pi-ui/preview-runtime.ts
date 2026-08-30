@@ -28,7 +28,7 @@ function findPkgDir(name: string): string | null {
 	}
 }
 
-export type ShellBg = "toolSuccessBg" | "toolErrorBg" | "toolPendingBg";
+type ShellBg = "toolSuccessBg" | "toolErrorBg" | "toolPendingBg";
 
 export interface PreviewRuntime {
 	theme: Theme;

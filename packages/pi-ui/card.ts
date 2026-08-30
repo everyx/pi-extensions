@@ -25,11 +25,8 @@ export interface CardIcon {
 export const successIcon: CardIcon = { glyph: "\u2713", color: "success" };
 export const errorIcon: CardIcon = { glyph: "\u2717", color: "error" };
 export const stoppedIcon: CardIcon = { glyph: "\u25a0", color: "warning" };
-export function spinnerIcon(spinner: Spinner): CardIcon {
-	return { glyph: spinner.current(), color: "accent" };
-}
 
-export interface CardHeader {
+interface CardHeader {
 	icon: CardIcon;
 	/** Raw title. When `name` is set, rendered as `name "title"` (bashMode quotes). */
 	title?: string;
@@ -42,14 +39,14 @@ export interface CardHeader {
 }
 
 /** Render the status icon for a card. */
-export function renderIcon(icon: CardIcon, theme: Theme): string {
+function renderIcon(icon: CardIcon, theme: Theme): string {
 	return theme.fg(icon.color, icon.glyph);
 }
 
 /** Bold name + quoted sanitized title (`Agent "task"`, `web_search "q"`).
  *  Title is not width-capped — the Text renderer wraps long headers
  *  (bash-style full display); safeTitle still flattens newlines/quotes. */
-export function renderNameTitle(name: string, title: string | undefined, theme: Theme): string {
+function renderNameTitle(name: string, title: string | undefined, theme: Theme): string {
 	const bold = theme.fg("toolTitle", theme.bold(name));
 	return title ? `${bold} ${theme.fg("bashMode", `"${safeTitle(title)}"`)}` : bold;
 }
@@ -69,9 +66,9 @@ export function renderHeader(header: CardHeader, theme: Theme): string {
 // ── Content folding (shared card-body fold behavior) ─────────────
 
 /** Number of visual lines shown before the fold hint (bash tail). */
-export const PREVIEW_LINES = 5;
+const PREVIEW_LINES = 5;
 /** Head preview lines for write-like tools (read 10). */
-export const PREVIEW_HEAD_LINES = 10;
+const PREVIEW_HEAD_LINES = 10;
 
 // Cache for the folded preview — body (50k web_fetch) + width → truncated lines.
 // Key is length + head/tail fingerprint (not reference), so a new details object
@@ -111,7 +108,7 @@ export function foldedBlock(styledRows: string[], theme: Theme, expanded = false
 	return foldedBlockWith(styledRows, theme, expanded, "tail", PREVIEW_LINES);
 }
 
-export function foldedBlockHead(styledRows: string[], theme: Theme, expanded = false): BodyComponent {
+function foldedBlockHead(styledRows: string[], theme: Theme, expanded = false): BodyComponent {
 	return foldedBlockWith(styledRows, theme, expanded, "head", PREVIEW_HEAD_LINES);
 }
 
@@ -169,7 +166,7 @@ function foldedBlockWith(
 }
 
 /** foldedBlock over a single colored string (split per line so colors survive folding). */
-export function foldedContent(styled: string, color: (line: string) => string, theme: Theme): BodyComponent {
+function foldedContent(styled: string, color: (line: string) => string, theme: Theme): BodyComponent {
 	return foldedBlock(styled.split("\n").map(color), theme);
 }
 
@@ -178,12 +175,7 @@ export function foldedContent(styled: string, color: (line: string) => string, t
  * fold (tail preview + expand hint); expanded renders every line in full.
  * Content is never dropped in either mode.
  */
-export function contentBlock(
-	styled: string,
-	color: (line: string) => string,
-	expanded: boolean,
-	theme: Theme,
-): BodyComponent {
+function contentBlock(styled: string, color: (line: string) => string, expanded: boolean, theme: Theme): BodyComponent {
 	if (expanded) {
 		const lines = styled.split("\n");
 		const cmp = new Container();
@@ -258,7 +250,7 @@ export function cardShell(
 	return cmp;
 }
 
-export type RowStyle = "thinking" | "tool" | "text" | "muted";
+type RowStyle = "thinking" | "tool" | "text" | "muted";
 
 /** One styled content row (activity lines, widget rows). */
 export interface StyledRow {
@@ -283,9 +275,9 @@ export function styleRow(row: StyledRow, theme: Theme): string {
 // ── Data-driven card (consumers pass data, component handles everything) ─
 
 /** Data-only card config: pass text, the card assembles header + folded body. */
-export type CardStatus = "processing" | "success" | "error" | "stop";
+type CardStatus = "processing" | "success" | "error" | "stop";
 
-export interface DataCardConfig {
+interface DataCardConfig {
 	/** Semantic state — drives the icon (spinner/✓/✗/■) and tail color. */
 	status: CardStatus;
 	/** Bold tool/task name (`web_search`, `Agent`). */

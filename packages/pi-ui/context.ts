@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { truncateHead, truncateTail } from "@earendil-works/pi-coding-agent";
 
-export interface ContextStash {
+interface ContextStash {
 	/** Capped preview text (LLM-visible). */
 	text: string;
 	/** Full-text path when truncated; undefined when the text fit. */
