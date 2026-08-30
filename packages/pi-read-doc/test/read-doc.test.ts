@@ -1,45 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { extOf, OFFICE_EXTS } from "../index.js";
+import { createRateLimiter } from "../rate-limit.js";
 
 describe("pi-read-doc", () => {
 	it("ext detection", () => {
-		const extOf = (p: string) => {
-			const i = p.lastIndexOf(".");
-			return i >= 0 ? p.slice(i).toLowerCase() : "";
-		};
 		assert.equal(extOf("a.docx"), ".docx");
 		assert.equal(extOf("A.PDF"), ".pdf");
 		assert.equal(extOf("noext"), "");
 	});
 
-	it("office ext set", () => {
-		const set = new Set([".docx", ".pdf", ".xlsx"]);
-		assert.ok(set.has(".docx"));
-		assert.ok(!set.has(".ts"));
+	it("office ext set covers the anydoc table (21 formats)", () => {
+		for (const ext of [".doc", ".docx", ".docm", ".pdf", ".xlsx", ".xlsm", ".pptx", ".odt", ".rtf", ".epub", ".csv"]) {
+			assert.ok(OFFICE_EXTS.has(ext), `${ext} in OFFICE_EXTS`);
+		}
+		assert.ok(!OFFICE_EXTS.has(".ts"));
 	});
 
-	it("rate limiter serializes", async () => {
-		let last = 0;
-		let chain: Promise<void> = Promise.resolve();
-		const limiter =
-			(qps: number) =>
-			async <T>(fn: () => Promise<T>): Promise<T> => {
-				const gap = 1000 / qps;
-				const task = chain.then(async () => {
-					const now = Date.now();
-					const wait = Math.max(0, last + gap - now);
-					if (wait) await new Promise((r) => setTimeout(r, wait));
-					last = Date.now();
-					return fn();
-				});
-				chain = task.then(
-					() => {},
-					() => {},
-				);
-				return task;
-			};
-		const lim = limiter(10);
-		const a = await lim(async () => 1);
-		assert.equal(a, 1);
+	it("rate limiter serializes and enforces the gap (qps<=0 passes through)", async () => {
+		const lim = createRateLimiter(10); // 100ms gap
+		let active = 0;
+		let maxActive = 0;
+		const run = lim(async () => {
+			active++;
+			maxActive = Math.max(maxActive, active);
+			await new Promise((r) => setTimeout(r, 20));
+			active--;
+			return active;
+		});
+		const results = await Promise.all([run, run, run]);
+		assert.deepEqual(results, [0, 0, 0]); // serialized: never concurrent
+		assert.equal(maxActive, 1);
+
+		// qps <= 0 disables throttling entirely (the real guard).
+		const disabled = createRateLimiter(0);
+		const t0 = Date.now();
+		await disabled(async () => Promise.resolve());
+		const dt = Date.now() - t0;
+		assert.ok(dt < 500, `no artificial delay (took ${dt}ms)`);
 	});
 });

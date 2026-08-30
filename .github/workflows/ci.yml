@@ -14,7 +14,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
 
       - uses: pnpm/action-setup@v6
 
@@ -26,3 +26,6 @@ jobs:
 
       - name: Type check
         run: pnpm typecheck
+
+      - name: Test (every package)
+        run: pnpm test

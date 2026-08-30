@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
+import { styleRow as cardStyleRow, type StyledRow } from "./card.js";
 import { formatDuration, SPINNER_TICK_MS, Spinner } from "./spinner.js";
 import { type TickerHandle, ticker } from "./ticker.js";
 import { structRow } from "./width.js";
@@ -109,14 +110,10 @@ export function renderWidgetItemLine(item: WidgetItem, theme: Theme, spinner: Sp
 }
 
 function styleRow(row: WidgetRow, theme: Theme): string {
-	switch (row.style) {
-		case "thinking":
-			return theme.italic(theme.fg("thinkingText", row.content));
-		case "tool":
-			return theme.fg("toolTitle", row.content);
-		default:
-			return theme.fg("muted", row.content);
-	}
+	// One color map (card.ts styleRow — keeps the shared vocabulary honest):
+	// widget text rows are muted (cards render text plain), so translate.
+	const styled: StyledRow = row.style === "text" ? { ...row, style: "muted" } : row;
+	return cardStyleRow(styled, theme);
 }
 
 /**

@@ -16,26 +16,8 @@ import { createToolView } from "@everyx/pi-ui/view.js";
 import { Type } from "typebox";
 
 // ── Rate limiter (hosted OCR) ───────────────────────────────
-function createRateLimiter(qps: number) {
-	let last = 0;
-	let chain: Promise<void> = Promise.resolve();
-	return async <T>(fn: () => Promise<T>): Promise<T> => {
-		if (qps <= 0) return fn();
-		const gap = 1000 / qps;
-		const task = chain.then(async () => {
-			const now = Date.now();
-			const wait = Math.max(0, last + gap - now);
-			if (wait) await new Promise((r) => setTimeout(r, wait));
-			last = Date.now();
-			return fn();
-		});
-		chain = task.then(
-			() => {},
-			() => {},
-		);
-		return task;
-	};
-}
+import { createRateLimiter } from "./rate-limit.js";
+
 const hostedLimiter = createRateLimiter(2); // 2 qps for Parse
 const QUOTA_LIMIT = 1000;
 
@@ -73,7 +55,9 @@ async function saveQuota(n: number): Promise<void> {
 	} catch {}
 }
 
-const OFFICE_EXTS = new Set([
+// Exported for tests: the extension's default export is the pi entry; these
+// domain constants are the single source the tests pin to.
+export const OFFICE_EXTS = new Set([
 	".doc",
 	".docx",
 	".docm",
@@ -97,7 +81,7 @@ const OFFICE_EXTS = new Set([
 	".pdf",
 ]);
 
-function extOf(path: string): string {
+export function extOf(path: string): string {
 	const i = path.lastIndexOf(".");
 	return i >= 0 ? path.slice(i).toLowerCase() : "";
 }
