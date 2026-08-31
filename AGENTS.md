@@ -10,6 +10,7 @@
 - 工具链只在根（biome / tsconfig / husky / lint-staged），各包不复制
 - pi 依赖版本在 `pnpm-workspace.yaml` 的 `catalog:` 单一来源，包内 `peerDependencies` 用 `catalog:`
 - `.github/workflows/` 由根管理：CI 全 workspace；release 走 release-please manifest（版本 PR 统一 bump，合并后 `pnpm publish -r --provenance`）
+- **跨包版本耦合**：给库包（如 pi-ui）新增导出 = 该包必须用 `feat:`/`fix:` 提交——release-please **不 bump `refactor:`**，而消费者包（如 pi-web-tools）发版会把它对库包的 `workspace:*` 解析到最新已发布版；库包没发 = 消费者装即炸（曾发生）。merge release PR 前核对 PR 包清单是否含全部被依赖方。
 
 ## LLM 文案（工具描述 / 参数描述 / promptGuidelines）
 
