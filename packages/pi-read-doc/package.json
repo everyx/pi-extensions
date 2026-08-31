@@ -33,7 +33,6 @@
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "catalog:",
-		"@earendil-works/pi-tui": "catalog:",
 		"typebox": "catalog:"
 	}
 }
