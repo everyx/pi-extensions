@@ -4,6 +4,7 @@
  * drift. Same pattern as pi-subagent's views.ts.
  */
 
+import { keyText } from "@earendil-works/pi-coding-agent";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import type { FetchToolData, SearchToolData } from "./types.js";
@@ -40,7 +41,18 @@ export const searchView = createToolView<Record<string, unknown>, SearchToolData
 
 export const fetchView = createToolView<Record<string, unknown>, FetchToolData>({
 	name: "web_fetch",
-	title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? ""),
+	title: (ctx) => {
+		const url = String((ctx.args as Record<string, unknown>).url ?? "");
+		// read-like header-only folding: the collapsed card shows no content
+		// preview; when the fetch was truncated the header carries the expand
+		// hint (same spot read appends its compact-resource hint — the title
+		// row is always rendered, the body only on expand). keyText (not
+		// keyHint) keeps this theme-free; unbound → no hint (nothing promised).
+		const d = ctx.result?.data;
+		if (!d?.outputPath) return url;
+		const keys = keyText("app.tools.expand");
+		return keys ? `${url} (${keys} to expand)` : url;
+	},
 	tail: (ctx) => (ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 	meta: (ctx) => {
 		// No page title in meta — the URL already fills the header, and the

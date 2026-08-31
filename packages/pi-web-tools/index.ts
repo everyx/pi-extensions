@@ -182,10 +182,11 @@ async function executeFetch(
 		details: {
 			data: {
 				title: result.title,
-				// UI expand (ctrl+o) renders the FULL text; the LLM side keeps
-				// the capped preview + stash pointer (details never reaches the
-				// model — pi's UI-only channel, same pattern as read-doc).
+				// UI expand (ctrl+o) renders the FULL text; the collapsed card
+				// stays header-only (read-like) with a one-line expand hint
+				// (details never reaches the model — pi's UI-only channel).
 				content: result.fullContent ?? result.content,
+				outputPath: result.outputPath,
 				contentType: result.contentType,
 				startedAt,
 				endedAt: Date.now(),

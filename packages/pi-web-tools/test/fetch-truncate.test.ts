@@ -158,6 +158,18 @@ describe("webFetch — no content-type gates", () => {
 		assert.equal(r.error, undefined);
 	});
 
+	it("a truncated page carries the expand contract: outputPath + fullContent", async () => {
+		// The UI hint (ctrl+o to expand on the card header) keys off
+		// outputPath, and expand renders fullContent — both must be exactly
+		// the truncation pair from one fetch.
+		const r = await webFetch(`${base}/big.html`);
+		assert.ok(r.outputPath, "truncated page stashed");
+		assert.ok(r.fullContent, "full text rides the UI channel");
+		assert.ok(r.fullContent.length > r.content.length, "fullContent is the pre-cap text");
+		assert.ok(r.fullContent.includes("lorem ipsum"), "fullContent carries the body");
+		assert.equal(r.error, undefined);
+	});
+
 	it("an image response becomes an image block — TUI renders it, model consumes it multimodally", async () => {
 		const r = await webFetch(`${base}/photo.png`);
 		assert.ok(r.image, "image payload present");
