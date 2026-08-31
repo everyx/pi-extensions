@@ -5,6 +5,15 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+    # Release PRs are generated (version bumps + changelog) — CI adds nothing
+    # there: the same workspace sources are already green on master, and the
+    # failure classes CI could catch (files globs, cross-package exports) only
+    # manifest at npm-install time, not in the workspace. paths-ignore keeps
+    # required-check exemption semantics for real code PRs.
+    paths-ignore:
+      - "**/CHANGELOG.md"
+      - "**/package.json"
+      - ".release-please-manifest.json"
 
 jobs:
   check:
