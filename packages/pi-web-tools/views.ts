@@ -4,9 +4,8 @@
  * drift. Same pattern as pi-subagent's views.ts.
  */
 
-import { keyText } from "@earendil-works/pi-coding-agent";
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
-import { createToolView } from "@everyx/pi-ui/view.js";
+import { createToolView, expandHintText } from "@everyx/pi-ui/view.js";
 import type { FetchToolData, SearchToolData } from "./types.js";
 
 /** Meta label for the channel a search went through. The bsk fuse is labeled
@@ -46,12 +45,9 @@ export const fetchView = createToolView<Record<string, unknown>, FetchToolData>(
 		// read-like header-only folding: the collapsed card shows no content
 		// preview; when the fetch was truncated the header carries the expand
 		// hint (same spot read appends its compact-resource hint — the title
-		// row is always rendered, the body only on expand). keyText (not
-		// keyHint) keeps this theme-free; unbound → no hint (nothing promised).
-		const d = ctx.result?.data;
-		if (!d?.outputPath) return url;
-		const keys = keyText("app.tools.expand");
-		return keys ? `${url} (${keys} to expand)` : url;
+		// row is always rendered, the body only on expand). Hint logic lives
+		// in pi-ui (expandHintText): single source for the extension family.
+		return `${url}${expandHintText(ctx.result?.data)}`;
 	},
 	tail: (ctx) => (ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 	meta: (ctx) => {
