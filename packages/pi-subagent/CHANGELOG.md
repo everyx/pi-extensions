@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.5](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.3.4...pi-subagent-v1.3.5) (2026-08-31)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.1.1
+
 ## [1.3.4](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.3.3...pi-subagent-v1.3.4) (2026-08-31)
 
 
