@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.1](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.0...pi-web-tools-v1.2.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **pi-ui:** expand hint — content-gated, in the meta parentheses, API key ([e6f866f](https://github.com/everyx/pi-extensions/commit/e6f866feb15bc54f3a6f174e8fe7946fff7fcede))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.1.1
+
 ## [1.2.0](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.1.0...pi-web-tools-v1.2.0) (2026-08-31)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.1.0...pi-ui-v1.1.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **pi-ui:** expand hint — content-gated, in the meta parentheses, API key ([e6f866f](https://github.com/everyx/pi-extensions/commit/e6f866feb15bc54f3a6f174e8fe7946fff7fcede))
+
 ## [1.1.0](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.0.3...pi-ui-v1.1.0) (2026-08-31)
 
 
