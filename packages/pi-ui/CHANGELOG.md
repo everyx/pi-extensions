@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.0.3...pi-ui-v1.1.0) (2026-08-31)
+
+
+### Features
+
+* **pi-ui:** expand-hint abstraction — TruncatedCardData + expandHintText ([d4f7154](https://github.com/everyx/pi-extensions/commit/d4f7154645287cd4976e16019c25e31733a58636))
+
 ## [1.0.3](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.0.2...pi-ui-v1.0.3) (2026-08-30)
 
 

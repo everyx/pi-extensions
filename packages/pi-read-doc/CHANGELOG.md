@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.4](https://github.com/everyx/pi-extensions/compare/pi-read-doc-v1.0.3...pi-read-doc-v1.0.4) (2026-08-31)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.1.0
+
 ## [1.0.3](https://github.com/everyx/pi-extensions/compare/pi-read-doc-v1.0.2...pi-read-doc-v1.0.3) (2026-08-30)
 
 
