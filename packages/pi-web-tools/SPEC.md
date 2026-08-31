@@ -137,14 +137,18 @@ candidatesFor(params): Promise<ChannelId[]>   // 链序 ∩ 可用（key/CLI）�
 
 ## web_fetch 行为规格
 
-### 传输层（2026-08 再改：impers 全指纹 → 诚实 plain fetch 单层）
+### 传输层（2026-08 三改：伪装层尽弃 → 唤醒系统 curl）
 
 ```
-单一传输：诚实 plain fetch（固定 FALLBACK_UA + md 协商，零原生依赖）。
-不做 TLS/头部伪装——使用者是"非爬虫、低并发"的人机节奏，伪装层（曾为
-impers 全指纹 / 更早手写头部）的收益在保险丝链覆盖下不成比例；且原生
-依赖（koffi）给 npm 安装带来 approve 门槛。对齐 mcp-server-fetch 的诚实
-代理哲学。反爬/JS 渲染页交给保险丝：tinyfish fetch → bsk 真浏览器。
+主传输：spawn 系统 curl（-sS -L --max-redirs 5 --compressed，-D 捕响应头，
+stdout 流式入 64MB cap）。身份 = 该机器真实的 curl：TLS/UA/Accept: */*/
+HTTP/1.1 全部原生，零伪装零调优——"你就是这台机器上用 curl 抓网页的人"。
+不装 Chrome 的理由：Node 的 TLS 指纹无法对齐 Chrome（ext 乱序/记录尺寸
+OpenSSL 写死），反而"Chrome 声明 + Node 指纹"的不一致本身是 bot 信号
+（curl_cffi 文档同论）。
+fallback（curl 缺失 / PI_WEB_TOOLS_NO_CURL=1）：undici + 钉死 curl UA +
+Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎不走；严格反爬
+有保险丝链兜底）。
 ```
 
 ### 请求行为
@@ -186,10 +190,9 @@ impers 全指纹 / 更早手写头部）的收益在保险丝链覆盖下不成�
   tinyfish fetch → bsk 真浏览器（LLM 拿真实内容不给占位）。本地 headless 已移除——
   同能力一份实现，也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝
   （页面确实不存在，渲染器无法复活）。
-- **请求头诚实默认**：固定现代 Chrome UA + Accept md 协商 + Accept-Language。
-  动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）留档，但非爬虫
-  低并发的使用形态不需要伪装层——被拦的页面由保险丝链兜底（不丢能力，
-  多一跳）。
+- **请求头 = 系统 curl 原生**（UA/Accept: */*/无 Accept-Language）；fallback
+  用钉死 curl UA。动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）
+  留档——curl 是合法命令行身份，被拦的页面由保险丝链兜底（不丢能力，多一跳）。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；
   超时与外部取消区分。
 - **GitHub blob 直取文件**：`github.com/…/blob/<ref>/<path>` 重写为 raw 内容
@@ -209,6 +212,7 @@ API key 环境变量（有则升级、无则降级，全部可选）：
 | `EXA_API_KEY` | Exa 全参数 keyed 模式（无 key = MCP keyless 裸 query） |
 | `TAVILY_API_KEY` | 启用 Tavily |
 | `FIRECRAWL_API_KEY` | Firecrawl keyed 升档（与 pi-read-doc OCR 共享池，搜索尽量不碰） |
+| `PI_WEB_TOOLS_NO_CURL=1` | 跳过系统 curl 子进程（hermetic 测试 / 无 curl 环境强制 fallback；存在性探测一次并缓存） |
 | `PI_WEB_TOOLS_NO_BSK=1` | 禁用 bsk 真实浏览器通道（探测前短路——不弹窗、不起 daemon；默认测试套件强制） |
 | `PI_WEB_TOOLS_TEST_BSK=1` | opt-in：运行真浏览器测试（bsk 会打开本机 Chromium）；需同时清掉 NO_BSK |
   （test/browser.test.ts 在 opt-in 时自行清除 NO_BSK） |

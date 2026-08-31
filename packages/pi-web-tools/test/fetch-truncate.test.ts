@@ -14,12 +14,6 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = ((input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
 	const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
 	if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return realFetch(input, init);
-	if (url.hostname === "192.0.2.1") {
-		const err = Object.assign(new TypeError("fetch failed"), {
-			cause: Object.assign(new Error("connection reset"), { code: "ECONNRESET" }),
-		});
-		return Promise.reject(err);
-	}
 	return Promise.reject(new TypeError("fetch failed (hermetic tests: no real-site requests)"));
 }) as typeof fetch;
 
@@ -45,20 +39,6 @@ describe("stashOverflow — context budget (pi truncateHead parity)", () => {
 		assert.ok(Buffer.byteLength(r.text, "utf8") <= 51_200, `bytes ${Buffer.byteLength(r.text, "utf8")} > 50KiB`);
 		assert.ok(r.text.startsWith("# 文档"), "head must be kept");
 		assert.ok(r.stashPath, "full text stashed even when only the line limit is far away");
-	});
-});
-
-describe("fetch connection-error diagnostics", () => {
-	it("webFetch surfaces the cause code (ECONNRESET) for transport failures", async () => {
-		// Dead host simulated hermetically (192.0.2.1 is the RFC 5737 test
-		// range — the global fetch router rejects it with a cause.code).
-		const r = await webFetch("https://192.0.2.1/");
-		assert.ok(r.error, "expected an error");
-		assert.ok(r.error.includes("fetch failed"), `got: ${r.error}`);
-		assert.ok(
-			/\b(ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|UND_ERR)/.test(r.error),
-			`cause code missing: ${r.error}`,
-		);
 	});
 });
 
@@ -100,6 +80,13 @@ const listener = createServer((req, res) => {
 		res.end(`<html><head><title>Big</title></head><body>${"<p>lorem ipsum</p>".repeat(6000)}</body></html>`);
 		return;
 	}
+	if (req.url === "/reset") {
+		// Transport-failure fixture: the server tears the socket down mid-
+		// handshake — curl reports it as an empty reply (exit 52) without any
+		// real-site traffic.
+		res.destroy();
+		return;
+	}
 	if (req.url === "/page") {
 		// The raw-vs-markdown fixtures now come from here (example.com used
 		// to serve as the ICANN test domain — no real sites in tests).
@@ -114,6 +101,16 @@ const listener = createServer((req, res) => {
 });
 await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${(listener.address() as AddressInfo).port}`;
+
+describe("fetch connection-error diagnostics", () => {
+	it("webFetch surfaces the curl transport error for a socket reset", async () => {
+		// Local /reset fixture: the server destroys the socket; curl maps it
+		// to a typed error instead of a bare "fetch failed".
+		const r = await webFetch(`${base}/reset`);
+		assert.ok(r.error, "expected an error");
+		assert.match(r.error, /curl: \(52\)|empty reply/i, `got: ${r.error}`);
+	});
+});
 
 describe("webFetch raw option", () => {
 	// Local /page fixtures: deterministic raw-vs-default behaviour without

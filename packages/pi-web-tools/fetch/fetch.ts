@@ -1,38 +1,23 @@
 /**
  * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
  *
- *   - Direct fetch: honest plain fetch, pinned browser UA + markdown content
- *     negotiation — no TLS/header mimicry (non-crawler, low concurrency: not
- *     needed); fuse renderers (tinyfish fetch → bsk) cover anti-bot and CSR
- *     pages.
- *   - Accept: text/markdown content negotiation, timeout, SPA empty-body
- *     detection, error normalization (HTTP status → error field, not a throw).
+ *   - Direct fetch: the system curl CLI (identity = real curl, nothing
+ *     mimicked), shallow curl-UA fallback on curl-less systems; fuse
+ *     renderers (tinyfish fetch → bsk) cover anti-bot and CSR pages.
+ *   - timeout, SPA empty-body detection, error normalization (HTTP status →
+ *     error field, not a throw).
  */
 
 import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi-coding-agent";
 import { stashOverflow } from "@everyx/pi-ui/context.js";
-import { fetchWithTimeout } from "../http.js";
 import { fetchUrlWithBsk } from "../search/browser.js";
 import type { WebFetchResult } from "../types.js";
+import { curlFetch } from "./api/curl-fetch.js";
 import { fetchWithTinyfish } from "./api/tinyfish-fetch.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
 import { adaptUrl } from "./sites/index.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-
-/** Accept header: prefer Markdown for Agents (content negotiation, Cloudflare).
- *  No image/avif: our decoder (Photon) cannot decode AVIF — asking for it
- *  would negotiate images we then degrade to noise (verified empirically);
- *  webp/jpeg/png all decode. */
-const ACCEPT = "text/markdown, text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8";
-/** For raw fetches: request the HTML source, not a negotiated markdown body. */
-const ACCEPT_HTML = "text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8";
-
-/** The fetch User-Agent: a pinned modern Chrome. The system-browser
- *  detection (ua.ts) and every header/TLS mimicry layer are gone — this is
- *  the honest, stable default the whole package uses. */
-const FALLBACK_UA =
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
 /** Host-memory physics, not policy: the download buffer cap. The body is read
  *  as a stream with a running count (Content-Length is untrusted — chunked
@@ -40,30 +25,6 @@ const FALLBACK_UA =
  *  further enters memory. Set well above the image budget so every
  *  resizable image still fits. */
 const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
-
-async function readBodyCapped(response: Response): Promise<Uint8Array | null> {
-	const reader = response.body?.getReader();
-	if (!reader) return new Uint8Array(0);
-	const chunks: Uint8Array[] = [];
-	let total = 0;
-	for (;;) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		total += value.byteLength;
-		if (total > MAX_DOWNLOAD_BYTES) {
-			void reader.cancel().catch(() => {});
-			return null;
-		}
-		chunks.push(value);
-	}
-	const body = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		body.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return body;
-}
 
 interface FetchPageResult {
 	ok: boolean;
@@ -166,34 +127,17 @@ function isHtmlContent(contentType: string): boolean {
  *  a policy decision that limits the caller. Text passes through readable;
  *  true binaries lossy-decode into recognizable noise (the contentType field
  *  says what it is); budget stays bounded by the stash cap downstream. */
-async function fetchPage(url: string, signal?: AbortSignal, preferHtml = false): Promise<FetchPageResult> {
-	const accept = preferHtml ? ACCEPT_HTML : ACCEPT;
-
-	try {
-		const response = await fetchWithTimeout(
-			url,
-			{ headers: { "User-Agent": FALLBACK_UA, Accept: accept, "Accept-Language": "en-US,en;q=0.9" } },
-			{ signal, timeoutMs: DEFAULT_TIMEOUT_MS },
-		);
-		const contentType = response.headers.get("content-type") ?? "";
-		if (!response.ok) {
-			return {
-				ok: false,
-				status: response.status,
-				contentType,
-				error: `HTTP ${response.status}: ${response.statusText}`,
-			};
-		}
-		const bytes = await readBodyCapped(response);
-		return finishPage(response.status, contentType, bytes, bytes === null);
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		// undici wraps connection-level failures as "fetch failed" with the
-		// code on err.cause — surface it so callers can tell a server-side
-		// reset (anti-bot / Cloudflare) from other network errors.
-		const code = (err as { cause?: { code?: string } }).cause?.code;
-		return { ok: false, status: 0, error: code ? `${message} (${code})` : message };
+async function fetchPage(url: string, signal?: AbortSignal): Promise<FetchPageResult> {
+	const raw = await curlFetch(url, { signal, timeoutMs: DEFAULT_TIMEOUT_MS, maxBytes: MAX_DOWNLOAD_BYTES });
+	if (raw.ok) {
+		return finishPage(raw.status, raw.contentType, raw.bytes ?? null, raw.tooLarge);
 	}
+	return {
+		ok: false,
+		status: raw.status,
+		contentType: raw.contentType,
+		error: raw.error ?? `Failed to fetch ${url}`,
+	};
 }
 
 export interface WebFetchOptions {
@@ -213,9 +157,9 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	// to the original URL when the rewrite target is unavailable.
 	const targetUrl = adaptUrl(url) ?? url;
 	// raw asks for the source, so prefer an HTML (not negotiated-markdown) body.
-	let page = await fetchPage(targetUrl, signal, raw);
+	let page = await fetchPage(targetUrl, signal);
 	if (targetUrl !== url && (!page.ok || !page.text)) {
-		page = await fetchPage(url, signal, raw);
+		page = await fetchPage(url, signal);
 	}
 
 	// Direct HTTP failure → normalized error. 404/410 mean the page genuinely

@@ -3,7 +3,7 @@
 Pi 的 Web 原语——`web_search` + `web_fetch`。
 
 - **`web_search`** — 搜索互联网。请求按保险丝顺序路由过多个 HTTP 搜索通道——TinyFish（免费无限）→ Exa → Tavily → Firecrawl（Google 后端；keyless 优先，key 只作升档）——失败自动降级；真实浏览器引擎（Google，中文走百度，经 BrowserSkill）是最后一把无 key 保险丝。五个参数：`query`、`recency?`、`allowed_domains?`、`blocked_domains?`、`locale?`。结果语言跟随 query 语言；`locale` 是显式的市场/语言加权。没有 engine 参数——路由对 LLM 完全不可见。
-- **`web_fetch`** — 抓取 URL：HTML 页面默认转为 Markdown（LLM / token friendly）；传 `raw: true` 获取原始 HTML（不做任何包装）。非 HTML（SVG/JSON/文本等一切文本）一律原样返回；超大内容截断并给出 /tmp 全文路径（非网页内容不内联预览）；响应 Content-Type 随结果元数据返回；图片（`image/*`，SVG 除外）以多模态 image block 返回——TUI 内联渲染、模型直接消费。直取层用固定现代 Chrome UA + markdown 协商（诚实默认头，不做伪装）；反爬/JS 渲染页自动走保险丝：tinyfish fetch → 真实浏览器（bsk）。
+- **`web_fetch`** — 抓取 URL：HTML 页面默认转为 Markdown（LLM / token friendly）；传 `raw: true` 获取原始 HTML（不做任何包装）。非 HTML（SVG/JSON/文本等一切文本）一律原样返回；超大内容截断并给出 /tmp 全文路径（非网页内容不内联预览）；响应 Content-Type 随结果元数据返回；图片（`image/*`，SVG 除外）以多模态 image block 返回——TUI 内联渲染、模型直接消费。直取层唤醒系统 `curl` CLI（身份 = 这台机器的真 curl：TLS/头部/HTTP1.1 全原生，零伪装），无 curl 时退化钉死 curl UA 的浅模拟；反爬/JS 渲染页自动走保险丝：tinyfish fetch → 真实浏览器（bsk）。
 
 两个原语，别无冗余——无内容存储、无 curator、无 PDF/视频提取。
 
