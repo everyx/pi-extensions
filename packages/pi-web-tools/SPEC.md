@@ -137,18 +137,14 @@ candidatesFor(params): Promise<ChannelId[]>   // 链序 ∩ 可用（key/CLI）�
 
 ## web_fetch 行为规格
 
-### 传输层（2026-08 改：手写头部模拟 → impers 全指纹）
+### 传输层（2026-08 再改：impers 全指纹 → 诚实 plain fetch 单层）
 
 ```
-Tier 1（主力）impers：完整浏览器模拟（TLS JA3/JA4 + HTTP/2 SETTINGS/伪头序 +
-   头部值与序，来自真实 Chrome 捕获）。UA/sec-ch-ua*/Accept-Encoding 等全部
-   由模拟档案统一给出——曾自维护的 UA 探测（xdg）+ sec-ch-ua 派生已删除：
-   版本/平台不一致本身就是 bot 信号，而"三处自维护"注定漂移（curl_cffi
-   文档明言手写头部难对值难对序）。
-   仅保留两个刻意覆盖：Accept（md 协商，功能）/ Cache-Control: no-cache（新鲜度）。
-Tier 2（退化）诚实 plain fetch：固定 FALLBACK_UA + md 协商，零原生依赖——
-   离线 / PI_WEB_TOOLS_NO_IMPERS=1 / lib 下载失败时,普通静态页仍可用
-   （对齐 mcp-server-fetch 的诚实代理哲学，不做任何伪装）。
+单一传输：诚实 plain fetch（固定 FALLBACK_UA + md 协商，零原生依赖）。
+不做 TLS/头部伪装——使用者是"非爬虫、低并发"的人机节奏，伪装层（曾为
+impers 全指纹 / 更早手写头部）的收益在保险丝链覆盖下不成比例；且原生
+依赖（koffi）给 npm 安装带来 approve 门槛。对齐 mcp-server-fetch 的诚实
+代理哲学。反爬/JS 渲染页交给保险丝：tinyfish fetch → bsk 真浏览器。
 ```
 
 ### 请求行为
@@ -190,10 +186,10 @@ Tier 2（退化）诚实 plain fetch：固定 FALLBACK_UA + md 协商，零原�
   tinyfish fetch → bsk 真浏览器（LLM 拿真实内容不给占位）。本地 headless 已移除——
   同能力一份实现，也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝
   （页面确实不存在，渲染器无法复活）。
-- **请求头由 impers 全权负责**（Tier 1）：值、序、TLS 三层都来自真实捕获，
-  不再手写（手写版的缺陷：值对序不对/版本平台漂移/TLS 不可达——已删除）。
-  修头动机史（openai/codex#18456：Cloudflare 按 UA 403 `reqwest/*` 是真实
-  HTTP 层判据）已由 impers 覆盖并超出。退化层（Tier 2）是诚实默认头。
+- **请求头诚实默认**：固定现代 Chrome UA + Accept md 协商 + Accept-Language。
+  动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）留档，但非爬虫
+  低并发的使用形态不需要伪装层——被拦的页面由保险丝链兜底（不丢能力，
+  多一跳）。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；
   超时与外部取消区分。
 - **GitHub blob 直取文件**：`github.com/…/blob/<ref>/<path>` 重写为 raw 内容
@@ -213,8 +209,6 @@ API key 环境变量（有则升级、无则降级，全部可选）：
 | `EXA_API_KEY` | Exa 全参数 keyed 模式（无 key = MCP keyless 裸 query） |
 | `TAVILY_API_KEY` | 启用 Tavily |
 | `FIRECRAWL_API_KEY` | Firecrawl keyed 升档（与 pi-read-doc OCR 共享池，搜索尽量不碰） |
-| `PI_WEB_TOOLS_NO_IMPERS=1` | 强制退化层（hermetic 测试 / 离线）；首次使用 impers 会下载
-  libcurl-impersonate v2.0.0（版本 pin，失败自动降 Tier 2） |
 | `PI_WEB_TOOLS_NO_BSK=1` | 禁用 bsk 真实浏览器通道（探测前短路——不弹窗、不起 daemon；默认测试套件强制） |
 | `PI_WEB_TOOLS_TEST_BSK=1` | opt-in：运行真浏览器测试（bsk 会打开本机 Chromium）；需同时清掉 NO_BSK |
   （test/browser.test.ts 在 opt-in 时自行清除 NO_BSK） |

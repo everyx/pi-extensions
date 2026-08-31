@@ -35,7 +35,7 @@ export function pickEngine(locale?: string): EngineId {
 	return parseLocale(locale).language === "zh" ? "baidu" : "google";
 }
 
-/** Env gate mirroring PI_WEB_TOOLS_NO_IMPERS: disables the real-browser
+/** Env gate: disables the real-browser
  *  channel (hermetic tests / offline) BEFORE any CLI probe — no browser
  *  window, no bsk daemon. Test scripts set it so the default suite never
  *  pops a Chromium; opt-in browser tests clear it (PI_WEB_TOOLS_TEST_BSK). */

@@ -1,11 +1,10 @@
 /**
  * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
  *
- *   - Direct fetch tiers: impers — full browser impersonation (TLS JA3/JA4 +
- *     HTTP/2 SETTINGS + header values/order, captured from real Chrome) —
- *     with a degraded plain-fetch fallback (fixed UA + md negotiation, zero
- *     native deps); fuse renderers (tinyfish fetch → bsk) cover anti-bot and
- *     CSR pages.
+ *   - Direct fetch: honest plain fetch, pinned browser UA + markdown content
+ *     negotiation — no TLS/header mimicry (non-crawler, low concurrency: not
+ *     needed); fuse renderers (tinyfish fetch → bsk) cover anti-bot and CSR
+ *     pages.
  *   - Accept: text/markdown content negotiation, timeout, SPA empty-body
  *     detection, error normalization (HTTP status → error field, not a throw).
  */
@@ -15,7 +14,6 @@ import { stashOverflow } from "@everyx/pi-ui/context.js";
 import { fetchWithTimeout } from "../http.js";
 import { fetchUrlWithBsk } from "../search/browser.js";
 import type { WebFetchResult } from "../types.js";
-import { impersFetchRaw } from "./api/impers-fetch.js";
 import { fetchWithTinyfish } from "./api/tinyfish-fetch.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
 import { adaptUrl } from "./sites/index.js";
@@ -30,10 +28,9 @@ const ACCEPT = "text/markdown, text/html, application/xhtml+xml, application/xml
 /** For raw fetches: request the HTML source, not a negotiated markdown body. */
 const ACCEPT_HTML = "text/html, application/xhtml+xml, application/xml;q=0.9, image/webp, */*;q=0.8";
 
-/** Degraded-tier UA: a generic modern Chrome, pinned by us (the old
- *  system-browser detection and ua.ts died with the header mimicry — impers
- *  now owns UA + sec-ch-ua + TLS as one captured bundle; what remains only
- *  needs an honest browser-shaped constant). */
+/** The fetch User-Agent: a pinned modern Chrome. The system-browser
+ *  detection (ua.ts) and every header/TLS mimicry layer are gone — this is
+ *  the honest, stable default the whole package uses. */
 const FALLBACK_UA =
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
@@ -162,38 +159,16 @@ function isHtmlContent(contentType: string): boolean {
 	return contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 }
 
-/** Direct HTTP GET over two transport tiers (SPEC: impers → degraded).
- *  Tier 1: impers — full browser impersonation (TLS + HTTP/2 + headers as
- *  one captured Chrome bundle) when the native lib is loadable. Tier 2
- *  (degraded): honest plain fetch, fixed UA + md negotiation — keeps simple
- *  pages working with zero native deps (offline / PI_WEB_TOOLS_NO_IMPERS=1).
- *  No content-type gating — every gate is a policy decision that limits the
- *  caller. Text passes through readable; true binaries lossy-decode into
- *  recognizable noise (the contentType field says what it is); budget stays
- *  bounded by the stash cap downstream. */
+/** Direct HTTP GET, one honest transport: pinned UA + markdown negotiation,
+ *  no TLS/header mimicry — a human-usage pattern (non-crawler, low
+ *  concurrency) doesn't need it; anti-bot and CSR pages advance to the fuse
+ *  renderers (tinyfish fetch → bsk). No content-type gating — every gate is
+ *  a policy decision that limits the caller. Text passes through readable;
+ *  true binaries lossy-decode into recognizable noise (the contentType field
+ *  says what it is); budget stays bounded by the stash cap downstream. */
 async function fetchPage(url: string, signal?: AbortSignal, preferHtml = false): Promise<FetchPageResult> {
 	const accept = preferHtml ? ACCEPT_HTML : ACCEPT;
 
-	// Tier 1 — full impersonation (null = unavailable → fall through).
-	const imp = await impersFetchRaw(url, {
-		signal,
-		timeoutMs: DEFAULT_TIMEOUT_MS,
-		accept,
-		maxBytes: MAX_DOWNLOAD_BYTES,
-	});
-	if (imp) {
-		if (!imp.ok) {
-			return {
-				ok: false,
-				status: imp.status,
-				contentType: imp.contentType || "",
-				error: imp.error || `Failed to fetch ${url}`,
-			};
-		}
-		return finishPage(imp.status, imp.contentType || "", imp.bytes, Boolean(imp.tooLarge));
-	}
-
-	// Tier 2 — degraded plain fetch.
 	try {
 		const response = await fetchWithTimeout(
 			url,

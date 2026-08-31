@@ -11,7 +11,7 @@
 	},
 	"type": "module",
 	"scripts": {
-		"test": "PI_WEB_TOOLS_NO_IMPERS=1 PI_WEB_TOOLS_NO_BSK=1 tsx --test test/*.test.ts",
+		"test": "PI_WEB_TOOLS_NO_BSK=1 tsx --test test/*.test.ts",
 		"preview": "tsx preview.ts"
 	},
 	"repository": {
@@ -36,7 +36,6 @@
 		"typebox": "catalog:"
 	},
 	"dependencies": {
-		"impers": "0.1.1",
 		"@everyx/pi-ui": "workspace:*",
 		"@mozilla/readability": "^0.6.0",
 		"exa-js": "^2.16.3",
