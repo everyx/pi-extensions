@@ -20,6 +20,8 @@
 	},
 	"files": [
 		"*.ts",
+		"fetch/",
+		"search/",
 		"README.md",
 		"README.zh.md"
 	],
