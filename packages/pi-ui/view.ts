@@ -12,7 +12,12 @@
  *   pi-ui   → everything else (renderers, folding, colors, status)
  */
 
-import type { AgentToolResult, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import {
+	type AgentToolResult,
+	keyText,
+	type Theme,
+	type ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
 import { type CardIcon, type Component, dataCard, renderHeader, type StyledRow, textLine } from "./card.js";
 import { SPINNER_TICK_MS, Spinner } from "./spinner.js";
 import { ticker } from "./ticker.js";
@@ -329,4 +334,30 @@ export function createToolView<Args, Data>(
 			);
 		},
 	};
+}
+
+/**
+ * Truncation contract for tool cards (duck-typed): extensions carrying the
+ * capped-text fields on their details.data announce expand-ability through
+ * expandHintText. `outputPath` is the judge — set exactly when the
+ * LLM-visible text was truncated; `content`/`fullContent` are what expand
+ * renders for header-only cards.
+ */
+export interface TruncatedCardData {
+	content?: string;
+	/** Set when content was truncated — the full text lives at this path. */
+	outputPath?: string;
+	/** Full text when truncation happened (expand channel for the UI). */
+	fullContent?: string;
+}
+
+/** The " (Ctrl+O to expand)" suffix for header-only folded cards: rendered
+ *  from the live keybinding (keyText — theme-free, callable outside the TUI),
+ *  empty when the data isn't truncated or the binding is unbound (nothing
+ *  promised). Single source so extensions advertise expandability without
+ *  touching pi's keybinding table themselves. */
+export function expandHintText(data: TruncatedCardData | undefined): string {
+	if (!data?.outputPath) return "";
+	const keys = keyText("app.tools.expand");
+	return keys ? ` (${keys} to expand)` : "";
 }
