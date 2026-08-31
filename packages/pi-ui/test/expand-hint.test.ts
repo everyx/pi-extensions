@@ -1,9 +1,11 @@
 /**
- * expandHintText — the truncation→expand-hint contract for header-only
- * folded cards (pi-ui single source; consumed by pi-web-tools).
+ * expandHintText — the expand-hint contract for header-only folded cards
+ * (pi-ui single source; consumed by pi-web-tools).
  *
- * The bound branch is exercised hermetically by swapping the global
- * keybinding table (pi-tui setKeybindings) — restored after every test.
+ * The judge is "the card has expandable content" — folding hides every byte,
+ * truncated or not — not the LLM-visible truncation bit. The bound branch is
+ * exercised hermetically by swapping the global keybinding table (pi-tui
+ * setKeybindings) — restored after every test.
  */
 
 import assert from "node:assert/strict";
@@ -30,21 +32,30 @@ afterEach(() => {
 });
 
 describe("expandHintText", () => {
-	it("no hint when the data isn't truncated (no outputPath)", () => {
+	it("no hint when the card has no content to expand", () => {
 		assert.equal(expandHintText(undefined), "");
-		assert.equal(expandHintText({ content: "full text" }), "");
-		assert.equal(expandHintText({ content: "x", fullContent: "x" }), "", "fullContent alone is not the truncation bit");
+		assert.equal(expandHintText({}), "");
+		assert.equal(expandHintText({ content: "" }), "");
 	});
 
 	it("no hint when the binding is unbound — nothing promised", () => {
-		assert.equal(expandHintText({ outputPath: "/tmp/x.txt" }), "");
+		assert.equal(expandHintText({ content: "full text" }), "");
+		assert.equal(expandHintText({ content: "x", fullContent: "x" }), "");
+		assert.equal(expandHintText({ content: "cut", fullContent: "x", outputPath: "/tmp/x.txt" }), "");
 	});
 
-	it("renders the live keybinding suffix when truncated and bound", () => {
+	it("renders the meta-parenthesis hint whenever content exists — truncated or not", () => {
 		const restore = withExpandBinding();
 		try {
-			assert.match(expandHintText({ outputPath: "/tmp/x.txt" }), /^ \(.+ to expand\)$/);
-			assert.ok(expandHintText({ outputPath: "/tmp/x.txt" }).includes("ctrl+o"), "default binding ctrl+o");
+			// small page: content, no truncation bit — the folded card still hides it
+			assert.equal(expandHintText({ content: "full text" }), "ctrl+o to expand");
+			// truncated page: same hint, truncation fields are extra data not the gate
+			assert.equal(
+				expandHintText({ content: "cut", fullContent: "x".repeat(99), outputPath: "/tmp/x.txt" }),
+				"ctrl+o to expand",
+			);
+			// fullContent-only card
+			assert.equal(expandHintText({ fullContent: "x" }), "ctrl+o to expand");
 		} finally {
 			restore();
 		}

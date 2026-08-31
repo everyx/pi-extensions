@@ -40,22 +40,22 @@ export const searchView = createToolView<Record<string, unknown>, SearchToolData
 
 export const fetchView = createToolView<Record<string, unknown>, FetchToolData>({
 	name: "web_fetch",
-	title: (ctx) => {
-		const url = String((ctx.args as Record<string, unknown>).url ?? "");
-		// read-like header-only folding: the collapsed card shows no content
-		// preview; when the fetch was truncated the header carries the expand
-		// hint (same spot read appends its compact-resource hint — the title
-		// row is always rendered, the body only on expand). Hint logic lives
-		// in pi-ui (expandHintText): single source for the extension family.
-		return `${url}${expandHintText(ctx.result?.data)}`;
-	},
+	title: (ctx) => String((ctx.args as Record<string, unknown>).url ?? ""),
 	tail: (ctx) => (ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working\u2026" : undefined),
 	meta: (ctx) => {
 		// No page title in meta — the URL already fills the header, and the
 		// title would make the row far too long.
 		const d = ctx.result?.data ?? {};
+		const items: string[] = [];
 		const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
-		return dur ? [dur] : undefined;
+		if (dur) items.push(dur);
+		// Expand hint rides in the same meta parentheses as the duration
+		// (one paren group, " · "-split — read keeps its hints out of the
+		// header entirely; ours is a header-only fold, so the affordance
+		// lives in the header's meta, never inside the quoted title).
+		const hint = expandHintText(d);
+		if (hint) items.push(hint);
+		return items.length ? items : undefined;
 	},
 	body: { text: (ctx) => (ctx.expanded ? (ctx.result?.data?.content ?? "") : "") },
 });

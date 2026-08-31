@@ -351,13 +351,22 @@ export interface TruncatedCardData {
 	fullContent?: string;
 }
 
-/** The " (Ctrl+O to expand)" suffix for header-only folded cards: rendered
- *  from the live keybinding (keyText — theme-free, callable outside the TUI),
- *  empty when the data isn't truncated or the binding is unbound (nothing
- *  promised). Single source so extensions advertise expandability without
- *  touching pi's keybinding table themselves. */
+/** The expand-hint text for header-only folded cards: "<keys> to expand"
+ *  from the live keybinding (keyText — theme-free, callable outside the
+ *  TUI); empty when the binding is unbound (nothing promised) or the card
+ *  has no content to expand. Consumers place it as the LAST item of the
+ *  card's meta parentheses — "(Took 2.7s · ctrl+o to expand)" — never
+ *  inside the quoted title (pi's read tool keeps its expand hints out of
+ *  the header entirely: path line only). Single source so extensions
+ *  advertise expandability without touching pi's keybinding table.
+ *
+ *  The judge is "the card has expandable content", NOT "the text was
+ *  truncated": header-only folding hides every byte when collapsed, so the
+ *  hint is owed on any successful fetch — truncated or not (same as read's
+ *  compact-resource hint). LLM-visible truncation (outputPath) is a
+ *  separate concern and stays on the data, not on the UI affordance. */
 export function expandHintText(data: TruncatedCardData | undefined): string {
-	if (!data?.outputPath) return "";
+	if (!data || (!data.content && !data.fullContent)) return "";
 	const keys = keyText("app.tools.expand");
-	return keys ? ` (${keys} to expand)` : "";
+	return keys ? `${keys} to expand` : "";
 }
