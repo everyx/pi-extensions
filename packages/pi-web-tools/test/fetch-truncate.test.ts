@@ -5,6 +5,24 @@ import { after, describe, it } from "node:test";
 import { stashOverflow } from "@everyx/pi-ui/context.js";
 import { webFetch } from "../fetch/fetch.js";
 
+// Hermetic-by-rule: no test may reach a real site. Route global fetch —
+// localhost → the real local server below; anything else either a
+// deterministic transport failure (the connection-diagnostics case) or a
+// plain rejection. The tinyfish fuse POST is covered by the same reject
+// path, so a dead-host test stays fast and offline.
+const realFetch = globalThis.fetch;
+globalThis.fetch = ((input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+	const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+	if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return realFetch(input, init);
+	if (url.hostname === "192.0.2.1") {
+		const err = Object.assign(new TypeError("fetch failed"), {
+			cause: Object.assign(new Error("connection reset"), { code: "ECONNRESET" }),
+		});
+		return Promise.reject(err);
+	}
+	return Promise.reject(new TypeError("fetch failed (hermetic tests: no real-site requests)"));
+}) as typeof fetch;
+
 describe("stashOverflow — context budget (pi truncateHead parity)", () => {
 	it("passes short text through unchanged", () => {
 		const text = "# Title\n\nshort body";
@@ -31,9 +49,9 @@ describe("stashOverflow — context budget (pi truncateHead parity)", () => {
 });
 
 describe("fetch connection-error diagnostics", () => {
-	it("webFetch surfaces the undici cause code (ECONNRESET) for server resets", async () => {
-		// Blackhole IP (RFC 5737) — connection attempt fails fast, undici reports
-		// cause.code instead of a bare "fetch failed".
+	it("webFetch surfaces the cause code (ECONNRESET) for transport failures", async () => {
+		// Dead host simulated hermetically (192.0.2.1 is the RFC 5737 test
+		// range — the global fetch router rejects it with a cause.code).
 		const r = await webFetch("https://192.0.2.1/");
 		assert.ok(r.error, "expected an error");
 		assert.ok(r.error.includes("fetch failed"), `got: ${r.error}`);
@@ -41,31 +59,6 @@ describe("fetch connection-error diagnostics", () => {
 			/\b(ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|UND_ERR)/.test(r.error),
 			`cause code missing: ${r.error}`,
 		);
-	});
-});
-
-describe("webFetch raw option", () => {
-	// example.com is an ICANN-reserved test domain — stable, always returns a
-	// small fixed HTML page, so raw vs default behaviour is deterministic.
-	it("raw: true returns the HTML source verbatim — no fence, no decoration", async () => {
-		const r = await webFetch("https://example.com/", { raw: true });
-		assert.ok(!r.content.includes("```"), "content is never wrapped in a code fence");
-		assert.ok(r.content.includes("<html"), "raw HTML source returned, not converted");
-		assert.ok(r.content.includes("Example Domain"));
-		assert.ok(r.contentType?.includes("text/html"), `contentType carried, got: ${r.contentType}`);
-	});
-
-	it("default converts HTML to markdown without a fence", async () => {
-		const r = await webFetch("https://example.com/");
-		assert.ok(r.content.includes("Example Domain"), "markdown body has the title");
-		assert.ok(!r.content.includes("```html"), "converted markdown is prose, not fenced");
-		assert.ok(!r.content.includes("<html>"), "no raw HTML tags in converted output");
-	});
-
-	it("error path leaves content empty", async () => {
-		const r = await webFetch("not-a-url");
-		assert.equal(r.content, "");
-		assert.match(r.error ?? "", /Unsupported URL/);
 	});
 });
 
@@ -107,11 +100,45 @@ const listener = createServer((req, res) => {
 		res.end(`<html><head><title>Big</title></head><body>${"<p>lorem ipsum</p>".repeat(6000)}</body></html>`);
 		return;
 	}
+	if (req.url === "/page") {
+		// The raw-vs-markdown fixtures now come from here (example.com used
+		// to serve as the ICANN test domain — no real sites in tests).
+		res.writeHead(200, { "Content-Type": "text/html" });
+		res.end(
+			"<html><head><title>Example Domain</title></head><body><h1>Example Domain</h1><p>This domain is for use in illustrative examples.</p></body></html>",
+		);
+		return;
+	}
 	res.writeHead(404);
 	res.end();
 });
 await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${(listener.address() as AddressInfo).port}`;
+
+describe("webFetch raw option", () => {
+	// Local /page fixtures: deterministic raw-vs-default behaviour without
+	// touching a real site.
+	it("raw: true returns the HTML source verbatim — no fence, no decoration", async () => {
+		const r = await webFetch(`${base}/page`, { raw: true });
+		assert.ok(!r.content.includes("```"), "content is never wrapped in a code fence");
+		assert.ok(r.content.includes("<html"), "raw HTML source returned, not converted");
+		assert.ok(r.content.includes("Example Domain"));
+		assert.ok(r.contentType?.includes("text/html"), `contentType carried, got: ${r.contentType}`);
+	});
+
+	it("default converts HTML to markdown without a fence", async () => {
+		const r = await webFetch(`${base}/page`);
+		assert.ok(r.content.includes("Example Domain"), "markdown body has the title");
+		assert.ok(!r.content.includes("```html"), "converted markdown is prose, not fenced");
+		assert.ok(!r.content.includes("<html>"), "no raw HTML tags in converted output");
+	});
+
+	it("error path leaves content empty", async () => {
+		const r = await webFetch("not-a-url");
+		assert.equal(r.content, "");
+		assert.match(r.error ?? "", /Unsupported URL/);
+	});
+});
 
 describe("webFetch — no content-type gates", () => {
 	it("an SVG passes through verbatim — it is text, whatever MIME says", async () => {
