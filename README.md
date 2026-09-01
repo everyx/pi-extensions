@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-My personal [pi](https://github.com/earendil-works/pi) extensions — each package a plain, independently publishable pi extension.
+My personal [pi](https://github.com/earendil-works/pi) extensions — five publishable extensions plus pi-ui, the shared UI library they build on.
 
 | Package | What it is |
 |---|---|
@@ -14,7 +14,7 @@ My personal [pi](https://github.com/earendil-works/pi) extensions — each packa
 
 ## Layout
 
-- `packages/*` — one pi extension per directory, each with its own `README` (ships with the npm package) and `package.json` (`pi.extensions` entry).
+- `packages/*` — one package per directory; the five pi extensions each carry a `pi.extensions` entry (pi-ui is a library, not an extension). Each ships its own `README` with the npm package.
 - Shared tooling lives at the root only — biome, TypeScript (one root `tsconfig.json` checking `packages/**`), husky, lint-staged. Packages never duplicate dev tooling.
 - pi dependency versions are declared once in the `catalog:` section of `pnpm-workspace.yaml`; every package references them with `catalog:` in its `peerDependencies`.
 

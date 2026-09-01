@@ -2,7 +2,7 @@
 
 所有 pi 扩展的 pnpm workspace。设计意图与原则见根 [`SPEC.md`](SPEC.md)（新建包前先读）。
 
-- 6 个包全在 `packages/*`：清单与一行简介见根 README 表格，各包设计见各自 `SPEC.md`（pi-read-doc 无 SPEC，见 README）
+- 6 个包全在 `packages/*`：清单与一行简介见根 README 表格，各包设计见各自 `SPEC.md`
 - 新扩展在此新增一个 package
 
 ## 约定

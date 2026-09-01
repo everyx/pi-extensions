@@ -10,7 +10,6 @@ catalog:
 allowBuilds:
   '@google/genai': true
   esbuild: true
-  koffi: true
   protobufjs: true
 # pnpm's minimum-release-age policy (default 7 days) blocks freshly published
 # packages; this set is auto-maintained by pnpm while the pi 0.84.0 release
