@@ -42,7 +42,7 @@ export async function searchWithTinyfish(
 	if (params.blocked_domains?.length) url.searchParams.set("exclude_domains", params.blocked_domains.join(","));
 
 	const response = await limiter.run(() =>
-		fetchWithTimeout(url.href, { headers: { "X-API-Key": key } }, { signal: ctx.signal, timeoutMs: ctx.timeoutMs }),
+		fetchWithTimeout(url.href, { headers: { "X-API-Key": key } }, { signal: ctx.signal }),
 	);
 	if (!response.ok) {
 		const text = await response.text().catch(() => "");

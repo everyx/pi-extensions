@@ -113,7 +113,7 @@ async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchCont
 				},
 			}),
 		},
-		{ signal: ctx.signal, timeoutMs: ctx.timeoutMs },
+		{ signal: ctx.signal },
 	);
 
 	if (!response.ok) {

@@ -271,9 +271,9 @@ function buildSearchUrl(params: WebSearchParams, engine: EngineId): string {
 	return `https://${host}${path.replace("{q}", encodeURIComponent(query))}${qs}`;
 }
 
-export async function searchWithBsk(params: WebSearchParams, ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
+export async function searchWithBsk(params: WebSearchParams, _ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
 	const engine = pickEngine(params.locale);
-	const timeoutMs = ctx.timeoutMs ?? 30_000;
+	const timeoutMs = 30_000; // bsk attempt budget (runBsk's own default)
 	// baidu has no freshness param — an explicit error beats silently
 	// dropping the filter (SPEC: 能力缺失不静默).
 	if (params.recency && engine === "baidu") {

@@ -73,7 +73,7 @@ export async function searchWithTavily(
 				headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
 				body: JSON.stringify(body),
 			},
-			{ signal: ctx.signal, timeoutMs: ctx.timeoutMs },
+			{ signal: ctx.signal },
 		),
 	);
 	if (!response.ok) {

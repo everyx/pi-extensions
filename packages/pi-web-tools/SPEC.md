@@ -128,12 +128,13 @@ LLM 对搜索操作符有先验知识（`site:` / `filetype:` / `-` / `OR` / 引
 ## 能力与路由
 
 ```ts
-candidatesFor(params): Promise<ChannelId[]>   // 链序 ∩ 可用（key/CLI）∩ 能力（supports）
+candidatesFor(params, channels): SearchChannel[]          // 链序 ∩ 可用（key/CLI）∩ 能力（supports）
+searchFuse(params, channels, { signal, onAttempt }): Outcome   // walk：failover · 错误累积 · 末错入 LLM
 ```
 
 - 每通道一个 `available()`（key 非空 / bsk CLI 懒探测并缓存）+ `supports(params)`（能力门控——keyless Exa 不能兑现过滤器/.locale 时**跳过该通道**而非静默丢参数：SPEC 能力缺失不静默）。
 - 路由按链序 failover，错误累积进 details.failures；全灭才对 LLM 报错。
-- 注册表在 search/channels.ts（纯数据 + 组装，可单测）；HTTP 细节在各适配器。
+- 注册表在 search/channels.ts（每通道一个自描述对象：available/supports/search/echo，纯组装）；walk 逻辑在 search/fuse.ts（fake 通道可单测）；HTTP 细节在各适配器。加通道 = 一个适配器文件 + 注册表一条 + `ChannelId` union 一个成员（类型系统强制）。
 
 ## web_fetch 行为规格
 

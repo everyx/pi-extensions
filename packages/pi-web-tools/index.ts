@@ -12,12 +12,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { webFetch } from "./fetch/fetch.js";
 import { buildWebSearchSchema, type WebFetchParams, WebFetchParamsSchema } from "./schema.js";
-import { searchWithExa } from "./search/api/exa.js";
-import { searchWithFirecrawl } from "./search/api/firecrawl.js";
-import { searchWithTavily } from "./search/api/tavily.js";
-import { searchWithTinyfish } from "./search/api/tinyfish.js";
-import { pickEngine, searchWithBsk } from "./search/browser.js";
-import { candidatesFor } from "./search/channels.js";
+import { CHANNELS } from "./search/channels.js";
+import { searchFuse } from "./search/fuse.js";
 import type { ChannelId, FetchToolData, SearchResultItem, SearchToolData, WebSearchParams } from "./types.js";
 import { fetchView, searchView } from "./views.js";
 
@@ -83,69 +79,33 @@ async function executeSearch(
 		};
 	}
 
-	// Walk the fuse order; a channel that cannot honor the request's filters
-	// is not a candidate (SPEC: 能力缺失不静默，跳过而非降级).
-	const candidates = await candidatesFor(params);
-	if (candidates.length === 0) {
+	const out = await searchFuse(params, CHANNELS, {
+		signal,
+		// Surface the channel being tried on the live card (updates if a
+		// failure falls through to the next candidate).
+		onAttempt: (channel) =>
+			onUpdate?.({
+				content: [{ type: "text", text: `Searching "${params.query}" via ${channel}\u2026` }],
+				details: { query: params.query, channel },
+			}),
+	});
+
+	if (out.channel) {
+		return finalizeResult(out.results, out.channel, out.echo?.engine, params, startedAt);
+	}
+	if (out.failures.length === 0) {
 		return {
 			content: [{ type: "text", text: "No search channel is available." }],
 			details: { error: "No search channel is available.", query: params.query },
 			isError: true,
 		};
 	}
-
-	const failures: { channel: string; error: string; hint?: string }[] = [];
-	for (const channel of candidates) {
-		// Surface the channel being tried on the live card (updates if a
-		// failure falls through to the next candidate).
-		onUpdate?.({
-			content: [{ type: "text", text: `Searching "${params.query}" via ${channel}\u2026` }],
-			details: { query: params.query, channel },
-		});
-		try {
-			const result = await runChannel(channel, params, signal);
-			return finalizeResult(
-				result,
-				channel,
-				channel === "bsk" ? pickEngine(params.locale) : undefined,
-				params,
-				startedAt,
-			);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			// Config guidance travels in details (UI), never in LLM text
-			// (SPEC 错误分层: LLM 不含安装/配置指引).
-			const maybeHint = (err as { hint?: unknown }).hint;
-			const hint = typeof maybeHint === "string" ? maybeHint : undefined;
-			failures.push({ channel, error: message, ...(hint ? { hint } : {}) });
-		}
-	}
-
-	const message = `All search channels failed: ${failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`;
+	const message = `All search channels failed: ${out.failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`;
 	return {
-		content: [{ type: "text", text: failures[failures.length - 1]?.error || message }],
-		details: { error: message, failures, query: params.query, startedAt, endedAt: Date.now() },
+		content: [{ type: "text", text: out.lastError || message }],
+		details: { error: message, failures: out.failures, query: params.query, startedAt, endedAt: Date.now() },
 		isError: true,
 	};
-}
-
-async function runChannel(
-	channel: ChannelId,
-	params: WebSearchParams,
-	signal: AbortSignal | undefined,
-): Promise<SearchResultItem[]> {
-	switch (channel) {
-		case "tinyfish":
-			return searchWithTinyfish(params, { signal });
-		case "exa":
-			return searchWithExa(params, { signal });
-		case "tavily":
-			return searchWithTavily(params, { signal });
-		case "firecrawl":
-			return searchWithFirecrawl(params, { signal });
-		case "bsk":
-			return searchWithBsk(params, { signal });
-	}
 }
 
 // ── web_fetch ────────────────────────────────────────────────────

@@ -93,7 +93,7 @@ async function searchOnce(
 			},
 			body: JSON.stringify(body),
 		},
-		{ signal: ctx.signal, timeoutMs: ctx.timeoutMs },
+		{ signal: ctx.signal },
 	);
 
 	if (response.status === 429) {

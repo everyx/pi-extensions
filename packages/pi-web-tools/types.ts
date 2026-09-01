@@ -37,8 +37,21 @@ export interface WebSearchParams {
 export interface ChannelSearchContext {
 	/** AbortSignal from the tool call. */
 	signal?: AbortSignal;
-	/** Timeout budget for the whole channel attempt (ms). */
-	timeoutMs?: number;
+}
+
+/** One search channel (fuse member) — composed by search/channels.ts into
+ *  fuse order, walked by search/fuse.ts. */
+export interface SearchChannel {
+	id: ChannelId;
+	/** Environment gate — an unavailable channel is not a candidate. */
+	available: () => boolean | Promise<boolean>;
+	/** Capability gate — an available channel that cannot honor this
+	 *  request's filters is skipped (SPEC: 能力缺失不静默，跳过而非降级). */
+	supports: (params: WebSearchParams) => boolean;
+	/** The search call — HTTP/CLI details live in the adapter. */
+	search: (params: WebSearchParams, ctx: ChannelSearchContext) => Promise<SearchResultItem[]>;
+	/** Card echo — channel-specific fields for the result card (bsk: engine). */
+	echo?: (params: WebSearchParams) => { engine: EngineId };
 }
 
 /** web_search tool-result payload (`details.data`) — written by index.ts,
