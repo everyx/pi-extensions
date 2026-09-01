@@ -88,7 +88,7 @@ async function finishPage(
 async function fuseRender(url: string, signal?: AbortSignal): Promise<WebFetchResult | null> {
 	const candidates: Array<() => Promise<RenderedContent | null>> = [
 		() => fetchWithTinyfish(url, signal),
-		() => fetchUrlWithBsk(url),
+		() => fetchUrlWithBsk(url, 30_000, signal),
 	];
 	for (const render of candidates) {
 		const rendered = await render();

@@ -107,6 +107,8 @@ LLM 对搜索操作符有先验知识（`site:` / `filetype:` / `-` / `OR` / 引
 
 真实浏览器通道的已知风险：引擎触发人机验证 → 检测到 captcha 特征（`captcha / not a robot / automated requests`）→ **如实报错**（含引擎名），无 human-in-loop（bsk 无此 API）。bsk 是链尾——报错即全链失败，由 LLM 决定下一步（改写 query / 传 locale 重试）。
 
+- **浏览器所有权**：bsk 需要一个已开的 Chromium（经其扩展连接）。请求时无已连浏览器则自动启动一个（平台候选序）；**我们启动的实例**在会话结束、队列排空后延迟关闭（5s 宽限——新请求来则重置，其他会话仍活跃则不关）；**用户自己开的浏览器绝不触碰**。取消（AbortSignal）透传到**请求路径**的在途 bsk CLI 调用（navigate/evaluate），取消即止（Node child_process 原生 `signal`）；连接/会话生命周期调用不透传——连接等待 15s 截止、各 CLI 调用自带 10–30s 超时，不无限占队列槽位。决策逻辑独立成 bsk-browser.ts（依赖注入，fake CLI 驱动测试）。
+
 ## 错误处理与诊断
 
 ### 错误分层
