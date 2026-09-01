@@ -57,7 +57,7 @@ test("notification header carries the status icon", () => {
 			details: {
 				status: "completed",
 				agent_id: "a1",
-				title: "research db schema",
+				label: "research db schema",
 				result: "found 5 tables",
 				usage: { durationMs: 27500, tokens: 1250, toolUses: 3 },
 			},
@@ -74,7 +74,7 @@ test("notification header carries the status icon", () => {
 			details: {
 				status: "failed",
 				agent_id: "a1",
-				title: "research db schema",
+				label: "research db schema",
 				result: "partial",
 				usage: { durationMs: 12000, tokens: 1100, toolUses: 2 },
 			},
@@ -89,7 +89,7 @@ test("notification header carries the status icon", () => {
 			details: {
 				status: "stopped",
 				agent_id: "a1",
-				title: "slow query probe",
+				label: "slow query probe",
 				usage: { durationMs: 3200, tokens: 0, toolUses: 0 },
 			},
 		},

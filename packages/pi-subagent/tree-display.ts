@@ -22,7 +22,7 @@ function applyTreeEvent(widget: AgentWidget, event: AgentTreeEvent): void {
 		case "add":
 			widget.addNested({
 				agentId: event.id,
-				title: event.title,
+				label: event.label,
 				startedAt: event.startedAt,
 				indent: event.depth,
 				status: event.status,

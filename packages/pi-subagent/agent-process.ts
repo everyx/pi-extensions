@@ -48,8 +48,8 @@ export interface AgentProcessOptions {
 	thinking?: string;
 	/** Tool allowlist (comma-joined into --tools). */
 	tools?: string[];
-	/** Short task title (notification card). */
-	title: string;
+	/** Short task label (notification card). */
+	label: string;
 	/** Short human-readable id ("max", "zoe") assigned by the registry (name-gen.ts). */
 	agentId: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
@@ -90,7 +90,7 @@ const STOP_GRACE_MS = 5_000;
 
 export class AgentProcess {
 	readonly agentId: string;
-	readonly title: string;
+	readonly label: string;
 	readonly startedAt = Date.now();
 	readonly model: string | undefined;
 	readonly thinking: string | undefined;
@@ -126,7 +126,7 @@ export class AgentProcess {
 
 	constructor(options: AgentProcessOptions, deps: AgentProcessDeps = {}) {
 		this.agentId = options.agentId;
-		this.title = options.title;
+		this.label = options.label;
 		this.timeoutMs = options.timeoutMs;
 		this.abortSettleGraceMs = options.abortSettleGraceMs ?? DEFAULT_ABORT_SETTLE_GRACE_MS;
 		this.model = options.model;
@@ -143,7 +143,7 @@ export class AgentProcess {
 		if (options.thinking) args.push("--thinking", options.thinking);
 		if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
 		// Title (resolved by the caller — explicit or derived) names the session.
-		args.push("--name", options.title.slice(0, 80));
+		args.push("--name", options.label.slice(0, 80));
 		if (options.sessionDir) args.push("--session-dir", options.sessionDir);
 
 		const clientOptions: RpcClientOptions = {

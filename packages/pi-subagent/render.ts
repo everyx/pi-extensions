@@ -53,7 +53,7 @@ export function renderNotification(
 
 	return renderNotificationCard(
 		{
-			header: { icon, name: "agent_spawn", title: d.title, tail: status, meta: metaParts },
+			header: { icon, name: "agent_spawn", title: d.label, tail: status, meta: metaParts },
 			body,
 			footer: d.sessionPath,
 			expanded,

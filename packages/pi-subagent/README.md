@@ -28,7 +28,7 @@ Pi has no built‑in sub‑agents. So heavy, parallel, or context‑heavy work c
 - **Nestable** — a child is a full pi instance, so it can spawn another child.
 - **Token economy** — the system side stays lean:
   - **System prompt** — three tools and terse guidance inject roughly 2–3KB of system prompt (token count drifts with the tokenizer).
-  - **Notification** — the LLM sees only minimal structured data; decoration (title, usage, session path) stays in the render layer.
+  - **Notification** — the LLM sees only minimal structured data; decoration (label, usage, session path) stays in the render layer.
   - **Results** — tail‑truncated (2000 lines / 50KB); expand any card for the full transcript.
 
 ## Comparison with similar extensions
@@ -108,7 +108,7 @@ The directory lives **outside** pi's standard session tree so `pi -r` (resume) s
 | Param | Type | Default | Meaning |
 |---|---|---|---|
 | `prompt` | string | **required** | Self‑contained task description for the sub‑agent. |
-| `title` | string (3–5 words) | optional | Labels the tool card, notification card, widget row, and session name — omitted, it is derived from the first prompt line. |
+| `label` | string | required | Short label shown on the tool card, notification card, widget row, and session name. |
 | `model` | string | inherited | Override the sub‑agent's model. Specified but not registered → **error, no silent fallback**. |
 | `thinking` | `"off"`…`"max"` | inherited | Override thinking level; omit to run at your current session's level. |
 | `tools` | string[] | all | Whitelist of tool names visible to the sub‑agent — anything else is invisible. |

@@ -6,7 +6,7 @@ import { createNestedFold, resolveTreeAnchor } from "../nested-fold.js";
 const add = (id: string, status: "running" | "idle" = "running"): AgentTreeEvent => ({
 	op: "add",
 	id,
-	title: id,
+	label: id,
 	startedAt: 1000,
 	depth: 1,
 	status,

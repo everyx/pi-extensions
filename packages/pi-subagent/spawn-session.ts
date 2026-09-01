@@ -24,7 +24,7 @@ import type { RenderEvent } from "./types.js";
  *  purpose: tests build literal fakes instead of mocking AgentProcess. */
 export interface SpawnSessionAgent {
 	agentId: string;
-	title: string;
+	label: string;
 	model?: string;
 	thinking?: string;
 	startedAt: number;

@@ -28,7 +28,7 @@ import { type AgentMessage, type RouteDecision, routeMessage } from "./protocol.
 /** Narrow agent surface the registry needs — AgentProcess satisfies it. */
 export interface RegisteredAgent {
 	readonly agentId: string;
-	readonly title: string;
+	readonly label: string;
 	readonly model?: string;
 	readonly thinking?: string;
 	/** Resident after completion (idle) — explicit opt-in; complete() keeps it. */

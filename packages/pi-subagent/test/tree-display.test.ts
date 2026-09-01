@@ -47,7 +47,7 @@ function harness(opts: { hasParent?: boolean; foregroundEdge?: boolean } = {}) {
 }
 
 const addAt = (depth: number) =>
-	({ op: "add", id: "k1", title: "K", startedAt: 1, depth, status: "running" }) as AgentTreeEvent;
+	({ op: "add", id: "k1", label: "K", startedAt: 1, depth, status: "running" }) as AgentTreeEvent;
 
 describe("createSubtreeDisplay — 显示面统一规则 full chain", () => {
 	it("root + open foreground card → folds, refreshes card, never touches widget", () => {
@@ -62,7 +62,7 @@ describe("createSubtreeDisplay — 显示面统一规则 full chain", () => {
 		const h = harness({ hasParent: true });
 		h.display.onTreeEvent(addAt(1));
 		assert.equal(h.foldCount(), 0);
-		assert.deepEqual(h.forward, [{ op: "add", id: "k1", title: "K", startedAt: 1, depth: 2, status: "running" }]);
+		assert.deepEqual(h.forward, [{ op: "add", id: "k1", label: "K", startedAt: 1, depth: 2, status: "running" }]);
 	});
 
 	it("root + background child → widget rows at forwarded depth", () => {

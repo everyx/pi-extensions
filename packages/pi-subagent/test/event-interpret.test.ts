@@ -238,16 +238,16 @@ describe("tree telemetry events (TREE_STATUS_KEY)", () => {
 
 	it("parses add (running) / add (idle, resident)", () => {
 		assert.deepEqual(
-			treeEvent({ op: "add", id: "n1", title: "deep task", startedAt: 100, depth: 1, status: "running" }),
+			treeEvent({ op: "add", id: "n1", label: "deep task", startedAt: 100, depth: 1, status: "running" }),
 			[
 				{
 					type: "agent_tree",
-					event: { op: "add", id: "n1", title: "deep task", startedAt: 100, depth: 1, status: "running" },
+					event: { op: "add", id: "n1", label: "deep task", startedAt: 100, depth: 1, status: "running" },
 				},
 			],
 		);
-		assert.deepEqual(treeEvent({ op: "add", id: "n2", title: "t", startedAt: 1, depth: 3, status: "idle" }), [
-			{ type: "agent_tree", event: { op: "add", id: "n2", title: "t", startedAt: 1, depth: 3, status: "idle" } },
+		assert.deepEqual(treeEvent({ op: "add", id: "n2", label: "t", startedAt: 1, depth: 3, status: "idle" }), [
+			{ type: "agent_tree", event: { op: "add", id: "n2", label: "t", startedAt: 1, depth: 3, status: "idle" } },
 		]);
 	});
 
@@ -272,8 +272,8 @@ describe("tree telemetry events (TREE_STATUS_KEY)", () => {
 
 	it("rejects malformed payloads (bad op, missing fields, bad json, bad activity)", () => {
 		assert.deepEqual(treeEvent({ op: "nope", id: "n1" }), []);
-		assert.deepEqual(treeEvent({ op: "add", id: "", title: "t", startedAt: 1, depth: 1, status: "running" }), []);
-		assert.deepEqual(treeEvent({ op: "add", title: "t", startedAt: 1, depth: 1, status: "running" }), []);
+		assert.deepEqual(treeEvent({ op: "add", id: "", label: "t", startedAt: 1, depth: 1, status: "running" }), []);
+		assert.deepEqual(treeEvent({ op: "add", label: "t", startedAt: 1, depth: 1, status: "running" }), []);
 		assert.deepEqual(treeEvent({ op: "activity", id: "n1", activity: { kind: "weird" } }), []);
 		assert.deepEqual(treeEvent("{not json"), []);
 	});

@@ -30,8 +30,8 @@ export type RenderEvent =
 export type SubagentDetails = {
 	task?: string;
 	agentId?: string;
-	/** Agent title — used by the background-start status line (the tool header is empty for background). */
-	title?: string;
+	/** Agent label — used by the background-start status line (the tool header is empty for background). */
+	label?: string;
 	/** Resolved "provider/id" model string, or default when omitted. */
 	model?: string;
 	/** Reasoning intensity ("off"…"max"), or inherited level when omitted. */
@@ -61,8 +61,8 @@ export type SubagentDetails = {
 export interface NotificationDetails {
 	status: string;
 	agent_id: string;
-	/** Required — always passed by notifyCompletion (AgentProcess.title). */
-	title: string;
+	/** Required — always passed by notifyCompletion (AgentProcess.label). */
+	label: string;
 	/** Resolved model string, or default when omitted. */
 	model?: string;
 	/** Reasoning intensity, or inherited level when omitted. */

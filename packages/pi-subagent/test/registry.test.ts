@@ -17,7 +17,7 @@ import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "../regi
 
 class FakeAgent implements RegisteredAgent {
 	readonly agentId: string;
-	readonly title: string;
+	readonly label: string;
 	readonly persistent?: boolean;
 	stoppedByControl = false;
 	stopCalls = 0;
@@ -26,9 +26,9 @@ class FakeAgent implements RegisteredAgent {
 	delivered: string[] = [];
 	sendOk = true;
 
-	constructor(agentId: string, title = "fake", persistent = false) {
+	constructor(agentId: string, label = "fake", persistent = false) {
 		this.agentId = agentId;
-		this.title = title;
+		this.label = label;
 		this.persistent = persistent;
 	}
 

@@ -20,17 +20,17 @@ export function atId(id: string): string {
 }
 
 /**
- * Card title for agent_stop / agent_send: `@id — title` — the target's human
- * title when the result carried one, else the at-prefixed target id, else
- * from args. The @-prefix is applied exactly once (via atId).
+ * Card title for agent_stop / agent_send: `@id — label` — the target's label
+ * when the result carried one, else the at-prefixed target id, else from args.
+ * The @-prefix is applied exactly once (via atId).
  */
 export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, idKey: string): string {
-	const data = (ctx.result?.data as ({ title?: string } & Record<string, unknown>) | undefined) ?? {};
+	const data = (ctx.result?.data as ({ label?: string } & Record<string, unknown>) | undefined) ?? {};
 	const args = ctx.args as Record<string, unknown> | undefined;
 	const id = data[idKey] ?? args?.[idKey];
-	const title = data.title;
+	const label = data.label;
 	const idPart = id ? atId(String(id)) : "";
-	const joined = title && idPart ? `${idPart} — ${title}` : (title ?? idPart);
+	const joined = label && idPart ? `${idPart} — ${label}` : (label ?? idPart);
 	return joined;
 }
 
@@ -38,7 +38,7 @@ export const spawnView = createToolView<Record<string, unknown>, SubagentDetails
 	name: "agent_spawn",
 	title: (ctx) => {
 		const d = ctx.result?.data;
-		return String((ctx.args as { title?: unknown }).title ?? d?.title ?? d?.task ?? "");
+		return String((ctx.args as { label?: unknown }).label ?? d?.label ?? d?.task ?? "");
 	},
 	tail: (ctx) => {
 		if (ctx.status === "error") return "start failed";

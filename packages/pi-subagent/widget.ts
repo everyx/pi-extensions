@@ -2,8 +2,8 @@
  * pi-subagent — AgentWidget.
  *
  * Persistent above-editor widget showing one status line per tracked agent:
- * `⠋ title (42.0s)`, plus a latest-activity excerpt line aligned under the
- * title. Backed by the shared pi-ui StatusWidget (generic foreground
+ * `⠋ label (42.0s)`, plus a latest-activity excerpt line aligned under the
+ * label. Backed by the shared pi-ui StatusWidget (generic foreground
  * indicator for background work); the agent-specific part is the row data
  * (AgentProcess → WidgetItem) and the activity excerpt.
  *
@@ -31,8 +31,8 @@ export class AgentWidget {
 	add(agent: AgentProcess): void {
 		this.widget.add({
 			id: agent.agentId,
-			// @id — title: the user matches the @name the LLM mentions in chat.
-			title: `@${agent.agentId} — ${agent.title}`,
+			// @id — label: the user matches the @name the LLM mentions in chat.
+			title: `@${agent.agentId} — ${agent.label}`,
 			startedAt: agent.startedAt,
 			status: agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done",
 			rows: activityToRows(agent.getLatestActivity()),
@@ -43,14 +43,14 @@ export class AgentWidget {
 	 *  pure data — no local AgentProcess behind the row. */
 	addNested(agent: {
 		agentId: string;
-		title: string;
+		label: string;
 		startedAt: number;
 		indent: number;
 		status: "running" | "idle";
 	}): void {
 		this.widget.add({
 			id: agent.agentId,
-			title: `@${agent.agentId} — ${agent.title}`,
+			title: `@${agent.agentId} — ${agent.label}`,
 			startedAt: agent.startedAt,
 			status: agent.status === "idle" ? "idle" : "running",
 			indent: agent.indent,

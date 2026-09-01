@@ -51,7 +51,7 @@ bash: pnpm check
 session: /path/...jsonl
 ```
 
-- header：`⠋/✓/✗` + `agent_spawn` + `"title"` + muted meta——时间从 state 共享；`run_in_background` 时 renderCall 返回空（后台 spawn 用独立结果卡）；前台卡 meta 尾部追加**嵌套子树汇总段**（`done n/total · n running · …`，与 widget 标题行同词汇，见实现决策「显示面统一规则」）
+- header：`⠋/✓/✗` + `agent_spawn` + `"label"` + muted meta——时间从 state 共享；`run_in_background` 时 renderCall 返回空（后台 spawn 用独立结果卡）；前台卡 meta 尾部追加**嵌套子树汇总段**（`done n/total · n running · …`，与 widget 标题行同词汇，见实现决策「显示面统一规则」）
 - body：混合活动流——prompt 在流头，随后按事件顺序渲染子 agent 会话（Thinking... / 工具调用 / 流式文本）；随输出增长 prompt 与早期活动滚出折叠区
 - footer：仅 `session: <path>`
 - 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值
@@ -218,7 +218,7 @@ queued → running ──→ completed（通知）
 ### 会话存储
 
 - 目录在 pi 标准会话树之外——`pi -r` 保持干净；永不删除
-- `--name` 始终传递：显式 title，缺省则从 prompt 首行派生（safeTitle 截断）——title 是纯 UI 标签，不影响子代理行为，永不值得为它阻塞 spawn 或消耗校验轮次
+- `--name` 始终传递：label（80 字截断）——label 是纯 UI 标签，不影响子代理行为
 - attach：`pi --session <path>`
 
 ### 嵌套

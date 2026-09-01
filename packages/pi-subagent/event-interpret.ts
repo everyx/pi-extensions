@@ -65,7 +65,7 @@ export const TREE_STATUS_KEY = "pi-subagent-tree";
  * hangs forever; it may just outlive the truth by up to one deadline.
  */
 export type AgentTreeEvent =
-	| { op: "add"; id: string; title: string; startedAt: number; depth: number; status: "running" | "idle" }
+	| { op: "add"; id: string; label: string; startedAt: number; depth: number; status: "running" | "idle" }
 	| { op: "activity"; id: string; activity: AgentActivity }
 	| { op: "remove"; id: string; status: WidgetResult };
 
@@ -201,11 +201,11 @@ function parseTreeEvent(value: unknown): AgentTreeEvent | undefined {
 	if (typeof v.id !== "string" || !v.id) return undefined;
 	switch (v.op) {
 		case "add":
-			if (typeof v.title !== "string" || typeof v.startedAt !== "number" || typeof v.depth !== "number") {
+			if (typeof v.label !== "string" || typeof v.startedAt !== "number" || typeof v.depth !== "number") {
 				return undefined;
 			}
 			if (v.status !== "running" && v.status !== "idle") return undefined;
-			return { op: "add", id: v.id, title: v.title, startedAt: v.startedAt, depth: v.depth, status: v.status };
+			return { op: "add", id: v.id, label: v.label, startedAt: v.startedAt, depth: v.depth, status: v.status };
 		case "activity":
 			return isActivity(v.activity) ? { op: "activity", id: v.id, activity: v.activity } : undefined;
 		case "remove":

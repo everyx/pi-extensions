@@ -25,7 +25,7 @@ import { AgentWidget } from "./widget.js";
 /** Minimal Agent params shape for preview stories. */
 interface AgentParams {
 	prompt: string;
-	title: string;
+	label: string;
 	model?: string;
 	thinking?: string;
 	run_in_background?: boolean;
@@ -58,7 +58,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const params: AgentParams = {
 	prompt: "Check the CI config for flaky tests. Look at the pipeline definition and report issues with evidence.",
-	title: "检查 CI 配置",
+	label: "检查 CI 配置",
 	model: "claude-sonnet",
 	thinking: "high",
 };
@@ -151,7 +151,7 @@ type StreamCard =
 	| {
 			kind: "control";
 			args: { agent_id?: string; to?: string; message?: string };
-			details: { to?: string; message?: string; title?: string; error?: string; status?: string };
+			details: { to?: string; message?: string; label?: string; error?: string; status?: string };
 			isPartial: boolean;
 			isError?: boolean;
 			expanded?: boolean;
@@ -161,7 +161,7 @@ type StreamCard =
 			details: {
 				status: "completed" | "failed" | "stopped";
 				agent_id: string;
-				title: string;
+				label: string;
 				model?: string;
 				thinking?: string;
 				result?: string;
@@ -175,7 +175,7 @@ type StreamCard =
 interface WidgetAgent {
 	id: string;
 	/** Present while the agent is running in the widget. */
-	title?: string;
+	label?: string;
 	/** Offset (ms) behind the round start — elapsed grows from here. */
 	startedOffset?: number;
 	activity?: AgentActivity;
@@ -321,10 +321,10 @@ const widgetUi = {
 	},
 } as never;
 const widget = new AgentWidget(widgetUi as never);
-const fakeAgent = (agentId: string, title: string, startedAt: number, activity: unknown) =>
+const fakeAgent = (agentId: string, label: string, startedAt: number, activity: unknown) =>
 	({
 		agentId,
-		title,
+		label,
 		startedAt,
 		status: "running",
 		getLatestActivity: () => activity,
@@ -353,11 +353,11 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 			widget.setStatus(a.id, a.idle ? "idle" : "running");
 			continue;
 		}
-		if (a.title == null) continue;
+		if (a.label == null) continue;
 		// startedAt per round: elapsed grows from the agent's own start.
 		const started = Date.now() - (a.startedOffset ?? 0);
 		widgetState.set(a.id, { startedAt: started });
-		widget.add(fakeAgent(a.id, a.title, started, a.activity));
+		widget.add(fakeAgent(a.id, a.label, started, a.activity));
 		// Persistent agent already completed: register (running) then flip to
 		// idle — same two-step path as the real registry (register → markIdle).
 		if (a.idle) widget.setStatus(a.id, "idle");
@@ -385,7 +385,7 @@ const pathA: LifecyclePath = {
 			name: "a1 started",
 			ticks: 19,
 			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false }],
-			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 			status: "working",
 		},
 		{
@@ -395,12 +395,12 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: true,
 				},
 			],
-			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 			status: "spawn",
 		},
 		{
@@ -410,14 +410,14 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
 			status: "working",
 		},
@@ -428,20 +428,20 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: true,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 			],
 			status: "spawn",
 		},
@@ -452,21 +452,21 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", label: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "working",
 		},
@@ -477,21 +477,21 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", label: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "working",
 		},
@@ -502,27 +502,27 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
 					kind: "control",
 					args: { to: "zoe", message: "优先看 orders 表索引" },
-					details: { to: "zoe", title: "慢查询排查" },
+					details: { to: "zoe", label: "慢查询排查" },
 					isPartial: true,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", label: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "send",
 		},
@@ -533,30 +533,30 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
 					kind: "control",
 					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
-						title: "慢查询排查",
+						label: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
 					isPartial: false,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", label: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "send",
 		},
@@ -567,21 +567,21 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
 					kind: "control",
 					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
-						title: "慢查询排查",
+						label: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
 					isPartial: false,
@@ -589,14 +589,14 @@ const pathA: LifecyclePath = {
 				{
 					kind: "control",
 					args: { agent_id: "kai" },
-					details: { title: "审计 reports 表" },
+					details: { label: "审计 reports 表" },
 					isPartial: true,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
-				{ id: "kai", title: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "kai", label: "审计 reports 表", startedOffset: 3_000, activity: activityTool },
 			],
 			status: "stop",
 		},
@@ -607,21 +607,21 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
 					kind: "control",
 					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
-						title: "慢查询排查",
+						label: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
 					isPartial: false,
@@ -629,13 +629,13 @@ const pathA: LifecyclePath = {
 				{
 					kind: "control",
 					args: { agent_id: "kai" },
-					details: { title: "审计 reports 表" },
+					details: { label: "审计 reports 表" },
 					isPartial: false,
 				},
 			],
 			widget: [
-				{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "kai", removed: "stopped" },
 			],
 			status: "stop",
@@ -647,21 +647,21 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
 					kind: "control",
 					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
-						title: "慢查询排查",
+						label: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
 					isPartial: false,
@@ -669,7 +669,7 @@ const pathA: LifecyclePath = {
 				{
 					kind: "control",
 					args: { agent_id: "kai" },
-					details: { title: "审计 reports 表" },
+					details: { label: "审计 reports 表" },
 					isPartial: false,
 				},
 				{
@@ -677,7 +677,7 @@ const pathA: LifecyclePath = {
 					details: {
 						status: "completed",
 						agent_id: "max",
-						title: "检查 CI 配置",
+						label: "检查 CI 配置",
 						model: p.model,
 						thinking: p.thinking,
 						result: "Found 5 flaky tests. All share the `retries: 0` flag.",
@@ -688,7 +688,7 @@ const pathA: LifecyclePath = {
 				},
 			],
 			widget: [
-				{ id: "zoe", title: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
+				{ id: "zoe", label: "慢查询排查", startedOffset: 12_000, activity: activityThinking },
 				{ id: "max", removed: "done" },
 			],
 			status: "notify",
@@ -700,21 +700,21 @@ const pathA: LifecyclePath = {
 				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, title: "慢查询排查" }),
+					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ runInBackground: true, label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, title: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, title: "审计 reports 表" }),
+					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ runInBackground: true, label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
 					kind: "control",
 					args: { to: "zoe", message: "优先看 orders 表索引" },
 					details: {
-						title: "慢查询排查",
+						label: "慢查询排查",
 						message: "优先看 orders 表的索引和慢查询\nSecond line: focus on the result.\nThird: wrap up when done.",
 					},
 					isPartial: false,
@@ -722,7 +722,7 @@ const pathA: LifecyclePath = {
 				{
 					kind: "control",
 					args: { agent_id: "kai" },
-					details: { title: "审计 reports 表" },
+					details: { label: "审计 reports 表" },
 					isPartial: false,
 				},
 				{
@@ -730,7 +730,7 @@ const pathA: LifecyclePath = {
 					details: {
 						status: "completed",
 						agent_id: "max",
-						title: "检查 CI 配置",
+						label: "检查 CI 配置",
 						model: p.model,
 						thinking: p.thinking,
 						result: "Found 5 flaky tests. All share the `retries: 0` flag.",
@@ -744,7 +744,7 @@ const pathA: LifecyclePath = {
 					details: {
 						status: "completed",
 						agent_id: "zoe",
-						title: "慢查询排查",
+						label: "慢查询排查",
 						model: p.model,
 						thinking: p.thinking,
 						result: "Slow query found: orders.idx_created_at missing; added.",
@@ -835,7 +835,7 @@ const pathC: LifecyclePath = {
 					args: bgArgs,
 					details: details({
 						runInBackground: true,
-						title: "bad model",
+						label: "bad model",
 						error: 'Model "no-such-model-xyz" not available.',
 					}),
 					isPartial: false,
@@ -853,7 +853,7 @@ const pathC: LifecyclePath = {
 					args: bgArgs,
 					details: details({
 						runInBackground: true,
-						title: "bad model",
+						label: "bad model",
 						error: 'Model "no-such-model-xyz" not available.',
 					}),
 					isPartial: false,
@@ -864,7 +864,7 @@ const pathC: LifecyclePath = {
 					details: {
 						status: "failed",
 						agent_id: "max",
-						title: params.title,
+						label: params.label,
 						model: p.model,
 						thinking: p.thinking,
 						result: 'Model "no-such-model-xyz" not available.',
@@ -940,14 +940,14 @@ const pathE: LifecyclePath = {
 					details: {
 						status: "completed",
 						agent_id: "max",
-						title: "检查 CI 配置",
+						label: "检查 CI 配置",
 						result: "Found 5 issues, all flaky tests traced to shared setup.",
 						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
 						idle: true,
 					},
 				},
 			],
-			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, idle: true }],
+			widget: [{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, idle: true }],
 		},
 		{
 			name: "message wakes",
@@ -959,7 +959,7 @@ const pathE: LifecyclePath = {
 					details: {
 						status: "completed",
 						agent_id: "max",
-						title: "检查 CI 配置",
+						label: "检查 CI 配置",
 						result: "Found 5 issues, all flaky tests traced to shared setup.",
 						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
 						idle: true,
@@ -972,7 +972,7 @@ const pathE: LifecyclePath = {
 					isPartial: true,
 				},
 			],
-			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 		},
 		{
 			name: "delivered",
@@ -985,7 +985,7 @@ const pathE: LifecyclePath = {
 					details: {
 						status: "completed",
 						agent_id: "max",
-						title: "检查 CI 配置",
+						label: "检查 CI 配置",
 						result: "Found 5 issues, all flaky tests traced to shared setup.",
 						usage: { durationMs: 27_500, tokens: 1250, toolUses: 3 },
 						idle: true,
@@ -994,11 +994,11 @@ const pathE: LifecyclePath = {
 				{
 					kind: "control",
 					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
-					details: { to: "max", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "max", label: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
 					isPartial: false,
 				},
 			],
-			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 		},
 		{
 			name: "stop",
@@ -1008,12 +1008,12 @@ const pathE: LifecyclePath = {
 				{
 					kind: "control",
 					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
-					details: { to: "max", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "max", label: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
 					isPartial: false,
 				},
-				{ kind: "control", args: { agent_id: "max" }, details: { title: "检查 CI 配置" }, isPartial: true },
+				{ kind: "control", args: { agent_id: "max" }, details: { label: "检查 CI 配置" }, isPartial: true },
 			],
-			widget: [{ id: "max", title: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
+			widget: [{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 		},
 		{
 			name: "stopped",
@@ -1024,10 +1024,10 @@ const pathE: LifecyclePath = {
 				{
 					kind: "control",
 					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
-					details: { to: "max", title: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
+					details: { to: "max", label: "检查 CI 配置", message: "继续：给 5 个问题各写一个修复 PR 描述" },
 					isPartial: false,
 				},
-				{ kind: "control", args: { agent_id: "max" }, details: { title: "检查 CI 配置" }, isPartial: false },
+				{ kind: "control", args: { agent_id: "max" }, details: { label: "检查 CI 配置" }, isPartial: false },
 			],
 		},
 	],

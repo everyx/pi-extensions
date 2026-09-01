@@ -41,7 +41,7 @@ export function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, compl
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,
-		title: `@${agent.agentId} — ${agent.title}`,
+		label: `@${agent.agentId} — ${agent.label}`,
 		model: agent.model,
 		thinking: agent.thinking,
 		// Card body (never enters LLM context — verified against convertToLlm).

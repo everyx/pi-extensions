@@ -13,9 +13,9 @@ test("titleFrom never renders @@ (double-prefix regression)", () => {
 	// agent_send to "@parent": details.to keeps the literal @ (protocol routes
 	// on it); the card title must show a single @.
 	assert.equal(titleFrom({ result: { data: { to: "@parent", message: "hi" } }, args: {} }, "to"), "@parent");
-	// Plain id gets the prefix added once, joined with the title.
+	// Plain id gets the prefix added once, joined with the label.
 	assert.equal(
-		titleFrom({ result: { data: { to: "zoe", title: "Research schema" } }, args: {} }, "to"),
+		titleFrom({ result: { data: { to: "zoe", label: "Research schema" } }, args: {} }, "to"),
 		"@zoe — Research schema",
 	);
 	// agent_stop not-found: executor puts the stripped id in details.agentId

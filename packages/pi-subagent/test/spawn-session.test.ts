@@ -10,7 +10,7 @@ function fakeAgent(overrides: Partial<SpawnSessionAgent> & { completion?: AgentC
 	const calls: string[] = [];
 	const agent: SpawnSessionAgent & { calls: string[] } = {
 		agentId: "t1",
-		title: "Test",
+		label: "Test",
 		model: "m/1",
 		thinking: undefined,
 		startedAt: 1000,

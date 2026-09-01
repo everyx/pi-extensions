@@ -33,7 +33,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { safeTitle } from "@everyx/pi-ui/width.js";
 import { Type } from "typebox";
 import { AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
@@ -143,10 +142,10 @@ function createTreeTelemetry(hasParent: boolean) {
 	const report = (event: AgentTreeEvent) => uiRef?.setStatus(TREE_STATUS_KEY, JSON.stringify(event));
 	return {
 		report,
-		add(agent: { agentId: string; title: string; startedAt: number }, status: "running" | "idle"): void {
+		add(agent: { agentId: string; label: string; startedAt: number }, status: "running" | "idle"): void {
 			if (!hasParent) return;
 			tracked.add(agent.agentId);
-			report({ op: "add", id: agent.agentId, title: agent.title, startedAt: agent.startedAt, depth: 1, status });
+			report({ op: "add", id: agent.agentId, label: agent.label, startedAt: agent.startedAt, depth: 1, status });
 		},
 		activity(agent: { agentId: string; getLatestActivity(): AgentActivity | undefined }): void {
 			if (!tracked.has(agent.agentId)) return;
@@ -164,7 +163,7 @@ function createTreeTelemetry(hasParent: boolean) {
 /** agent_spawn tool params (schema static shape). */
 interface SpawnParams {
 	prompt: string;
-	title: string;
+	label: string;
 	model?: string;
 	thinking?: string;
 	tools?: string[];
@@ -189,17 +188,9 @@ interface SendParams {
 const SpawnPromptField = Type.String({
 	description: "The task for the sub-agent.",
 });
-const SpawnTitleField = Type.Optional(
-	Type.String({
-		description: "Task title. Omit to derive one from the prompt.",
-	}),
-);
-
-/** Fallback when no explicit title was given: the prompt's first line, capped
- *  to a one-line title budget (session names / notification cards never wrap). */
-export function deriveTitle(prompt: string | undefined): string {
-	return safeTitle((prompt ?? "").split("\n")[0], 60);
-}
+const SpawnLabelField = Type.String({
+	description: "Task label.",
+});
 const SpawnModelField = Type.Optional(
 	Type.String({
 		description:
@@ -249,7 +240,7 @@ const SpawnTimeoutField = Type.Optional(
 export function buildSpawnParamsSchema(hasParent: boolean): ReturnType<typeof Type.Object> {
 	return Type.Object({
 		prompt: SpawnPromptField,
-		title: SpawnTitleField,
+		label: SpawnLabelField,
 		model: SpawnModelField,
 		thinking: SpawnThinkingField,
 		tools: SpawnToolsField,
@@ -448,11 +439,16 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
 			captureUi(ctx);
 			const params = raw as unknown as SpawnParams;
-			// Title is cosmetic — it names the session, card, and notifications,
-			// and never changes what the agent does. Never worth blocking a spawn
-			// on (or a validation round-trip): omitted → derive from the prompt's
-			// first line; renderers cap display length themselves.
-			const resolveTitle = (): string => params.title?.trim() || deriveTitle(params.prompt);
+			// Label is cosmetic — it names the session, card, and notifications,
+			// and never changes what the agent does.
+			const label = params.label?.trim();
+			if (!label) {
+				return {
+					content: [{ type: "text", text: "`label` is required." }],
+					details: { error: "`label` is required." },
+					isError: true,
+				};
+			}
 			// Schema hides run_in_background from sub-agents; this guard catches
 			// hallucinated args (schema validation may pass extras through).
 			if (HAS_PARENT && params.run_in_background != null) {
@@ -468,7 +464,7 @@ export default function (pi: ExtensionAPI) {
 								"caller can decide.",
 						},
 					],
-					details: { error: "background spawns are root-only", title: resolveTitle() },
+					details: { error: "background spawns are root-only", label },
 					isError: true,
 				};
 			}
@@ -483,12 +479,12 @@ export default function (pi: ExtensionAPI) {
 
 			const resolved = resolveModel(ctx.modelRegistry, ctx.model, params.model);
 			if (resolved.error) {
-				// Background: render as the status line `Agent <title> start failed:
+				// Background: render as the status line `Agent <label> start failed:
 				// <reason>` (the id never exists yet — spawn didn't happen).
 				return {
 					content: [{ type: "text", text: resolved.error }],
 					details: params.run_in_background
-						? { runInBackground: true, title: resolveTitle(), error: resolved.error }
+						? { runInBackground: true, label, error: resolved.error }
 						: { error: resolved.error },
 					isError: true,
 				};
@@ -553,7 +549,7 @@ export default function (pi: ExtensionAPI) {
 				model: resolved.model,
 				thinking: params.thinking ?? pi.getThinkingLevel(),
 				tools: params.tools,
-				title: resolveTitle(),
+				label,
 				sessionDir: SUBAGENT_SESSION_DIR,
 				timeoutMs: params.timeoutMs,
 				// Resident after completion (idle, zero token) — explicit opt-in.
@@ -628,10 +624,10 @@ export default function (pi: ExtensionAPI) {
 							}),
 						onBackgroundStarting: () =>
 							onUpdate?.({
-								content: [{ type: "text", text: `Starting ${agent.title}\u2026` }],
+								content: [{ type: "text", text: `Starting ${agent.label}\u2026` }],
 								details: {
 									runInBackground: true,
-									title: agent.title,
+									label: agent.label,
 									model: agent.model,
 									thinking: agent.thinking,
 								} satisfies SubagentDetails,
@@ -685,15 +681,15 @@ export default function (pi: ExtensionAPI) {
 					// line shows it to the user — no follow-up notification on top.
 					return spawnErrorResult(outcome, {
 						runInBackground: params.run_in_background,
-						title: agent.title,
+						label: agent.label,
 					});
 
 				case "background-started": {
 					onUpdate?.({
-						content: [{ type: "text", text: `Started ${agent.title} (background)` }],
+						content: [{ type: "text", text: `Started ${agent.label} (background)` }],
 						details: {
 							runInBackground: true,
-							title: agent.title,
+							label: agent.label,
 							model: agent.model,
 							thinking: agent.thinking,
 							startedAt,
@@ -708,7 +704,7 @@ export default function (pi: ExtensionAPI) {
 						],
 						details: {
 							runInBackground: true,
-							title: agent.title,
+							label: agent.label,
 							model: agent.model,
 							thinking: agent.thinking,
 							startedAt,
@@ -814,11 +810,11 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			// Partial update first — drives the `⠋ agent_stop <title> stopping…`
+			// Partial update first — drives the `⠋ agent_stop <label> stopping…`
 			// spinner line while the child is being stopped.
 			onUpdate?.({
-				content: [{ type: "text", text: `Stopping ${agent.title}\u2026` }],
-				details: { title: agent.title, agentId },
+				content: [{ type: "text", text: `Stopping ${agent.label}\u2026` }],
+				details: { label: agent.label, agentId },
 			});
 			try {
 				const stopped = await registry.stopAndRemove(agentId);
@@ -829,13 +825,13 @@ export default function (pi: ExtensionAPI) {
 					const message = `agent ${params.agent_id} already finished.`;
 					return {
 						content: [{ type: "text", text: message }],
-						details: { agentId, title: agent.title, error: message },
+						details: { agentId, label: agent.label, error: message },
 						isError: true,
 					};
 				}
 				return {
 					content: [{ type: "text", text: `Stopped agent @${agentId}.` }],
-					details: { agentId, title: agent.title },
+					details: { agentId, label: agent.label },
 				};
 			} catch (err) {
 				// Child died mid-stop (e.g. write-after-end): surface it as a
@@ -843,7 +839,7 @@ export default function (pi: ExtensionAPI) {
 				const message = err instanceof Error ? err.message : String(err);
 				return {
 					content: [{ type: "text", text: message }],
-					details: { agentId, title: agent.title, error: message },
+					details: { agentId, label: agent.label, error: message },
 					isError: true,
 				};
 			}
@@ -903,11 +899,11 @@ export default function (pi: ExtensionAPI) {
 			}
 			return {
 				content: [{ type: "text", text: `${r.verb} to ${atId(target)}.` }],
-				// Card title shows @id — target title (uniform with agent_stop).
+				// Card title shows @id — target label (uniform with agent_stop).
 				details: {
 					to: target,
 					message,
-					title: registry.lookup(target)?.title,
+					label: registry.lookup(target)?.label,
 					agentId: registry.lookup(target)?.agentId,
 				},
 			};

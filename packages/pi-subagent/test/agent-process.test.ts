@@ -137,7 +137,7 @@ class FakeClient {
 function makeAgent(options: Partial<AgentProcessOptions> & { cwd: string }): { agent: AgentProcess; fake: FakeClient } {
 	let fake!: FakeClient;
 	const agent = new AgentProcess(
-		{ ...options, agentId: options.agentId ?? "a1", title: options.title ?? "test agent" },
+		{ ...options, agentId: options.agentId ?? "a1", label: options.label ?? "test agent" },
 		{
 			createClient: (opts: RpcClientOptions) => {
 				fake = new FakeClient(opts);
@@ -150,7 +150,7 @@ function makeAgent(options: Partial<AgentProcessOptions> & { cwd: string }): { a
 
 describe("AgentProcess — spawnAndSend", () => {
 	it("moves to running and captures session info on prompt ack", async () => {
-		const { agent, fake } = makeAgent({ cwd: "/tmp", title: "my task" });
+		const { agent, fake } = makeAgent({ cwd: "/tmp", label: "my task" });
 		const started = await agent.spawnAndSend("do it");
 		assert.deepEqual(started, { ok: true });
 		assert.equal(agent.status, "running");
@@ -172,12 +172,12 @@ describe("AgentProcess — spawnAndSend", () => {
 		assert.equal(agent.status, "failed");
 	});
 
-	it("passes model/tools/sessionDir through and sets --name when title is given", () => {
+	it("passes model/tools/sessionDir through and sets --name when label is given", () => {
 		const { fake } = makeAgent({
 			cwd: "/tmp",
 			model: "google/gemini-x",
 			tools: ["read", "grep"],
-			title: "explore",
+			label: "explore",
 			sessionDir: "/home/u/.pi/agent/subagent-sessions",
 		});
 		assert.deepEqual(fake.args, [
@@ -193,12 +193,12 @@ describe("AgentProcess — spawnAndSend", () => {
 	});
 
 	it("passes thinking level through as --thinking", () => {
-		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", title: "explore", thinking: "high" });
+		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", label: "explore", thinking: "high" });
 		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--thinking", "high", "--name", "explore"]);
 	});
 
 	it("omits --thinking when no level is given (inherit main session)", () => {
-		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", title: "explore" });
+		const { fake } = makeAgent({ cwd: "/tmp", model: "google/gemini-x", label: "explore" });
 		assert.deepEqual(fake.args, ["--model", "google/gemini-x", "--name", "explore"]);
 	});
 });
