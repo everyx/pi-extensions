@@ -20,4 +20,4 @@
 - **单源**：同一契约只在一处出现。行为级契约（如“query 语言 = 结果语言”）进 promptGuidelines；字段级契约（格式约定、语义、省略行为）进参数描述——互相引用，不复写。
 - **实现不可见**：路由、通道、failover、fallback 架构不进 LLM 文案——LLM 无法据此行动，它只见结果或终错。
 - **错误分层**：LLM 可见文本是简洁错误，配置指引（装什么 key、怎么配）走 `details`（UI 可见），不进 LLM 上下文。
-- **LLM API 无 breaking change**：schema 是给模型的，不是给代码的——行为变化用 `feat:`/`fix:`，不用 `!`。
+- **LLM API 无 breaking change**：LLM 面向的接口（schema/描述/prompt）是模型侧的 UI——模型每次请求都读当前版本，不存在依赖旧版的下游，所以改动它（含改参数名、删字段）不算 breaking change：提交一律 `feat:`/`fix:`，不用 `!`。
