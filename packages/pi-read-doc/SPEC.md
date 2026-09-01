@@ -10,9 +10,17 @@ Enhanced `read` for office documents: `read_doc <path>` returns clean Markdown.
 
 ## 转换链路（fallback 顺序）
 
-1. anydoc (`@firecrawl/anydoc`, Rust) — 21 office formats local, no network.
+Walk 在 `convert.ts`（`convertDocument(path, ext, deps)`，deps 注入——fake 可单测）；真实适配器（anydoc 动态 import、rapid CLI）在 index.ts，配额文件实现在 convert.ts。
+
+1. anydoc (`@firecrawl/anydoc`, Rust) — `OFFICE_EXTS` 格式本地转换，无网络。
 2. anydoc:hosted (Firecrawl Parse, keyless) — only for scanned pages needing OCR (`needsOcr`), 2 qps.
-3. rapidocr (local `python-rapidocr`, official `from rapidocr import RapidOCR`; python/python3 双试是二进制名枚举) — pdf only.
+3. rapidocr (local `python-rapidocr`, official `from rapidocr import RapidOCR`; python/python3 双试是二进制名枚举) — pdf only。
+4. 全落空 → 原 needsOcr 错误抛出（execute 加配置提示，错误分层）。
+
+## LLM 截断（根 SPEC：LLM context 截断保护）
+
+- 进 LLM 的 content 头部截断——直接用 pi 官方 `truncateHead`（2000 行 / 50KB，**UTF-8 字节**计数，与 pi bash/read 同一实现，预算真对齐）+ 截断标记（真实输出/总量行数与字节数）。
+- 卡展开走 `fullContent` 全量（仅截断时设置）——UI 渲染源不截断，只有 LLM 看到截断版。
 
 ## 配额（成本自卫，非上游额度）
 

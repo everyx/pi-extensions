@@ -2,64 +2,24 @@
  * pi-read-doc — enhanced read for office docs via anydoc.
  *
  * Tool `read_doc` converts doc/docx/ppt/xlsx etc. + pdf to markdown via
- * @firecrawl/anydoc (Rust, 4.4ms). Text-based PDFs convert
- * locally; scanned pages hit `needsOcr` → auto fallback: hosted (Firecrawl
- * Parse, 1k/月) → rapidocr (local python-rapidocr, text-only). Header-only
- * folding (read-like) — collapsed shows only header, expanded shows full.
+ * @firecrawl/anydoc (Rust, 4.4ms). The fallback chain (anydoc → hosted OCR →
+ * rapidocr) + its quota gate live in convert.ts behind an injected interface
+ * (testable with fakes); this file keeps the tool wiring, the view, and the
+ * real adapters (anydoc import, rapid CLI). LLM text is head-truncated to
+ * the bash budget (root SPEC: UI 渲染源不截断 — the card expand shows
+ * fullContent). Header-only folding (read-like).
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readFile } from "node:fs/promises";
+import { type ExtensionAPI, truncateHead } from "@earendil-works/pi-coding-agent";
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { Type } from "typebox";
 
-// ── Rate limiter (hosted OCR) ───────────────────────────────
+import { type ConvertDeps, type ConvertedDocument, convertDocument, fileQuota } from "./convert.js";
 import { createRateLimiter } from "./rate-limit.js";
 
-const hostedLimiter = createRateLimiter(2); // 2 qps for Parse
-const QUOTA_LIMIT = 1000;
-
-// User-scoped extension state lives at the pi config root (~/.pi/), not
-// inside pi's managed agent dir (settings/trust/auth…): quota is a
-// user-level consumption counter, and we deliberately do NOT follow
-// PI_CODING_AGENT_DIR (an agent dir may point at sandbox/tmp — a counter
-// should not wander). CONFIG_DIR_NAME honors a custom configDir.
-function quotaPath(): string {
-	return join(homedir(), CONFIG_DIR_NAME, "read-doc.json");
-}
-function monthKey(d = new Date()): string {
-	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-/**
- * Local calendar date (YYYY-MM-DD). The quota month boundary is user-facing
- * (1k pages/month resets on the local month), so the local calendar — not
- * UTC — governs; monthKey() must stay on the same calendar (loadQuota
- * slices updatedAt with monthKey()).
- */
-function dateKey(d = new Date()): string {
-	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-async function loadQuota(): Promise<number> {
-	try {
-		const raw = await readFile(quotaPath(), "utf-8");
-		const j = JSON.parse(raw) as { quota?: { updatedAt?: string; used?: number } };
-		if (!j.quota?.updatedAt || j.quota.updatedAt.slice(0, 7) !== monthKey()) return 0;
-		return j.quota?.used ?? 0;
-	} catch {
-		return 0;
-	}
-}
-async function saveQuota(n: number): Promise<void> {
-	try {
-		const p = quotaPath();
-		await mkdir(dirname(quotaPath()), { recursive: true });
-		const quota = { updatedAt: dateKey(), used: n };
-		await writeFile(p, JSON.stringify({ quota }, null, 2), "utf-8");
-	} catch {}
-}
+const hostedLimiter = createRateLimiter(2); // 2 qps for hosted Parse
 
 // Exported for tests: the extension's default export is the pi entry; these
 // domain constants are the single source the tests pin to.
@@ -96,7 +56,13 @@ const ReadDocSchema = Type.Object({
 	path: Type.String(),
 });
 
-type ReadDocData = { content: string; convertedVia: "anydoc" | "anydoc:hosted" | "rapid" | "raw"; ext: string };
+type ReadDocData = {
+	content: string;
+	/** Set when content is LLM-truncated — the card expand shows the full text. */
+	fullContent?: string;
+	convertedVia: ConvertedDocument["via"] | "raw";
+	ext: string;
+};
 
 const readDocView = createToolView<Record<string, unknown>, ReadDocData>({
 	name: "read_doc",
@@ -105,24 +71,18 @@ const readDocView = createToolView<Record<string, unknown>, ReadDocData>({
 		ctx.status === "error" ? "failed" : ctx.status === "processing" ? "working…" : undefined,
 	body: {
 		text: (ctx: { expanded?: boolean; result?: { data?: ReadDocData } }) =>
-			ctx.expanded ? (ctx.result?.data?.content ?? "") : "",
+			ctx.expanded ? (ctx.result?.data?.fullContent ?? ctx.result?.data?.content ?? "") : "",
 	},
 });
-
-function quotaForPages(pages: number): number {
-	return pages || 1;
-}
 
 async function hasRapidOcr(): Promise<boolean> {
 	for (const bin of ["python", "python3"]) {
 		const ok = await new Promise<boolean>((resolve) => {
+			// spawn's `timeout` kills the probe — no manual timer (a pending
+			// setTimeout would hold the event loop for its full duration).
 			const py = spawn(bin, ["-c", "from rapidocr import RapidOCR"], { timeout: 5_000 });
 			py.on("error", () => resolve(false));
 			py.on("close", (code) => resolve(code === 0));
-			setTimeout(() => {
-				py.kill();
-				resolve(false);
-			}, 5_000);
 		});
 		if (ok) return true;
 	}
@@ -152,15 +112,40 @@ async function tryRapidOcr(pdfPath: string): Promise<string | null> {
 				else if (err.includes("ModuleNotFoundError") || err.includes("No module")) resolve(null);
 				else resolve(null);
 			});
-			setTimeout(() => {
-				py.kill();
-				resolve(null);
-			}, 30_000);
+			// spawn's `timeout` (30s) kills a hung OCR — no manual timer.
 		});
 		if (result !== null) return result;
 	}
 	return null;
 }
+
+// ── LLM budget truncation (root SPEC: LLM context 截断保护) ───────────
+
+/** Head-truncate to the LLM budget (documents read top-down, like `read`)
+ *  via pi's own truncateHead — pi-bash parity: 2000 lines / 50KB, counted in
+ *  UTF-8 bytes (the same implementation pi's read/bash tools use, so the
+ *  marker's numbers are true). The full text stays in details.data.
+ *  fullContent for the card expand. */
+export function truncateForLlm(text: string): { text: string; truncated: boolean } {
+	const r = truncateHead(text);
+	if (!r.truncated) return { text, truncated: false };
+	return {
+		text: `${r.content}\n(truncated: first ${r.outputLines} lines / ${r.outputBytes} bytes; total ${r.totalLines} lines / ${r.totalBytes} bytes)`,
+		truncated: true,
+	};
+}
+
+/** Real adapters for the conversion chain (convert.ts runs the walk). */
+const defaultDeps: ConvertDeps = {
+	toMarkdown: async (path, opts) => {
+		const { toMarkdown } = await import("@firecrawl/anydoc");
+		if (opts?.ocr === "hosted") return toMarkdown(path, { ...opts, apiKey: process.env.FIRECRAWL_API_KEY });
+		return toMarkdown(path);
+	},
+	quota: fileQuota,
+	limit: hostedLimiter,
+	rapidOcr: tryRapidOcr,
+};
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
@@ -174,62 +159,29 @@ export default function (pi: ExtensionAPI) {
 		async execute(_id, raw, _signal) {
 			const { path } = raw as { path: string };
 			const ext = extOf(path);
-			const isOffice = OFFICE_EXTS.has(ext);
-			if (!isOffice) {
+			if (!OFFICE_EXTS.has(ext)) {
 				try {
 					const buf = await readFile(path, "utf-8");
+					const { text, truncated } = truncateForLlm(buf);
 					return {
-						content: [{ type: "text" as const, text: buf }],
-						details: { data: { content: buf, convertedVia: "raw" as const, ext } },
+						content: [{ type: "text" as const, text }],
+						details: {
+							data: {
+								content: text,
+								...(truncated ? { fullContent: buf } : {}),
+								convertedVia: "raw" as const,
+								ext,
+							},
+						},
 					};
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					return { content: [{ type: "text" as const, text: msg }], details: { error: msg }, isError: true as const };
 				}
 			}
+			let doc: ConvertedDocument;
 			try {
-				const { toMarkdown } = await import("@firecrawl/anydoc");
-				try {
-					const md = await toMarkdown(path);
-					return {
-						content: [{ type: "text" as const, text: md }],
-						details: { data: { content: md, convertedVia: "anydoc" as const, ext } },
-					};
-				} catch (err: unknown) {
-					const code = (err as { code?: string })?.code;
-					if (code === "needsOcr") {
-						const used = await loadQuota();
-						if (used < QUOTA_LIMIT) {
-							try {
-								const mdHosted = await hostedLimiter(() =>
-									toMarkdown(path, {
-										ocr: "hosted" as const,
-										apiKey: process.env.FIRECRAWL_API_KEY,
-									}),
-								);
-								const pages = (err as { pages?: unknown[] })?.pages?.length ?? 1;
-								await saveQuota(used + quotaForPages(pages));
-								return {
-									content: [{ type: "text" as const, text: mdHosted }],
-									details: { data: { content: mdHosted, convertedVia: "anydoc:hosted" as const, ext } },
-								};
-							} catch {
-								// hosted failed → fall through to rapid
-							}
-						}
-						if (ext === ".pdf") {
-							const rapid = await tryRapidOcr(path);
-							if (rapid) {
-								return {
-									content: [{ type: "text" as const, text: rapid }],
-									details: { data: { content: rapid, convertedVia: "rapid" as const, ext } },
-								};
-							}
-						}
-						throw err;
-					}
-					throw err;
-				}
+				doc = await convertDocument(path, ext, defaultDeps);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				const code = (e as { code?: string })?.code;
@@ -243,6 +195,18 @@ export default function (pi: ExtensionAPI) {
 					isError: true as const,
 				};
 			}
+			const { text, truncated } = truncateForLlm(doc.text);
+			return {
+				content: [{ type: "text" as const, text }],
+				details: {
+					data: {
+						content: text,
+						...(truncated ? { fullContent: doc.text } : {}),
+						convertedVia: doc.via,
+						ext,
+					},
+				},
+			};
 		},
 	});
 }
