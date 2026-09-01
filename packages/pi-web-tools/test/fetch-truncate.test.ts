@@ -159,9 +159,9 @@ describe("webFetch — no content-type gates", () => {
 	});
 
 	it("a truncated page carries the expand contract: outputPath + fullContent", async () => {
-		// The UI hint (ctrl+o to expand on the card header) keys off
-		// outputPath, and expand renders fullContent — both must be exactly
-		// the truncation pair from one fetch.
+		// The expand view renders fullContent; the UI hint keys off
+		// content/fullContent (any successful fetch) — both must be exactly
+		// the pair from one fetch.
 		const r = await webFetch(`${base}/big.html`);
 		assert.ok(r.outputPath, "truncated page stashed");
 		assert.ok(r.fullContent, "full text rides the UI channel");

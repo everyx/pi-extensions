@@ -61,8 +61,8 @@ export type FetchToolData = {
 	 *  the LLM-visible text is the capped preview in the tool `content`. */
 	content?: string;
 	contentType?: string;
-	/** Set exactly when the fetch was truncated — the collapsed card shows a
-	 *  one-line expand hint on it (read-like header-only folding). */
+	/** Set exactly when the fetch was truncated — full text stashed on disk
+	 *  (the expand view / read takes over). */
 	outputPath?: string;
 	startedAt?: number;
 	endedAt?: number;

@@ -1,6 +1,6 @@
 /**
  * Tests for the LLM-facing web_search schema (schema.ts): the parameter set
- * is a deliberate contract — the four-channel intent intersection plus the
+ * is a deliberate contract — the four-API-channel intent intersection (bsk fuse included) plus the
  * locale override. This test pins it so no param can silently appear or
  * vanish.
  */

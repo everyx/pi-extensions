@@ -120,13 +120,14 @@ function isHtmlContent(contentType: string): boolean {
 	return contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 }
 
-/** Direct HTTP GET, one honest transport: pinned UA + markdown negotiation,
- *  no TLS/header mimicry — a human-usage pattern (non-crawler, low
- *  concurrency) doesn't need it; anti-bot and CSR pages advance to the fuse
- *  renderers (tinyfish fetch → bsk). No content-type gating — every gate is
- *  a policy decision that limits the caller. Text passes through readable;
- *  true binaries lossy-decode into recognizable noise (the contentType field
- *  says what it is); budget stays bounded by the stash cap downstream. */
+/** Direct HTTP GET, one honest transport: the system curl (native TLS/UA/HTTP
+ *  version — zero mimicry; a human-usage pattern doesn't need it), with a
+ *  pinned-identity shallow fallback when curl is absent. Anti-bot and CSR
+ *  pages advance to the fuse renderers (tinyfish fetch → bsk). No
+ *  content-type gating — every gate is a policy decision that limits the
+ *  caller. Text passes through readable; true binaries lossy-decode into
+ *  recognizable noise (the contentType field says what it is); budget stays
+ *  bounded by the stash cap downstream. */
 async function fetchPage(url: string, signal?: AbortSignal): Promise<FetchPageResult> {
 	const raw = await curlFetch(url, { signal, timeoutMs: DEFAULT_TIMEOUT_MS, maxBytes: MAX_DOWNLOAD_BYTES });
 	if (raw.ok) {
@@ -140,7 +141,7 @@ async function fetchPage(url: string, signal?: AbortSignal): Promise<FetchPageRe
 	};
 }
 
-export interface WebFetchOptions {
+interface WebFetchOptions {
 	/** Return the raw source as-is instead of converted Markdown (HTML stays HTML). */
 	raw?: boolean;
 	signal?: AbortSignal;

@@ -15,7 +15,7 @@ const turndown = new TurndownService({
 	codeBlockStyle: "fenced",
 });
 
-export interface ExtractResult {
+interface ExtractResult {
 	title: string;
 	markdown: string;
 	/** Set when extraction produced nothing readable. */
@@ -23,7 +23,7 @@ export interface ExtractResult {
 }
 
 /** Minimum markdown length below which we consider extraction a failure. */
-export const MIN_USEFUL_CONTENT = 40;
+const MIN_USEFUL_CONTENT = 40;
 
 /** Heuristic: page likely needs JS to render content (SPA shell). */
 export function isLikelyJSRendered(html: string): boolean {

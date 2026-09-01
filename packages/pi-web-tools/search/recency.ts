@@ -5,7 +5,7 @@
  * into its native expression. Pure, unit-testable.
  */
 
-export type RecencyFilter = "day" | "week" | "month" | "year";
+type RecencyFilter = "day" | "week" | "month" | "year";
 
 const DAYS: Record<RecencyFilter, number> = {
 	day: 1,
@@ -19,7 +19,7 @@ export function recencyToMinutes(filter: RecencyFilter): number {
 	return DAYS[filter] * 24 * 60;
 }
 
-/** ISO date (YYYY-MM-DD) N days ago — for APIs that take startPublishedDate / after_date. */
+/** ISO date (YYYY-MM-DD) N days ago — for APIs that take startPublishedDate. */
 export function recencyToStartDate(filter: RecencyFilter, now: Date = new Date()): string {
 	const d = new Date(now.getTime() - DAYS[filter] * 86_400_000);
 	return d.toISOString().slice(0, 10);

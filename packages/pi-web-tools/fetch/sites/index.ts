@@ -9,7 +9,7 @@
 import { githubRawUrl } from "./github.js";
 
 /** Site adapter: given a URL, return a rewritten one, or null if not applicable. */
-export type SiteAdapter = (url: string) => string | null;
+type SiteAdapter = (url: string) => string | null;
 
 const adapters: SiteAdapter[] = [githubRawUrl];
 

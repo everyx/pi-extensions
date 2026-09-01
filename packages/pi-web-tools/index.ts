@@ -123,7 +123,7 @@ async function executeSearch(
 
 	const message = `All search channels failed: ${failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`;
 	return {
-		content: [{ type: "text", text: failures[failures.length - 1]?.error ?? message }],
+		content: [{ type: "text", text: failures[failures.length - 1]?.error || message }],
 		details: { error: message, failures, query: params.query, startedAt, endedAt: Date.now() },
 		isError: true,
 	};

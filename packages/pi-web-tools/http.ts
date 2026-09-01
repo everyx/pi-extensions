@@ -2,13 +2,13 @@
  * pi-web-tools — shared HTTP helpers (timeout + abort wiring).
  */
 
-export interface HttpOptions {
+interface HttpOptions {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 	headers?: Record<string, string>;
 }
 
-export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
+const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 
 /** fetch with a hard timeout that races the caller's AbortSignal. */
 export async function fetchWithTimeout(url: string, init: RequestInit, options: HttpOptions = {}): Promise<Response> {

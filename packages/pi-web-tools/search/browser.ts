@@ -28,9 +28,9 @@ const execFileAsync = promisify(execFile);
 
 const BSK = "bsk";
 
-/** Fuse engines: zh queries route to baidu (mainland content), everything
- *  else to google. No system-locale sniffing — the LLM's locale param and
- *  query language are the only signals. */
+/** Fuse engines: zh locale routes to baidu (mainland content), everything
+ *  else to google. No system-locale sniffing — the LLM's locale param is the
+ *  only routing signal. */
 export function pickEngine(locale?: string): EngineId {
 	return parseLocale(locale).language === "zh" ? "baidu" : "google";
 }
@@ -39,7 +39,7 @@ export function pickEngine(locale?: string): EngineId {
  *  channel (hermetic tests / offline) BEFORE any CLI probe — no browser
  *  window, no bsk daemon. Test scripts set it so the default suite never
  *  pops a Chromium; opt-in browser tests clear it (PI_WEB_TOOLS_TEST_BSK). */
-export function bskDisabled(): boolean {
+function bskDisabled(): boolean {
 	return process.env.PI_WEB_TOOLS_NO_BSK === "1";
 }
 
@@ -133,7 +133,7 @@ function launchCandidates(): { name: string; args: string[] }[] {
 	if (process.platform === "win32") {
 		return ["chrome", "msedge", "brave", "chromium", "arc"].map((n) => ({ name: n, args: [] }));
 	}
-	// Single-sourced with headless rendering and UA probing (browsers.ts).
+	// Single-sourced with bsk's launch candidates (browsers.ts).
 	return CHROMIUM_BINARIES.map((n) => ({ name: n, args: [] }));
 }
 
@@ -307,7 +307,7 @@ export async function searchWithBsk(params: WebSearchParams, ctx: ChannelSearchC
 /** Real-browser text extraction for fetched pages — the fetch analogue of
  *  EXTRACT_SCRIPT (title + body text, capped): JS runs in the real page,
  *  stdout carries the JSON. */
-export const FETCH_CONTENT_SCRIPT = `(() => {
+const FETCH_CONTENT_SCRIPT = `(() => {
 	const title = document.title || "";
 	const body = document.body ? document.body.innerText : "";
 	return JSON.stringify({ title: title, body: body.slice(0, 200000) });

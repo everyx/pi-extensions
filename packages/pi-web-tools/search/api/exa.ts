@@ -25,7 +25,7 @@ const DEFAULT_RESULTS = 5;
 // Exa MCP (keyless) is rate-limited to 3 qps / 150 calls per day (researched).
 const mcpLimiter = createRateLimiter(3);
 
-export function exaApiKey(): string | null {
+function exaApiKey(): string | null {
 	const key = process.env.EXA_API_KEY?.trim();
 	return key && key.length > 0 ? key : null;
 }

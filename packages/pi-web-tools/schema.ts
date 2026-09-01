@@ -1,7 +1,7 @@
 /**
  * pi-web-tools — tool parameter schemas (TypeBox).
  *
- * The web_search surface is the four-channel intent intersection: query,
+ * The web_search surface is the four-API-channel intent intersection (the bsk no-key fuse rides the same surface): query,
  * recency, domain filters — plus locale as an explicit best-effort override.
  * Descriptions are minimal by principle: anything the LLM can self-serve
  * (param names, enum values, the returned result shape) carries no copy;

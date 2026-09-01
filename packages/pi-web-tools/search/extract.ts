@@ -69,7 +69,7 @@ export const EXTRACT_SCRIPT = String.raw`
  *  tell an anti-bot wall from genuinely zero results. */
 export const STATE_PROBE_SCRIPT = `JSON.stringify({ url: location.href, text: document.body ? document.body.innerText.slice(0, 200) : "" })`;
 
-export interface PageState {
+interface PageState {
 	url: string;
 	text: string;
 }

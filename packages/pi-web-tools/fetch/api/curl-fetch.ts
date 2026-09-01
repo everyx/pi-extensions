@@ -13,16 +13,16 @@ import { join } from "node:path";
 import { fetchWithTimeout } from "../../http.js";
 
 /** UA for the shallow fallback — same identity story as the real curl path. */
-export const CURL_UA = "curl/8.21.0";
+const CURL_UA = "curl/8.21.0";
 
-export interface CurlFetchOptions {
+interface CurlFetchOptions {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 	/** Body cap; past it the child is killed and the body abandoned unread. */
 	maxBytes?: number;
 }
 
-export interface CurlFetchResult {
+interface CurlFetchResult {
 	ok: boolean;
 	status: number;
 	contentType: string;

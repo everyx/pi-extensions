@@ -26,7 +26,7 @@ const LIMIT = 8;
 // burning the day's allowance in seconds.
 const limiter = createRateLimiter(1);
 
-export function firecrawlApiKey(): string | null {
+function firecrawlApiKey(): string | null {
 	const key = process.env.FIRECRAWL_API_KEY?.trim();
 	return key && key.length > 0 ? key : null;
 }

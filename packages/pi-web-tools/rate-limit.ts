@@ -8,14 +8,15 @@
  *     time, reusing a shared context (e.g. one bsk session for a batch of
  *     searches), opening it lazily and closing it when the queue drains.
  *
- * Researched rate limits (providers declare their own qps):
- *   - Exa MCP (keyless): 3 qps (150 calls/day)
- *   - Tavily free tier:  1 qps, account-level
- *   - Parallel:          600 RPM (10 qps)
+ * Researched rate limits — each channel declares its own qps (search/api/):
+ *   - Exa MCP (keyless): 3 qps (keyless 150 calls/day)
+ *   - TinyFish:          2 qps
+ *   - Firecrawl:         1 qps
+ *   - Tavily free tier:  1 qps (account-level)
  *   - Exa REST (key):    credit-metered, qps not published — left unlimited
  */
 
-export interface RateLimiter {
+interface RateLimiter {
 	/** Run fn under this limiter's throttle (pass-through when unlimited). */
 	run<T>(fn: () => Promise<T>): Promise<T>;
 }
