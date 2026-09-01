@@ -14,8 +14,8 @@ import { fetchUrlWithBsk } from "../search/browser.js";
 import type { WebFetchResult } from "../types.js";
 import { curlFetch } from "./api/curl-fetch.js";
 import { fetchWithTinyfish } from "./api/tinyfish-fetch.js";
+import { githubRawUrl } from "./github.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
-import { adaptUrl } from "./sites/index.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -154,9 +154,9 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 		return { title: "", content: "", error: `Unsupported URL: ${url} (only http/https)` };
 	}
 
-	// Site adapters rewrite content URLs (e.g. GitHub blob → raw); fall back
-	// to the original URL when the rewrite target is unavailable.
-	const targetUrl = adaptUrl(url) ?? url;
+	// The GitHub adapter rewrites blob URLs to raw content; fall back to the
+	// original URL when the rewrite target is unavailable.
+	const targetUrl = githubRawUrl(url) ?? url;
 	// raw asks for the source, so prefer an HTML (not negotiated-markdown) body.
 	let page = await fetchPage(targetUrl, signal);
 	if (targetUrl !== url && (!page.ok || !page.text)) {
@@ -191,7 +191,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 
 	// The source IS the deliverable — raw mode, or any non-HTML body (SVG,
 	// JSON, CSV, YAML… all just text). Return it verbatim: no transformation,
-	// no decoration. Site URL rewrites still apply (URL semantics, not
+	// no decoration. The GitHub URL rewrite still applies (URL semantics, not
 	// format). Only the title heuristic differs: Markdown-for-Agents bodies
 	// carry their title in the frontmatter — never parsed in raw mode (raw =
 	// pure source). On overflow the full text is stashed and pointed at, not

@@ -1,8 +1,8 @@
 /**
- * pi-web-tools — site-specific adapters (SPEC: web_fetch 行为规格).
+ * pi-web-tools — GitHub URL adapter (SPEC: web_fetch 行为规格).
  *
- * One file per site. These rewrite/transform URLs so web_fetch returns the
- * content the LLM actually wants instead of a site's UI chrome.
+ * Rewrites blob URLs so web_fetch returns the file content instead of the
+ * site's UI chrome.
  */
 
 /**
