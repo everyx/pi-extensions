@@ -10,7 +10,7 @@ describe("pi-read-doc", () => {
 		assert.equal(extOf("noext"), "");
 	});
 
-	it("office ext set covers the anydoc table (21 formats)", () => {
+	it("office ext set covers the anydoc table", () => {
 		for (const ext of [".doc", ".docx", ".docm", ".pdf", ".xlsx", ".xlsm", ".pptx", ".odt", ".rtf", ".epub", ".csv"]) {
 			assert.ok(OFFICE_EXTS.has(ext), `${ext} in OFFICE_EXTS`);
 		}

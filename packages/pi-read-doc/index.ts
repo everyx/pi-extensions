@@ -2,7 +2,7 @@
  * pi-read-doc — enhanced read for office docs via anydoc.
  *
  * Tool `read_doc` converts doc/docx/ppt/xlsx etc. + pdf to markdown via
- * @firecrawl/anydoc (Rust, 14 formats, 4.4ms). Text-based PDFs convert
+ * @firecrawl/anydoc (Rust, 4.4ms). Text-based PDFs convert
  * locally; scanned pages hit `needsOcr` → auto fallback: hosted (Firecrawl
  * Parse, 1k/月) → rapidocr (local python-rapidocr, text-only). Header-only
  * folding (read-like) — collapsed shows only header, expanded shows full.
