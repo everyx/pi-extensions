@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.2](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.1...pi-web-tools-v1.2.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **pi-web-tools:** bsk lifecycle test seam + abort signal into the CLI ([fdc644d](https://github.com/everyx/pi-extensions/commit/fdc644d42b66c3a5468e2099fb85df4b93adbb8b))
+* **pi-web-tools:** renderer seam self-reports contentType — bsk is no longer labeled markdown ([92d46b5](https://github.com/everyx/pi-extensions/commit/92d46b5d24f8514e02df2a3b894c7294041c0123))
+* **pi-web-tools:** rot sweep — ghost channel comments, curl-identity doc, expand-hint contract, unexport internals ([e0c77bb](https://github.com/everyx/pi-extensions/commit/e0c77bb3c9c32f4c58a683ee4f42968d6a641ef1))
+* **pi-web-tools:** tinyfish search limiter 2 → 0.4 qps — free tier is 30 req/min, not 120 ([52d2f81](https://github.com/everyx/pi-extensions/commit/52d2f817a3949bbb43f03722afbe1ee6bb6d0ebd))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.1.2
+
 ## [1.2.1](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.0...pi-web-tools-v1.2.1) (2026-08-31)
 
 
