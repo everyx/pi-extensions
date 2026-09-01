@@ -10,7 +10,7 @@
  *
  * Researched rate limits — each channel declares its own qps (search/api/):
  *   - Exa MCP (keyless): 3 qps (keyless 150 calls/day)
- *   - TinyFish:          2 qps
+ *   - TinyFish:          0.4 qps (free tier 30 req/min)
  *   - Firecrawl:         1 qps
  *   - Tavily free tier:  1 qps (account-level)
  *   - Exa REST (key):    credit-metered, qps not published — left unlimited

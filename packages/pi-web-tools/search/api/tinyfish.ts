@@ -15,8 +15,8 @@ import { recencyToMinutes } from "../recency.js";
 
 const ENDPOINT = "https://api.search.tinyfish.ai";
 
-// Free tier is 30 req/min per key — 2 qps keeps bursts polite.
-const limiter = createRateLimiter(2);
+// Free tier is 30 req/min per key — 0.4 qps (24/min) keeps ~20% headroom.
+const limiter = createRateLimiter(0.4);
 
 export function tinyfishApiKey(): string | null {
 	const key = process.env.TINYFISH_API_KEY?.trim();
