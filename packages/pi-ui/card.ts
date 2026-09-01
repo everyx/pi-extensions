@@ -306,7 +306,7 @@ interface DataCardConfig {
 }
 
 /** Map status → card icon (library decision; consumers pass status only). */
-function iconForStatus(status: CardStatus, spinner?: Spinner): CardIcon {
+export function iconForStatus(status: CardStatus, spinner?: Spinner): CardIcon {
 	switch (status) {
 		case "processing":
 			return { glyph: (spinner ?? new Spinner()).current(), color: "accent" };

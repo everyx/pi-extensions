@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { atId, titleFrom } from "../views.js";
+import { agentTitle, atId, titleFrom } from "../views.js";
 
 test("atId adds @ exactly once", () => {
 	assert.equal(atId("max"), "@max");
@@ -21,4 +21,8 @@ test("titleFrom never renders @@ (double-prefix regression)", () => {
 	// agent_stop not-found: executor puts the stripped id in details.agentId
 	// (args key is snake_case agent_id — titleFrom only reads details + camel).
 	assert.equal(titleFrom({ result: { data: { agentId: "max", error: "x" } }, args: {} }, "agentId"), "@max");
+});
+
+test("agentTitle: @id — label (widget rows and notification cards share it)", () => {
+	assert.equal(agentTitle("max", "check CI"), "@max — check CI");
 });

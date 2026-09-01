@@ -18,7 +18,7 @@ import {
 	type Theme,
 	type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
-import { type CardIcon, type Component, dataCard, renderHeader, type StyledRow, textLine } from "./card.js";
+import { type Component, dataCard, iconForStatus, renderHeader, type StyledRow, textLine } from "./card.js";
 import { SPINNER_TICK_MS, Spinner } from "./spinner.js";
 import { ticker } from "./ticker.js";
 
@@ -147,20 +147,6 @@ function stopAnimation(st: Record<string, unknown> | undefined): void {
 	st.animation = undefined;
 	handle.alive = false;
 	handle.unsubscribe();
-}
-
-/** Map status → card icon (library decision; consumers never pass icons). */
-function iconForStatus(status: CardStatus, spinner: Spinner | undefined): CardIcon {
-	switch (status) {
-		case "processing":
-			return { glyph: (spinner ?? new Spinner()).current(), color: "accent" };
-		case "error":
-			return { glyph: "\u2717", color: "error" };
-		case "stop":
-			return { glyph: "\u25a0", color: "warning" };
-		default:
-			return { glyph: "\u2713", color: "success" };
-	}
 }
 
 // ── body rendering (templates → text; folding is the card's job) ─

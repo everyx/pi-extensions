@@ -7,7 +7,14 @@ import { describe, it } from "node:test";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { Spinner } from "../spinner.js";
-import { EXCERPT_INDENT, renderWidgetItemLine, StatusWidget, type WidgetItem, type WidgetRow } from "../widget.js";
+import {
+	counterParts,
+	EXCERPT_INDENT,
+	renderWidgetItemLine,
+	StatusWidget,
+	type WidgetItem,
+	type WidgetRow,
+} from "../widget.js";
 
 /** Captures the widget's render function through a mock ui.setWidget. */
 function capture(ui: { setWidget: ExtensionUIContext["setWidget"] }) {
@@ -31,6 +38,22 @@ const theme = {
 } as never;
 
 const item = (id: string): WidgetItem => ({ id, title: `t${id}`, startedAt: 0, status: "running" });
+
+describe("counterParts (shared counter vocabulary)", () => {
+	it("emits the full segment list, failed carrying the error tone", () => {
+		assert.deepEqual(counterParts({ done: 1, total: 3, running: 1, idle: 1, failed: 1, stopped: 1 }), [
+			{ text: "done 1/3", tone: "normal" },
+			{ text: "1 running", tone: "normal" },
+			{ text: "1 idle", tone: "normal" },
+			{ text: "1 failed", tone: "error" },
+			{ text: "1 stopped", tone: "normal" },
+		]);
+	});
+
+	it("omits zero segments (progress only)", () => {
+		assert.deepEqual(counterParts({ done: 0, total: 2 }), [{ text: "done 0/2", tone: "normal" }]);
+	});
+});
 
 describe("StatusWidget progress meta", () => {
 	it("renders progress + live segments while items run (done 0/2 · 2 running)", () => {

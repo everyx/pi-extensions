@@ -25,6 +25,36 @@ export type WidgetStatus = "running" | "idle" | "stopped" | "done" | "failed";
 /** How a tracked item ended — feeds the lifetime progress meta (`done n/total …`). */
 export type WidgetResult = "done" | "failed" | "stopped";
 
+/** Counts behind the shared counter vocabulary (lifetime progress meta). */
+export interface CounterCounts {
+	done: number;
+	total: number;
+	running?: number;
+	idle?: number;
+	failed?: number;
+	stopped?: number;
+}
+
+/** One segment of the counter vocabulary. `tone` marks the segment the
+ *  consumer renders in the error color (abnormal end: failed). */
+export interface CounterPart {
+	text: string;
+	tone: "normal" | "error";
+}
+
+/** The shared counter vocabulary (`done n/total · n running · …`) — the
+ *  widget title and the card nested-subtree meta must speak the same words
+ *  (pi-subagent SPEC: 显示面统一规则). Consumers render tone per surface
+ *  (widget colors failed; the card meta stays dim). */
+export function counterParts(c: CounterCounts): CounterPart[] {
+	const parts: CounterPart[] = [{ text: `done ${c.done}/${c.total}`, tone: "normal" }];
+	if (c.running) parts.push({ text: `${c.running} running`, tone: "normal" });
+	if (c.idle) parts.push({ text: `${c.idle} idle`, tone: "normal" });
+	if (c.failed) parts.push({ text: `${c.failed} failed`, tone: "error" });
+	if (c.stopped) parts.push({ text: `${c.stopped} stopped`, tone: "normal" });
+	return parts;
+}
+
 /** Map a terminal widget status to the result it implies (tick cleanup). */
 function statusToResult(status: WidgetStatus): WidgetResult | undefined {
 	if (status === "done") return "done";
@@ -292,12 +322,15 @@ export class StatusWidget {
 		if (this.total === 0) return "";
 		const running = [...this.rows.values()].filter((r) => r.item.status === "running").length;
 		const idle = [...this.rows.values()].filter((r) => r.item.status === "idle").length;
-		const parts: string[] = [`done ${this.done}/${this.total}`];
-		if (running) parts.push(`${running} running`);
-		if (idle) parts.push(`${idle} idle`);
-		if (this.failed) parts.push(theme.fg("error", `${this.failed} failed`));
-		if (this.stopped) parts.push(`${this.stopped} stopped`);
-		return ` ${theme.fg("muted", `(${parts.join(" · ")})`)}`;
+		const parts = counterParts({
+			done: this.done,
+			total: this.total,
+			running,
+			idle,
+			failed: this.failed,
+			stopped: this.stopped,
+		});
+		return ` ${theme.fg("muted", `(${parts.map((p) => (p.tone === "error" ? theme.fg("error", p.text) : p.text)).join(" · ")})`)}`;
 	}
 
 	private registerWidget(): void {

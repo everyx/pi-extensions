@@ -19,7 +19,7 @@ pi 扩展的共享原语库，两族：**视图**（数据驱动卡片——工�
 | `context.ts` | LLM context 保护：stashOverflow（截断 + /tmp 落盘）+ truncationMarker | 全部 |
 | `spinner.ts` | Spinner 动画 + formatDuration/durationMeta；**兼容转发** width 的 clipTail/safeTitle（新代码一律从 `width.js` 导入） | 全部 |
 | `ticker.ts` | 共享动画时钟（多订阅最小间隔聚合） | ticker / TickerHandle |
-| `widget.ts` | 前台状态指示器（Agents 条、进度 meta、idle 行） | StatusWidget 等 |
+| `widget.ts` | 前台状态指示器（Agents 条、进度 meta、idle 行） | StatusWidget / **counterParts**（计数词汇单源）等 |
 | `card.ts` / `view.ts` | 视图族：卡片积木 + createToolView 声明工厂 | 见各自文件 |
 | `preview-runtime.ts` | **dev-only** storybook 运行时：主题深加载 hack + 框架 shell 模拟（生产代码禁止导入） | createPreviewRuntime |
 

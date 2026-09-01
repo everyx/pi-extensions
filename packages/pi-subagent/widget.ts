@@ -17,6 +17,7 @@ import type { WidgetResult, WidgetRow, WidgetStatus } from "@everyx/pi-ui/widget
 import { StatusWidget } from "@everyx/pi-ui/widget.js";
 import type { AgentProcess } from "./agent-process.js";
 import type { AgentActivity } from "./event-interpret.js";
+import { agentTitle } from "./views.js";
 
 export class AgentWidget {
 	private readonly widget: StatusWidget;
@@ -36,8 +37,7 @@ export class AgentWidget {
 	add(agent: AgentProcess, status: "running" | "idle" = "running"): void {
 		this.widget.add({
 			id: agent.agentId,
-			// @id — label: the user matches the @name the LLM mentions in chat.
-			title: `@${agent.agentId} — ${agent.label}`,
+			title: agentTitle(agent.agentId, agent.label),
 			startedAt: agent.startedAt,
 			status,
 			rows: activityToRows(agent.getLatestActivity()),
@@ -55,7 +55,7 @@ export class AgentWidget {
 	}): void {
 		this.widget.add({
 			id: agent.agentId,
-			title: `@${agent.agentId} — ${agent.label}`,
+			title: agentTitle(agent.agentId, agent.label),
 			startedAt: agent.startedAt,
 			status: agent.status === "idle" ? "idle" : "running",
 			indent: agent.indent,

@@ -238,6 +238,8 @@ queued → running ──→ completed（通知）
 
 **persistent 前台子的关卡后归属**：persistent 子在卡完成后仍存活（驻留），其唤醒期间新 spawn 的后代不能再折进已冻结的卡——execute 结算即关闭折叠（`cardClosed`），此后该子树的事件转 widget 行（与后台链同路径）。
 
+**词汇单源**（不再靠注释同步）：计数词汇 `done n/total · …` = pi-ui `counterParts`（widget 标题与卡 meta 共用，failed 段的 error 色由消费面自定）；`@id — label` 标题 = views.ts `agentTitle`（widget 行与通知卡共用）；状态图标 = pi-ui card.ts `iconForStatus`（card 与 view 共用）。
+
 ### 子代理禁止后台 spawn；persistent 全场景开放（2026-08-22）
 
 **后台**：子代理的生命周期被父的同步等待封顶——它的后台子要么活不过父的返回（管道 EOF 静默杀死），要么逼出收条 turn 覆盖真正的答卷、卡片计数悬空。这些是后台边与前台等待的时序纠缠，树清理解决不了，所以子代理进程（`PI_SUBAGENT_AGENT_ID` 存在）注册的 agent_spawn schema **直接不含** `run_in_background` 字段（`buildSpawnParamsSchema(HAS_PARENT)`），description/promptGuidelines 同步换为前台版文案（并行→同块多个前台调用，天然并发；长期任务→在答复中上报由调用者决定）。execute 保留一行守卫防幻觉传参。曾实现过「收割」（前台返回前 allSettled 等齐后台子），随本规则作废删除——卡内不可能再有后台边，整类问题（孤子孙、收条覆盖答卷、meta 计数不归位、强制多等一轮）灭绝于源头。

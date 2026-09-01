@@ -10,6 +10,7 @@
 
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
+import { counterParts } from "@everyx/pi-ui/widget.js";
 import type { SubagentDetails } from "./types.js";
 
 /** Add "@" exactly once — ids may already carry it ("@parent", "@max").
@@ -19,19 +20,26 @@ export function atId(id: string): string {
 	return id.startsWith("@") ? id : `@${id}`;
 }
 
+/** Row/card identity for a spawned agent: `@id — label` — the user matches
+ *  the @name the LLM mentions in chat. Widget rows and notification cards
+ *  both go through this (one title, one spelling). The @-prefix goes
+ *  through atId so an id that already carries one never doubles. */
+export function agentTitle(agentId: string, label: string): string {
+	return `${atId(agentId)} — ${label}`;
+}
+
 /**
- * Card title for agent_stop / agent_send: `@id — label` — the target's label
- * when the result carried one, else the at-prefixed target id, else from args.
- * The @-prefix is applied exactly once (via atId).
+ * Card title for agent_stop / agent_send: the target's label when the result
+ * carried one, else the at-prefixed target id, else from args. The `@id —
+ * label` join goes through agentTitle (one title, one spelling).
  */
 export function titleFrom(ctx: { result?: { data?: unknown }; args?: unknown }, idKey: string): string {
 	const data = (ctx.result?.data as ({ label?: string } & Record<string, unknown>) | undefined) ?? {};
 	const args = ctx.args as Record<string, unknown> | undefined;
 	const id = data[idKey] ?? args?.[idKey];
 	const label = data.label;
-	const idPart = id ? atId(String(id)) : "";
-	const joined = label && idPart ? `${idPart} — ${label}` : (label ?? idPart);
-	return joined;
+	if (id && label) return agentTitle(String(id), label);
+	return label ?? (id ? atId(String(id)) : "");
 }
 
 export const spawnView = createToolView<Record<string, unknown>, SubagentDetails>({
@@ -69,17 +77,12 @@ export const spawnView = createToolView<Record<string, unknown>, SubagentDetails
 				if (dur) parts.push(dur);
 			}
 		}
-		// Nested-subtree summary (foreground cards): widget vocabulary — the
-		// whole descendant tree of this agent folded into one count set.
-		// Vocabulary mirror of pi-ui widget.ts metaLine() — keep both in sync
-		// (SPEC: 显示面统一规则 mandates the shared vocabulary).
+		// Nested-subtree summary (foreground cards): the whole descendant
+		// tree of this agent folded into one count set — the shared counter
+		// vocabulary (pi-ui counterParts; SPEC: 显示面统一规则).
 		const n = d?.nested;
 		if (n && n.total > 0) {
-			parts.push(`done ${n.done}/${n.total}`);
-			if (n.running) parts.push(`${n.running} running`);
-			if (n.idle) parts.push(`${n.idle} idle`);
-			if (n.failed) parts.push(`${n.failed} failed`);
-			if (n.stopped) parts.push(`${n.stopped} stopped`);
+			parts.push(...counterParts(n).map((p) => p.text));
 		}
 		return parts;
 	},

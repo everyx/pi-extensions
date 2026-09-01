@@ -14,6 +14,7 @@ import { stashOverflow, truncationMarker } from "@everyx/pi-ui/context.js";
 import type { AgentCompletion } from "./agent-process.js";
 import type { RegisteredAgent } from "./registry.js";
 import type { NotificationDetails } from "./types.js";
+import { agentTitle } from "./views.js";
 
 /**
  * LLM-visible output cap: details.events stay complete, so folding/expansion
@@ -41,7 +42,7 @@ export function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, compl
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,
-		label: `@${agent.agentId} — ${agent.label}`,
+		label: agentTitle(agent.agentId, agent.label),
 		model: agent.model,
 		thinking: agent.thinking,
 		// Card body (never enters LLM context — verified against convertToLlm).
