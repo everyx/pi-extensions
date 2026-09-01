@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.6](https://github.com/everyx/pi-extensions/compare/pi-read-doc-v1.0.5...pi-read-doc-v1.0.6) (2026-09-01)
+
+
+### Bug Fixes
+
+* **pi-read-doc:** conversion seam + LLM-budget truncation (root SPEC rule) ([a0343c0](https://github.com/everyx/pi-extensions/commit/a0343c0ea1b199fac57be0554ad2b14d21d1056d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.1.2
+
 ## [1.0.5](https://github.com/everyx/pi-extensions/compare/pi-read-doc-v1.0.4...pi-read-doc-v1.0.5) (2026-08-31)
 
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.2](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.1.1...pi-ui-v1.1.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **pi-subagent:** persistent foreground widget row registers as idle, not done ([8499866](https://github.com/everyx/pi-extensions/commit/849986608ea3e380d1e2e8bbb492f0c3a361f47f))
+* **pi-ui:** rot sweep — stale comments, SPEC export columns, unexport foldedBlock ([024b3ae](https://github.com/everyx/pi-extensions/commit/024b3ae977ad8194b1aa9235ae4898decb28061d))
+* single-source the display surface — counterParts, agentTitle, iconForStatus ([d698d29](https://github.com/everyx/pi-extensions/commit/d698d29b42d6af27fb445cd39353ed749fb45c7c))
+
 ## [1.1.1](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.1.0...pi-ui-v1.1.1) (2026-08-31)
 
 
