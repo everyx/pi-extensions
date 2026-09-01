@@ -71,27 +71,27 @@ session: /path/...jsonl
 ### agent_stop / agent_send 结果卡
 
 ```
-✓ agent_stop "research db schema" stopped
+✓ agent_stop "@zoe — research db schema" stopped
 
-✓ agent_send → "research db schema" delivered
+✓ agent_send "@zoe — research db schema" delivered
   重点看 orders 表的索引和慢查询
 
-✓ agent_send → @parent delivered
+✓ agent_send "@parent" delivered
   我已经检查完，需要你确认部署窗口
 
-✗ agent_stop "slow query probe" stop failed
+✗ agent_stop "@max" stop failed
   agent not found
 ```
 
 - agent_send 的 `to` = 子 agent 的短人名 id（spawn/通知给到的）或 `@parent`（父会话）
-- 注入的消息以普通文本显示在卡片内，完整多行，超 5 行按统一折叠规则处理
+- 注入的消息以普通文本显示在卡片内，完整多行，超 10 行按 head 预览折叠（write 同款）
 - 动画帧在同一行内切换，绝不追加新行
 - 错误保持同一形态：状态行 error 色 + dim 原因行
 
 ### 完成通知卡片（persistent 时带 idle 标记）
 
 ```
-✓ agent_spawn "检查 CI 配置" (sonnet · high · Took 27.5s · 1,250 tokens · 3 tool uses · idle)
+✓ agent_spawn "@max — 检查 CI 配置" (sonnet · high · Took 27.5s · 1,250 tokens · 3 tool uses · idle)
 <空行>
 ... (3 earlier lines, ctrl+o to expand)
 Found 5 files handling authentication: src/auth/*.ts …
@@ -135,7 +135,7 @@ types.ts           — 共享协议类型（RenderEvent / SubagentDetails / Noti
 render.ts          — 通知卡渲染器（消息面）；格式化直接取自 pi-ui（spinner.js/width.js 正典出口）
 widget.ts          — Agents 状态 widget
 name-gen.ts        — 短人名代理 id（测试）
-spawn-session.ts   — 子代理会话目 isolated 目录 bootstrap
+spawn-session.ts   — spawn 生命周期（前/后台/persistent 三路）+ 结果分类（表测试）
 nested-fold.ts     — 前景卡子树 telemetry 计数
 views.ts           — 三张工具卡 view（单一来源）
 card.ts            — 通知卡包装（通过 pi-ui）
@@ -188,7 +188,7 @@ queued → running ──→ completed（通知）
 - **零 socket、零文件写入、零轮询**——纯内存事件流
 - 注入语义（已实证）：父 streaming（工具 execute 挂起/LLM 跑）→ 消息排队不抢占；父空闲 → 立即起新 turn 唤醒
 - 事件天然带身份：每个 AgentProcess 持有自己的 RpcClient 连自己的子进程——收到 extension_ui_request 的 client 即消息来源，无需 id 字段
-- 身份注入：spawn 时环境变量 `PI_SUBAGENT_AGENT_ID`（本 agent 人名 id）、`PI_SUBAGENT_PARENT`（父身份）；子进程扩展检测到才注册 agent_send 工具与 UI 上报
+- 身份注入：spawn 时环境变量 `PI_SUBAGENT_AGENT_ID`（本 agent 人名 id，子进程据此自认是子）；agent_send 全实例注册（root 用它给后台子发消息），仅上行 UI 上报限子进程（hasParent）
 
 ### 基石验证（2026-08-10 实证）
 
@@ -223,7 +223,7 @@ queued → running ──→ completed（通知）
 
 ### 嵌套
 
-子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。子进程扩展经环境变量获得自身身份（`PI_SUBAGENT_AGENT_ID` / `PI_SUBAGENT_PARENT`）——孙 agent 由子进程自身 registry 分配人名 id。
+子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。子进程扩展经 `PI_SUBAGENT_AGENT_ID` 获得自身身份——孙 agent 由子进程自身 registry 分配人名 id。
 
 ### 显示面统一规则（2026-08-22）
 

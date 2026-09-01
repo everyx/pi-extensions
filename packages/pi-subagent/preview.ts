@@ -329,7 +329,7 @@ const fakeAgent = (agentId: string, label: string, startedAt: number, activity: 
 		status: "running",
 		getLatestActivity: () => activity,
 	}) as unknown as AgentProcess;
-const widgetState = new Map<string, { startedAt: number }>();
+const widgetState = new Set<string>();
 function syncWidget(agents: WidgetAgent[] | undefined): void {
 	// 1) Ends first: agents marked `removed` leave the widget with their
 	//    result, feeding the lifetime progress meta (`1/3`, `(1+2)/3`).
@@ -356,7 +356,7 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 		if (a.label == null) continue;
 		// startedAt per round: elapsed grows from the agent's own start.
 		const started = Date.now() - (a.startedOffset ?? 0);
-		widgetState.set(a.id, { startedAt: started });
+		widgetState.add(a.id);
 		widget.add(fakeAgent(a.id, a.label, started, a.activity));
 		// Persistent agent already completed: register (running) then flip to
 		// idle — same two-step path as the real registry (register → markIdle).
@@ -817,9 +817,9 @@ const pathB: LifecyclePath = {
 	height: 0,
 };
 
-// Path C — background failure: spawn dies, failed notification follows.
+// Path C — background failure: spawn dies, start-failed card (no notification).
 const pathC: LifecyclePath = {
-	title: "C · background failure — starting → start failed → failed notification",
+	title: "C · background failure — starting → start failed",
 	phases: [
 		{
 			name: "starting",
@@ -843,38 +843,6 @@ const pathC: LifecyclePath = {
 				},
 			],
 			status: "start failed",
-		},
-		{
-			name: "failed notification",
-			ticks: 20,
-			stream: [
-				{
-					kind: "agent",
-					args: bgArgs,
-					details: details({
-						runInBackground: true,
-						label: "bad model",
-						error: 'Model "no-such-model-xyz" not available.',
-					}),
-					isPartial: false,
-					isError: true,
-				},
-				{
-					kind: "notification",
-					details: {
-						status: "failed",
-						agent_id: "max",
-						label: params.label,
-						model: p.model,
-						thinking: p.thinking,
-						result: 'Model "no-such-model-xyz" not available.',
-						usage: { durationMs: 4_200, tokens: 180, toolUses: 0 },
-						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
-						sessionId: "sess-1",
-					},
-				},
-			],
-			status: "failed notification",
 		},
 	],
 	pauseTicks: 30,
@@ -1129,4 +1097,3 @@ async function runLive(): Promise<void> {
 }
 
 await runLive();
-widget.dispose();

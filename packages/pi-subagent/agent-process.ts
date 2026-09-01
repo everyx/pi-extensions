@@ -142,7 +142,7 @@ export class AgentProcess {
 		if (options.model) args.push("--model", options.model);
 		if (options.thinking) args.push("--thinking", options.thinking);
 		if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
-		// Title (resolved by the caller — explicit or derived) names the session.
+		// Label names the session (--name, capped at 80 chars).
 		args.push("--name", options.label.slice(0, 80));
 		if (options.sessionDir) args.push("--session-dir", options.sessionDir);
 

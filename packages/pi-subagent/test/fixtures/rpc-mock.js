@@ -7,7 +7,7 @@
 // for the StringDecoder double-decode bug).
 import readline from "node:readline";
 
-const DELAYS = { get_state: 60, steer: 10, abort: 40 };
+const DELAYS = { get_state: 60, abort: 40 };
 
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", (line) => {

@@ -130,7 +130,7 @@ export const sendView = createToolView<Record<string, unknown>, Record<string, u
 		if (ctx.status === "processing") return "sending\u2026";
 		return "delivered";
 	},
-	// The message body shows on the card (folded at 5 rows like bash).
+	// The message body shows on the card (head preview: first 10 rows, write-like).
 	preview: "head",
 	body: { text: (ctx) => (ctx.result?.data as { message?: string } | undefined)?.message ?? "" },
 });

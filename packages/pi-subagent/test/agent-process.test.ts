@@ -79,7 +79,6 @@ class FakeClient {
 					success: true,
 					data: { text: this.lastText },
 				};
-			case "steer":
 			case "abort":
 				return { type: "response", command: command.type, success: true };
 			default:

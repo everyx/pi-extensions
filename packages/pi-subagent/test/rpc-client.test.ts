@@ -32,7 +32,7 @@ describe("RpcClient — command correlation", () => {
 	it("correlates concurrent commands by unique id even when responses arrive out of order", async () => {
 		const client = makeClient();
 		try {
-			// get_state is delayed 60ms, abort 10ms — the abort response lands
+			// get_state is delayed 60ms, abort 40ms — the abort response lands
 			// first. With a shared id the second sendCommand would overwrite the
 			// first waiter and the late get_state response would resolve the
 			// abort call (mismatch).

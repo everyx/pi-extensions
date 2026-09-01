@@ -28,7 +28,7 @@ Pi has no built‑in sub‑agents. So heavy, parallel, or context‑heavy work c
 - **Nestable** — a child is a full pi instance, so it can spawn another child.
 - **Token economy** — the system side stays lean:
   - **System prompt** — three tools and terse guidance inject roughly 2–3KB of system prompt (token count drifts with the tokenizer).
-  - **Notification** — the LLM sees only minimal structured data; decoration (label, usage, session path) stays in the render layer.
+  - **Notification** — the LLM sees only minimal structured data; decoration (label, usage) stays in the render layer.
   - **Results** — tail‑truncated (2000 lines / 50KB); expand any card for the full transcript.
 
 ## Comparison with similar extensions
@@ -81,7 +81,7 @@ Pi calls `agent_spawn` (foreground), the child runs in isolation, and the result
 Spawn three sub‑agents to look at the auth module, the database layer, and the API routes
 ```
 
-Pi calls `agent_spawn` with `run_in_background: true` three times. Each completion notification carries that agent's final output — no polling, no extra result tool.
+Pi issues three `agent_spawn` calls in one block — foreground calls run in parallel, and each call's result carries that agent's final output (no polling, no extra result tool).
 
 ### Message or stop
 

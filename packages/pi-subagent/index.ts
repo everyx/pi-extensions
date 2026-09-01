@@ -10,9 +10,9 @@
  *   registry.ts       — AgentRegistry: lifecycle + completion policy + routing (tested)
  *   model.ts          — model-spec → ResolvedModel (testable)
  *   name-gen.ts       — short human-readable agent ids (tested)
- *   spawn-session.ts  — isolated session-dir bootstrap for child agents
+ *   spawn-session.ts  — spawn lifecycle (fg/bg/persistent) + outcome classification (tested)
  *   nested-fold.ts    — foreground-card nested-subtree meta counters (tested)
- *   tree-display.ts   — live agent-tree widget integration (subtree fold)
+ *   tree-display.ts   — subtree display anchor: fold / forward / widget (显示面统一规则)
  *   notification.ts   — completion-notification payloads (notifyCompletion)
  *   types.ts          — shared tool-output / notification shapes
  *   views.ts          — tool card views (single source for the three cards)
@@ -554,11 +554,10 @@ export default function (pi: ExtensionAPI) {
 				timeoutMs: params.timeoutMs,
 				// Resident after completion (idle, zero token) — explicit opt-in.
 				persistent: params.persistent,
-				// Identity + parent reference for in-tree messaging; the child
-				// extension only enables agent_send when PI_SUBAGENT_AGENT_ID is set.
+				// Identity for in-tree messaging: PI_SUBAGENT_AGENT_ID marks this
+				// process as a child (agent_send is registered on every instance).
 				env: {
 					PI_SUBAGENT_AGENT_ID: agentId,
-					PI_SUBAGENT_PARENT: MY_AGENT_ID,
 				},
 				// Child→parent messages re-enter the router on this hop. Tree telemetry
 				// from deeper spawns forwards up (depth + 1) or lands on the root widget.
