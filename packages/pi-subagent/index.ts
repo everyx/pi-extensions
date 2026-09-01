@@ -113,7 +113,7 @@ function widgetSurface(): WidgetSurface | null {
 	const w = widget;
 	if (!w) return null;
 	return {
-		add: (agent) => w.add(agent as AgentProcess),
+		add: (agent, status) => w.add(agent as AgentProcess, status),
 		remove: (agentId, result) => w.remove(agentId, result),
 		setStatus: (agentId, status) => w.setStatus(agentId, status),
 		dispose: () => w.dispose(),
@@ -655,8 +655,11 @@ export default function (pi: ExtensionAPI) {
 						},
 						onResident: (a) => {
 							ensureWidget(ctx);
-							registry.register(a as AgentProcess);
-							registry.markIdle(a.agentId);
+							// Resident from birth: register the widget row as idle (‖
+							// marker, stays addressable). Registering an already-completed
+							// agent at its terminal status would be removed by the
+							// widget's terminal cleanup before markIdle could flip it.
+							registry.register(a as AgentProcess, "idle");
 							tree.add(a, "idle");
 						},
 						// Foreground settled: report the child upward (widget-rooted

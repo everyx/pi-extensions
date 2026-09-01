@@ -47,13 +47,13 @@ class FakeAgent implements RegisteredAgent {
 }
 
 class FakeWidget implements WidgetSurface {
-	added: string[] = [];
+	adds: Array<{ id: string; status?: "running" | "idle" }> = [];
 	removed: string[] = [];
 	disposed = false;
 	statuses: Array<{ id: string; status: string }> = [];
 
-	add(agent: RegisteredAgent): void {
-		this.added.push(agent.agentId);
+	add(agent: RegisteredAgent, status?: "running" | "idle"): void {
+		this.adds.push({ id: agent.agentId, status });
 	}
 	remove(agentId: string): void {
 		this.removed.push(agentId);
@@ -97,7 +97,7 @@ describe("AgentRegistry — tracking", () => {
 		registry.register(agent);
 
 		assert.equal(registry.lookup("a1"), agent);
-		assert.deepEqual(widget?.added, ["a1"]);
+		assert.deepEqual(widget?.adds, [{ id: "a1", status: "running" }]);
 	});
 
 	it("register is a no-op for the widget when there is none (non-TUI)", () => {
@@ -114,6 +114,12 @@ describe("AgentRegistry — tracking", () => {
 			assert.ok(/^[a-z]+$/.test(id), `looks like a name: ${id}`);
 			assert.ok(id.length <= 6, `terse: ${id}`);
 		}
+	});
+
+	it("registers a foreground resident as an idle row (never a terminal status)", () => {
+		const { registry, widget } = makeRegistry();
+		registry.register(new FakeAgent("max", "stay", true), "idle");
+		assert.deepEqual(widget?.adds, [{ id: "max", status: "idle" }]);
 	});
 
 	it("lookup returns undefined for unknown ids", () => {

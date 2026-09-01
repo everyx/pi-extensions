@@ -41,7 +41,10 @@ export interface RegisteredAgent {
 
 /** Narrow widget surface — index.ts adapts the TUI AgentWidget to it. */
 export interface WidgetSurface {
-	add(agent: RegisteredAgent): void;
+	/** `status` = the row's lifecycle state at registration (background settle = running;
+	 *  foreground resident = idle — never a terminal status: the widget's terminal
+	 *  cleanup removes such rows immediately). */
+	add(agent: RegisteredAgent, status?: "running" | "idle"): void;
 	/** `result` feeds the widget's lifetime progress meta; undefined = unknown. */
 	remove(agentId: string, result?: WidgetResult): void;
 	/** In-place status update (idle ⇄ running for persistent agents). */
@@ -85,9 +88,9 @@ export class AgentRegistry {
 	}
 
 	/** Track a background agent: registry entry + widget row. */
-	register(agent: RegisteredAgent): void {
+	register(agent: RegisteredAgent, status: "running" | "idle" = "running"): void {
 		this.agents.set(agent.agentId, agent);
-		this.getWidget()?.add(agent);
+		this.getWidget()?.add(agent, status);
 	}
 
 	lookup(agentId: string): RegisteredAgent | undefined {

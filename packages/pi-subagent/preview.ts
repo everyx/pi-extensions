@@ -357,10 +357,9 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 		// startedAt per round: elapsed grows from the agent's own start.
 		const started = Date.now() - (a.startedOffset ?? 0);
 		widgetState.add(a.id);
-		widget.add(fakeAgent(a.id, a.label, started, a.activity));
-		// Persistent agent already completed: register (running) then flip to
-		// idle — same two-step path as the real registry (register → markIdle).
-		if (a.idle) widget.setStatus(a.id, "idle");
+		// 1:1 with the real registry: background settles add a running row;
+		// a foreground resident registers as idle (idle from birth).
+		widget.add(fakeAgent(a.id, a.label, started, a.activity), a.idle ? "idle" : "running");
 	}
 }
 

@@ -173,6 +173,33 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		assert.match(lines[0] ?? "", /muted: \(/);
 	});
 
+	it("add() with a terminal status removes the row on the spot (terminal rows never persist)", () => {
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		const lines = capture(ui);
+		w.add({ id: "a", title: "A", startedAt: 0, status: "done" });
+		// The row is cleaned up immediately and counted — the widget ends up
+		// empty (disposed). Callers registering an already-finished agent must
+		// pass a non-terminal status, or the row dies at birth.
+		assert.ok(!lines().some((l) => l.includes("A")), "terminal row removed");
+	});
+
+	it("add() with 'idle' keeps the row (resident: uncounted, no spinner)", () => {
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		const lines = capture(ui);
+		w.add({ id: "a", title: "A", startedAt: 0, status: "idle" });
+		assert.ok(
+			lines().some((l) => l.includes("A")),
+			"idle row persists",
+		);
+		assert.ok(
+			lines().some((l) => l.includes("‖")),
+			"‖ pause marker",
+		);
+		w.dispose();
+	});
+
 	it("updateStatus flips a row between running and idle in place", () => {
 		const ui = { setWidget: () => {} } as never;
 		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");

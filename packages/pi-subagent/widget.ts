@@ -27,14 +27,19 @@ export class AgentWidget {
 		this.widget = new StatusWidget(ui, "Agents");
 	}
 
-	/** Track a background agent. No-op when the row is already present. */
-	add(agent: AgentProcess): void {
+	/** Track an agent row. `status` is the row's lifecycle state at
+	 * registration — the caller knows it (background settle = running,
+	 * foreground resident = idle). Never derived from agent.status: at
+	 * resident time the process is already "completed", and a terminal row
+	 * status is removed by the widget's terminal cleanup on the spot.
+	 * No-op when the row is already present. */
+	add(agent: AgentProcess, status: "running" | "idle" = "running"): void {
 		this.widget.add({
 			id: agent.agentId,
 			// @id — label: the user matches the @name the LLM mentions in chat.
 			title: `@${agent.agentId} — ${agent.label}`,
 			startedAt: agent.startedAt,
-			status: agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done",
+			status,
 			rows: activityToRows(agent.getLatestActivity()),
 		});
 	}
