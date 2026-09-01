@@ -13,6 +13,7 @@
 
 import { fetchWithTimeout } from "../../http.js";
 import { createRateLimiter } from "../../rate-limit.js";
+import type { RenderedContent } from "../../types.js";
 
 const ENDPOINT = "https://api.fetch.tinyfish.ai";
 
@@ -25,9 +26,10 @@ interface TinyfishFetchResponse {
 	errors?: Array<{ url?: string; error?: string }>;
 }
 
-/** Fetch one URL via TinyFish's browser rendering; null on any failure.
- *  Callers treat null like the channel being unavailable (fuse advance). */
-export async function fetchWithTinyfish(url: string, signal?: AbortSignal): Promise<string | null> {
+/** Fetch one URL via TinyFish's browser rendering (format: markdown — the
+ *  API honors the request); null on any failure. Callers treat null like
+ *  the channel being unavailable (fuse advance). */
+export async function fetchWithTinyfish(url: string, signal?: AbortSignal): Promise<RenderedContent | null> {
 	const key = process.env.TINYFISH_API_KEY?.trim();
 	try {
 		return await limiter.run(async () => {
@@ -46,7 +48,8 @@ export async function fetchWithTinyfish(url: string, signal?: AbortSignal): Prom
 			if (!response.ok) return null;
 			const body = (await response.json()) as TinyfishFetchResponse;
 			const result = body.results?.find((r) => r.url === url) ?? body.results?.[0];
-			return result?.text?.trim() || null;
+			const text = result?.text?.trim();
+			return text ? { text, contentType: "text/markdown" } : null;
 		});
 	} catch {
 		return null;

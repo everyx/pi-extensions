@@ -19,7 +19,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { CHROMIUM_BINARIES } from "../browsers.js";
 import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
-import type { ChannelSearchContext, EngineId, SearchResultItem, WebSearchParams } from "../types.js";
+import type { ChannelSearchContext, EngineId, RenderedContent, SearchResultItem, WebSearchParams } from "../types.js";
 import { parseLocale } from "./bcp47.js";
 import { EXTRACT_SCRIPT, isCaptchaState, parseExtraction, parsePageState, STATE_PROBE_SCRIPT } from "./extract.js";
 import { recencyToTbs } from "./recency.js";
@@ -317,10 +317,10 @@ const FETCH_CONTENT_SCRIPT = `(() => {
 // fetch has no engine; the queue just serializes bsk sessions).
 const fetchQueue = createSerialQueue(openSession, closeSession);
 
-/** Render a URL in the real browser and return its body text; null when bsk
- *  is unavailable or navigation/extraction failed (caller advances or falls
- *  back). */
-export async function fetchUrlWithBsk(url: string, timeoutMs = 30_000): Promise<string | null> {
+/** Render a URL in the real browser; null when bsk is unavailable or
+ *  navigation/extraction failed (caller advances or falls back). The text
+ *  is the page's innerText — plain text, self-reported as such. */
+export async function fetchUrlWithBsk(url: string, timeoutMs = 30_000): Promise<RenderedContent | null> {
 	if (!(await isBskAvailable())) return null;
 	try {
 		return await fetchQueue.run(async (sessionId) => {
@@ -329,9 +329,11 @@ export async function fetchUrlWithBsk(url: string, timeoutMs = 30_000): Promise<
 			const raw = await evaluate(sessionId, FETCH_CONTENT_SCRIPT, timeoutMs);
 			try {
 				const parsed = JSON.parse(raw) as { title?: string; body?: string };
-				return (parsed.body ?? raw.trim()).trim() || null;
+				const text = (parsed.body ?? raw.trim()).trim();
+				return text ? { text, contentType: "text/plain" } : null;
 			} catch {
-				return raw.trim() || null;
+				const text = raw.trim();
+				return text ? { text, contentType: "text/plain" } : null;
 			}
 		});
 	} catch {

@@ -190,7 +190,9 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
 - **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/429/5xx）：**远程真实渲染保险丝**
   tinyfish fetch → bsk 真浏览器（LLM 拿真实内容不给占位）。本地 headless 已移除——
   同能力一份实现，也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝
-  （页面确实不存在，渲染器无法复活）。
+  （页面确实不存在，渲染器无法复活）。渲染器自报输出类型（`RenderedContent`：
+  tinyfish 请求 markdown → `text/markdown`；bsk innerText → `text/plain`），
+  `contentType` 原样透传，不伪造（诚实规则）。
 - **请求头 = 系统 curl 原生**（UA/Accept: */*/无 Accept-Language）；fallback
   用钉死 curl UA。动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）
   留档——curl 是合法命令行身份，被拦的页面由保险丝链兜底（不丢能力，多一跳）。

@@ -46,16 +46,18 @@ after(() => {
 describe("bsk real-browser channel (opt-in: PI_WEB_TOOLS_TEST_BSK=1, localhost only)", () => {
 	itBsk("fetchUrlWithBsk renders a local page", async () => {
 		// First call opens the session; retry once to cover slow browsers.
-		const text = (await fetchUrlWithBsk(`${base}/`)) ?? (await fetchUrlWithBsk(`${base}/`));
-		assert.ok(text, "page text returned");
-		if (text === null) return;
-		assert.match(text, /Local Browser Page/);
+		const rendered = (await fetchUrlWithBsk(`${base}/`)) ?? (await fetchUrlWithBsk(`${base}/`));
+		assert.ok(rendered, "page text returned");
+		if (!rendered) return;
+		assert.match(rendered.text, /Local Browser Page/);
+		// innerText is plain text — self-reported, never a markdown claim.
+		assert.equal(rendered.contentType, "text/plain");
 	});
 
 	itBsk("a second fetch reuses the live session", async () => {
-		const text = await fetchUrlWithBsk(`${base}/other`);
-		assert.ok(text, "page text returned");
-		if (text === null) return;
-		assert.match(text, /second page marker/);
+		const rendered = await fetchUrlWithBsk(`${base}/other`);
+		assert.ok(rendered, "page text returned");
+		if (!rendered) return;
+		assert.match(rendered.text, /second page marker/);
 	});
 });

@@ -39,6 +39,15 @@ export interface ChannelSearchContext {
 	signal?: AbortSignal;
 }
 
+/** A page renderer's output: the text and the real type of that text. */
+export interface RenderedContent {
+	text: string;
+	/** The real type of the text (tinyfish: requested markdown; bsk: the
+	 *  page's innerText — plain). The result card's contentType is this,
+	 *  verbatim (SPEC 诚实规则). */
+	contentType: string;
+}
+
 /** One search channel (fuse member) — composed by search/channels.ts into
  *  fuse order, walked by search/fuse.ts. */
 export interface SearchChannel {

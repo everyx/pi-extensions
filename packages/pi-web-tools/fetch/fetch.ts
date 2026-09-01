@@ -11,7 +11,7 @@
 import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi-coding-agent";
 import { stashOverflow } from "@everyx/pi-ui/context.js";
 import { fetchUrlWithBsk } from "../search/browser.js";
-import type { WebFetchResult } from "../types.js";
+import type { RenderedContent, WebFetchResult } from "../types.js";
 import { curlFetch } from "./api/curl-fetch.js";
 import { fetchWithTinyfish } from "./api/tinyfish-fetch.js";
 import { githubRawUrl } from "./github.js";
@@ -86,20 +86,22 @@ async function finishPage(
  *  the same stash/preview path as locally extracted markdown. Returns null
  *  when every renderer is unavailable or failed (caller shows its own error). */
 async function fuseRender(url: string, signal?: AbortSignal): Promise<WebFetchResult | null> {
-	const candidates: Array<() => Promise<string | null>> = [
+	const candidates: Array<() => Promise<RenderedContent | null>> = [
 		() => fetchWithTinyfish(url, signal),
 		() => fetchUrlWithBsk(url),
 	];
 	for (const render of candidates) {
-		const text = await render();
-		if (text) {
-			const { text: content, stashPath } = stashOverflow(text, url);
+		const rendered = await render();
+		if (rendered) {
+			const { text: content, stashPath } = stashOverflow(rendered.text, url);
 			return {
-				title: firstLineAsTitle(text),
+				title: firstLineAsTitle(rendered.text),
 				content: previewWithPointer(content, stashPath),
-				contentType: "text/markdown",
+				// The renderer self-reports its output type (tinyfish:
+				// requested markdown; bsk: innerText is plain) — no fabrication.
+				contentType: rendered.contentType,
 				outputPath: stashPath,
-				fullContent: text,
+				fullContent: rendered.text,
 			};
 		}
 	}

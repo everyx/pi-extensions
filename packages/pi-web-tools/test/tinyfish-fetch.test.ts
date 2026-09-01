@@ -1,7 +1,8 @@
 /**
  * Tests for TinyFish Fetch (fetch/api/tinyfish-fetch.ts): POST shape, auth,
- * per-URL result matching, and failure → null (fuse semantics). HTTP is
- * stubbed at the global fetch boundary.
+ * per-URL result matching, the markdown contentType self-report, and
+ * failure → null (fuse semantics). HTTP is stubbed at the global fetch
+ * boundary.
  */
 
 import assert from "node:assert/strict";
@@ -41,14 +42,15 @@ describe("tinyfish fetch adapter", () => {
 			const capture: { url?: string; headers?: Record<string, string>; body?: string } = {};
 			stubFetch({ results: [{ url: "https://a.dev", title: "T", text: "# Hello" }] }, capture);
 
-			const text = await fetchWithTinyfish("https://a.dev");
+			const rendered = await fetchWithTinyfish("https://a.dev");
 			assert.ok(capture.url, "fetch was called");
 			assert.equal(capture.url, "https://api.fetch.tinyfish.ai");
 			assert.match(capture.headers?.["Content-Type"] ?? "", /application\/json/);
 			assert.equal(capture.headers?.["X-API-Key"], undefined, "keyless first");
 			const body = JSON.parse(capture.body ?? "{}");
 			assert.deepEqual(body, { urls: ["https://a.dev"], format: "markdown" });
-			assert.equal(text, "# Hello");
+			// The request asks for markdown — the adapter self-reports it.
+			assert.deepEqual(rendered, { text: "# Hello", contentType: "text/markdown" });
 		}));
 
 	it("sends X-API-Key when set (shared with the search channel)", async () => {
@@ -67,7 +69,7 @@ describe("tinyfish fetch adapter", () => {
 				{ url: "https://a.dev", text: "right" },
 			],
 		});
-		assert.equal(await fetchWithTinyfish("https://a.dev"), "right");
+		assert.equal((await fetchWithTinyfish("https://a.dev"))?.text, "right");
 	});
 
 	it("returns null when the URL is missing from results (per-URL error)", async () => {
