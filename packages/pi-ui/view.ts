@@ -40,7 +40,7 @@ interface RenderContext {
 
 type CardStatus = "processing" | "success" | "error" | "stop";
 
-/** Everything a template function may need. `result` is absent while running. */
+/** Everything a template function may need; `result` is present at every render (while running, it carries the latest streamed data). */
 interface ViewContext<Args, Data> {
 	args: Args;
 	result?: { data: Data; error?: string };
@@ -103,7 +103,6 @@ function statusForResult(result: AgentToolResult<Record<string, unknown>>, conte
 	return "success";
 }
 
-/** Map status → card icon (library decision; consumers never pass icons). */
 /** Reuse the spinner instance stored in the render state so the frames
  * animate across re-renders (time-driven: current() derives from wall clock). */
 function spinnerFor(state: RenderContext["state"] | undefined): Spinner | undefined {
@@ -150,6 +149,7 @@ function stopAnimation(st: Record<string, unknown> | undefined): void {
 	handle.unsubscribe();
 }
 
+/** Map status → card icon (library decision; consumers never pass icons). */
 function iconForStatus(status: CardStatus, spinner: Spinner | undefined): CardIcon {
 	switch (status) {
 		case "processing":

@@ -1,5 +1,5 @@
 /**
- * Tests for StatusWidget lifetime progress meta (`1/3`, `(1+2)/3`).
+ * Tests for StatusWidget lifetime progress meta (`done 1/3 · 1 running`).
  */
 
 import assert from "node:assert/strict";

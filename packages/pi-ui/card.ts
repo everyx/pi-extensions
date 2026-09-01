@@ -104,7 +104,7 @@ export function contentRow(styled: string, x = 0): Component {
  * loses content, it only caps how much fills the screen). Shared by every
  * card body so the fold behavior is identical across surfaces.
  */
-export function foldedBlock(styledRows: string[], theme: Theme, expanded = false): BodyComponent {
+function foldedBlock(styledRows: string[], theme: Theme, expanded = false): BodyComponent {
 	return foldedBlockWith(styledRows, theme, expanded, "tail", PREVIEW_LINES);
 }
 

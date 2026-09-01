@@ -323,7 +323,7 @@ export class StatusWidget {
 		const lines: string[] = [];
 		if (this.title) {
 			// One marker line: ` ● <Title>` — 1-char left padding (matching the
-			// agent rows), accent dot + bold title color (v1.2.0 style).
+			// agent rows), accent dot + bold title color.
 			lines.push(
 				` ${theme.fg("accent", "\u25cf")} ${theme.fg("toolTitle", theme.bold(this.title))}${this.metaLine(theme)}`,
 			);
