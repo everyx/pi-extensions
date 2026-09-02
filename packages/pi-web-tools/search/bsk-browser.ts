@@ -123,7 +123,7 @@ export class BskBrowser {
 		if (!conn.ok) {
 			throw new Error(`real-browser channel unavailable: ${conn.detail}`);
 		}
-		const { ok, stdout } = await this.controls.runBsk(["session", "start", "--json"]);
+		const { ok, stdout } = await this.controls.runBsk(["session", "start", "--no-focus", "--json"]);
 		if (!ok) throw new Error("bsk session start failed");
 		const sessionId = parseBskSessionId(stdout);
 		if (sessionId) return sessionId;

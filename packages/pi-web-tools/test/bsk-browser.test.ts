@@ -115,7 +115,7 @@ describe("BskBrowser sessions", () => {
 		const { lifecycle, calls } = makeFake(fresh({ browsersConnected: true }));
 		const id = await lifecycle.startSession();
 		assert.equal(id, "s1");
-		assert.ok(calls.some((a) => a.join(" ") === "session start --json"));
+		assert.ok(calls.some((a) => a.join(" ") === "session start --no-focus --json"));
 	});
 
 	it("startSession: a start failure throws the bsk error", async () => {
