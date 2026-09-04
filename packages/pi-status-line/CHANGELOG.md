@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/everyx/pi-extensions/compare/pi-status-line-v1.0.3...pi-status-line-v1.0.4) (2026-09-04)
+
+
+### Bug Fixes
+
+* **pi-status-line:** freeze TPS text on data, never recompute in footer render ([f37ec0d](https://github.com/everyx/pi-extensions/commit/f37ec0d801871253bf4fbe236a8f86e6537d7f82))
+
 ## [1.0.3](https://github.com/everyx/pi-extensions/compare/pi-status-line-v1.0.2...pi-status-line-v1.0.3) (2026-08-30)
 
 

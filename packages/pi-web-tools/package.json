@@ -1,6 +1,6 @@
 {
 	"name": "@everyx/pi-web-tools",
-	"version": "1.2.2",
+	"version": "1.2.3",
 	"description": "Web primitives for pi — search and URL fetch (URL → Markdown). Multi-provider search with keyless-first quota escalation and a real-browser fallback fuse.",
 	"keywords": [
 		"pi-package"
