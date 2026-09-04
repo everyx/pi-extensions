@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.2...pi-web-tools-v1.2.3) (2026-09-04)
+
+
+### Bug Fixes
+
+* **pi-web-tools:** start bsk session with --no-focus to avoid stealing focus ([3a1d357](https://github.com/everyx/pi-extensions/commit/3a1d35724ca442e9fd8b72ad9876d39b7de5a9ab))
+
 ## [1.2.2](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.1...pi-web-tools-v1.2.2) (2026-09-01)
 
 
