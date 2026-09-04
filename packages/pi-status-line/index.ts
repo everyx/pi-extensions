@@ -131,9 +131,10 @@ export default function (pi: ExtensionAPI) {
 						if (avg !== null) lastTtftText = formatTtft(avg);
 						else if (!lastTtftText) lastTtftText = "T--";
 						parts.push(lastTtftText);
-						const tps = metrics.liveTps(Date.now());
-						if (tps !== null) lastTpsText = formatTps(tps);
-						else if (!lastTpsText) lastTpsText = "0.0T/s";
+						// Display only: never recompute with wall-clock now here — every
+						// keystroke re-renders the footer, and a growing denominator
+						// against frozen tokens would make the number drift while typing.
+						if (!lastTpsText) lastTpsText = "0.0T/s";
 						parts.push(lastTpsText);
 					}
 					if (cacheRead) parts.push(`R${fmt(cacheRead)}`);
@@ -208,7 +209,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_update", async (event) => {
 		const delta = extractDelta(event);
 		if (!delta) return;
-		metrics.addDelta(delta, Date.now());
+		const now = Date.now();
+		metrics.addDelta(delta, now);
 		// TTFT avg: count once per turn on first token
 		if (!ttftCountedForTurn) {
 			const ttft = metrics.ttftMs;
@@ -217,10 +219,17 @@ export default function (pi: ExtensionAPI) {
 				ttftCountedForTurn = true;
 			}
 		}
+		// Freeze the live value now — footer render only displays the cache
+		// (debounced → keep the previous text, same as before).
+		const tps = metrics.liveTps(now);
+		if (tps !== null) lastTpsText = formatTps(tps);
 		requestRender();
 	});
 
 	pi.on("message_end", async () => {
+		// Completed-turn average becomes the frozen final value.
+		const avg = metrics.averageTps(Date.now());
+		if (avg !== null) lastTpsText = formatTps(avg);
 		requestRender();
 	});
 

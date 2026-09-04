@@ -33,8 +33,9 @@ pi 的 footer（`Footer` 组件，`render(width): string[]`）内置拼
 
 ```
 turn_start ──► 记录 t0（TTFT 起点）；显示值保持到新一轮第一个 token 到来才覆盖
-message_update (text/thinking delta) ──► 估算 tokens（含 reasoning），推滑动窗口，requestRender
-message_end ──► 刷新最终值
+message_update (text/thinking delta) ──► 估算 tokens（含 reasoning），推滑动窗口，冻结直播 TPS 文本，requestRender
+message_end ──► 整轮平均值冻结为最终值
+footer render 只读缓存文本，永不以渲染时刻 Date.now() 重算——输入触发的重渲染会让 total/elapsed 分母膨胀、数字边打字边掉
 turn_end 之后持久化保留（等下一轮第一个 token 再覆盖），仅 session_shutdown 清空
 ```
 
