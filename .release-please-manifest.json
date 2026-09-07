@@ -4,5 +4,5 @@
 	"packages/pi-web-tools": "1.2.3",
 	"packages/pi-read-doc": "1.0.6",
 	"packages/pi-sleep-guard": "1.0.2",
-	"packages/pi-status-line": "1.0.4"
+	"packages/pi-status-line": "1.0.5"
 }

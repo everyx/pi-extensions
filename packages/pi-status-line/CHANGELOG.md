@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.5](https://github.com/everyx/pi-extensions/compare/pi-status-line-v1.0.4...pi-status-line-v1.0.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* **pi-status-line:** whole-generation average with exact final, CJK-aware estimate ([5e0ab8f](https://github.com/everyx/pi-extensions/commit/5e0ab8fd466e03571672d8bc4cd831cf72dfbfd5))
+
 ## [1.0.4](https://github.com/everyx/pi-extensions/compare/pi-status-line-v1.0.3...pi-status-line-v1.0.4) (2026-09-04)
 
 
