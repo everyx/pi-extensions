@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { estimateTokens, formatTps, formatTtft, SlidingWindow, TtftAvg, TurnMetrics } from "../tps.js";
+import { estimateTokens, formatTps, formatTtft, TtftAvg, TurnMetrics } from "../tps.js";
 
 describe("estimateTokens", () => {
 	it("empty → 0", () => assert.equal(estimateTokens(""), 0));
-	it("chars/4 ceiling", () => {
+	it("chars/4 ceiling (ASCII)", () => {
 		assert.equal(estimateTokens("abcd"), 1);
 		assert.equal(estimateTokens("abcde"), 2);
+	});
+	it("CJK chars count ~1 token each", () => {
+		assert.equal(estimateTokens("你好"), 2);
+		assert.equal(estimateTokens("你好世界"), 4);
+	});
+	it("mixed CJK + ASCII — ceil once on the weighted total", () => {
+		assert.equal(estimateTokens("ab你好"), 3); // ceil(2 + 2/4)
 	});
 });
 
@@ -21,16 +28,6 @@ describe("formatTtft", () => {
 	it("ms vs s — compact like R, no space (T prefix)", () => {
 		assert.equal(formatTtft(800), "T800ms");
 		assert.equal(formatTtft(1200), "T1.2s");
-	});
-});
-
-describe("SlidingWindow", () => {
-	it("prunes outside window", () => {
-		const w = new SlidingWindow(1000);
-		w.push(0, 10);
-		w.push(500, 10);
-		w.push(1500, 10);
-		assert.equal(w.tokens, 20);
 	});
 });
 
@@ -50,22 +47,54 @@ describe("TurnMetrics", () => {
 		assert.equal(m.liveTps(t0 + 100), null);
 	});
 
-	it("liveTps after debounce", () => {
+	it("liveTps after debounce = running average (elapsed denominator)", () => {
 		const m = new TurnMetrics();
 		const t0 = 1000;
 		m.startTurn(t0);
 		m.addDelta("a".repeat(400), t0 + 300);
 		m.addDelta("b".repeat(400), t0 + 800);
-		assert.ok((m.liveTps(t0 + 1300) ?? 0) > 0);
+		// 800 chars → ceil(800/4) = 200 tokens over 1000ms elapsed
+		assert.equal(m.liveTps(t0 + 1300), 200);
 	});
 
-	it("averageTps after debounce", () => {
+	it("gaps during generation count in the denominator", () => {
 		const m = new TurnMetrics();
 		const t0 = 1000;
 		m.startTurn(t0);
-		m.addDelta("a".repeat(400), t0 + 100);
-		assert.equal(m.averageTps(t0 + 200), null, "debounced");
-		assert.ok((m.averageTps(t0 + 1500) ?? 0) > 0);
+		m.addDelta("a".repeat(400), t0 + 300);
+		m.addDelta("b".repeat(400), t0 + 800);
+		// Same 200 tokens, but 3s elapsed — the 2.2s silent gap dilutes the rate.
+		assert.equal(m.liveTps(t0 + 3300), 200 / 3);
+	});
+
+	it("tokens estimated once on cumulative chars, never per delta (ceil inflation guard)", () => {
+		const m = new TurnMetrics();
+		m.startTurn(1000);
+		for (const ch of ["a", "b", "c", "d"]) m.addDelta(ch, 1000);
+		// Per-delta ceil would give 4; once on the total it is 1.
+		assert.equal(m.estimatedTokens, 1);
+	});
+
+	it("averageTps prefers the provider's exact token count", () => {
+		const m = new TurnMetrics();
+		m.startTurn(1000);
+		m.addDelta("a".repeat(400), 1300);
+		assert.equal(m.averageTps(1800, 500), 1000); // 500 exact tokens / 0.5s
+	});
+
+	it("averageTps falls back to the estimate when exact is absent or zero", () => {
+		const m = new TurnMetrics();
+		m.startTurn(1000);
+		m.addDelta("a".repeat(400), 1300);
+		assert.equal(m.averageTps(1800), 200); // estimate ceil(400/4)=100 / 0.5s
+		assert.equal(m.averageTps(1800, 0), 200); // exact 0 is treated as absent
+	});
+
+	it("averageTps debounced like live", () => {
+		const m = new TurnMetrics();
+		m.startTurn(1000);
+		m.addDelta("a".repeat(400), 1000);
+		assert.equal(m.averageTps(1100), null);
 	});
 
 	it("clear resets", () => {

@@ -8,10 +8,10 @@ Integrated into footer via `setFooter` — `↑`/`↓` right after `↓`, single
 
 | Metric | Definition |
 | --- | --- |
-| **TPS** | `output+reasoning` tokens / pure decode time (`firstToken → now`), live 1s sliding window, `<250ms` debounced |
+| **TPS** | `output+reasoning` tokens / wall clock (`firstToken → now`), gaps during generation included, TTFT excluded, `<250ms` debounced |
 | **TTFT** | `turn_start → firstToken` |
 
-Tokens estimated as `chars/4` (OpenAI heuristic); provider-precise counts are a future upgrade.
+Tokens: provider-precise `usage.output` at message_end, falling back to a single ceil estimate on cumulative chars (CJK ≈ 1 token/char, other ≈ 4 chars/token) — never per-delta ceil, which inflates the sum.
 
 ```
 footer:  ↑6.3k ↓119 T1.2s 42.1T/s R113 ... 0.6%/1.0M (model)
@@ -21,9 +21,9 @@ footer:  ↑6.3k ↓119 T1.2s 42.1T/s R113 ... 0.6%/1.0M (model)
 ## How it works
 
 - `turn_start` records `t0` (TTFT start); displayed values persist until the new turn's first token arrives.
-- Each `message_update` text delta is estimated, pushed into a 1s `SlidingWindow`, and both statuses re-rendered.
+- Each `message_update` accumulates chars only (tokens estimated once on the total); the live value is the running average over the generation so far (gaps counted, tool waits excluded structurally via pi's per-generation `turn_start`).
 - Values stay visible until the next turn's first token overwrites them (only `session_shutdown` clears).
-- Engine: `tps.ts` is pure (`estimateTokens` / `SlidingWindow` / `TurnMetrics`), testable without pi.
+- Engine: `tps.ts` is pure (`estimateTokens` / `TurnMetrics`), testable without pi.
 
 ## Future
 

@@ -226,9 +226,13 @@ export default function (pi: ExtensionAPI) {
 		requestRender();
 	});
 
-	pi.on("message_end", async () => {
-		// Completed-turn average becomes the frozen final value.
-		const avg = metrics.averageTps(Date.now());
+	pi.on("message_end", async (event) => {
+		// Exact provider output tokens when the finalized message carries usage;
+		// falls back to the chars estimate otherwise (some providers omit usage
+		// or exclude reasoning from output — the jump to exact is expected).
+		const usage = (event as { message?: { usage?: { output?: number } } } | null)?.message?.usage;
+		const exact = usage && typeof usage.output === "number" ? usage.output : undefined;
+		const avg = metrics.averageTps(Date.now(), exact);
 		if (avg !== null) lastTpsText = formatTps(avg);
 		requestRender();
 	});

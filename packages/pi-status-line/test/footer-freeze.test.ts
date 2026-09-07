@@ -6,8 +6,9 @@ import extension from "../index.js";
 /**
  * Wall-clock-free regression test: footer renders (keystrokes, ticks, …)
  * must never recompute TPS. The text freezes when data arrives —
- * message_update freezes the live value, message_end the turn average —
- * and render only displays the cache.
+ * message_update freezes the running average, message_end the turn's final
+ * (preferring the provider's exact usage.output when present) — and render
+ * only displays the cache.
  */
 
 interface FakeTui {
@@ -108,9 +109,23 @@ describe("footer TPS freeze", () => {
 		await fire("message_update", delta("a".repeat(400)));
 		fakeNow = 10_300;
 		await fire("message_update", delta("b".repeat(400)));
-		// 200 tokens over a 300ms window span.
+		// 200 tokens over a 300ms elapsed window.
 		assert.equal(renderTps(), "667T/s");
 		fakeNow = 20_000;
 		assert.equal(renderTps(), "667T/s", "typing must not move it");
+	});
+
+	it("message_end prefers the provider's exact output tokens", async () => {
+		fakeNow = 10_000;
+		const { renderTps, fire } = setup();
+		await fire("session_start");
+		await fire("turn_start");
+		await fire("message_update", delta("a".repeat(400)));
+		fakeNow = 10_300;
+		await fire("message_end", { message: { usage: { output: 500 } } });
+		// 500 exact tokens / 0.3s — the estimate (100) is replaced, not added to.
+		assert.equal(renderTps(), "1667T/s");
+		fakeNow = 20_000;
+		assert.equal(renderTps(), "1667T/s", "frozen after message_end");
 	});
 });

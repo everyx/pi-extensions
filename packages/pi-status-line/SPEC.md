@@ -18,23 +18,30 @@ pi 的 footer（`Footer` 组件，`render(width): string[]`）内置拼
 
 | module | 职责 | 接口 |
 | --- | --- | --- |
-| `tps.ts` | 纯计算：token 估算、滑动窗口、TPS/TTFT 格式化 | `estimateTokens` / `SlidingWindow` / `TurnMetrics` |
+| `tps.ts` | 纯计算：累计 token 估算、TPS/TTFT 格式化 | `estimateTokens` / `TurnMetrics` |
 | `index.ts` | 扩展入口：`setFooter` 定制 footer + turn/message 驱动 metrics | 默认导出 extension 工厂 |
 
 - `tps.ts` 无 pi 依赖，接口即测试面。`TurnMetrics` 封装单 turn 状态
-  （`turnStartMs / firstTokenMs / totalTokens / SlidingWindow(1s)`），
+  （`turnStartMs / firstTokenMs / totalChars / totalCjkChars`），
   暴露 `ttftMs / liveTps / averageTps` 派生值。
-- 指标定义对齐业界（OpenCode / pi-tps-status）：分子 `output+reasoning`
-  （`chars/4` 估算，provider 精确计数后续可替换）、分母纯解码时间
-  （`firstToken → now`，工具等待天然排除——`turn_start` 重置）、
-  直播 1s 滑动窗口 + `<250ms` 防抖、TTFT 单列。
+- 指标定义对齐业界（见下）：分子 `output+reasoning`
+  （CJK/Kana/Hangul 字≈1 token、其他≈/4，**累计字符一次性取整**——逐 delta
+  `ceil` 会系统性虚高，实测 token 对齐流 +40%、逐字流 +284%），
+  分母**首 token → now/end 全程墙钟**（Vercel AI SDK `outputTokensPerSecond` /
+  MLPerf ITL 同口径；生成内卡顿计入，TTFT 单列排除）；
+  终值优先 provider 精确 `usage.output`，无则回退估算。
+- **live = 运行平均**（终值的中间表述），不是瞬时速率——chunk 时序是传输工件，
+  “瞬时”在客户端不可观测；运行平均单调收敛到终值，仅一次估算→精确跳变。
+- **工具等待天然排除**：pi 的 `turn_start` 每次生成段都发一次（agent-core
+  agent-loop 实证），工具执行落在 turn 之间，无需显式暂停计时。
+- TTFT 单列（`turn_start → firstToken`，会话平均）。
 
 ## 行为
 
 ```
 turn_start ──► 记录 t0（TTFT 起点）；显示值保持到新一轮第一个 token 到来才覆盖
-message_update (text/thinking delta) ──► 估算 tokens（含 reasoning），推滑动窗口，冻结直播 TPS 文本，requestRender
-message_end ──► 整轮平均值冻结为最终值
+message_update (text/thinking delta) ──► 只累计字符（不逐 delta 估算）；冻结直播 TPS = 运行平均（估算分子 / 首token→now 全程墙钟），requestRender
+message_end ──► 终值冻结：provider 精确 usage.output（无则回退估算） / 首token→末token 墙钟
 footer render 只读缓存文本，永不以渲染时刻 Date.now() 重算——输入触发的重渲染会让 total/elapsed 分母膨胀、数字边打字边掉
 turn_end 之后持久化保留（等下一轮第一个 token 再覆盖），仅 session_shutdown 清空
 ```
@@ -43,6 +50,7 @@ turn_end 之后持久化保留（等下一轮第一个 token 再覆盖），仅 
 
 ## 测试
 
-`SlidingWindow` 窗口裁剪 / `estimateTokens` 边界 / `TurnMetrics`
-TTFT/TPS 派生与防抖。扩展接线属 pi 事件面，靠单测 TurnMetrics 覆盖
-核心逻辑 + 人工 TUI 冒烟（`pi` 运行中观察 footer）。
+`estimateTokens` 边界（含 CJK 权重）/ `TurnMetrics` 的 TTFT、防抖、
+运行平均、卡顿计入、一次性取整防虚高、精确分子优先与回退。
+扩展接线属 pi 事件面，靠单测 TurnMetrics 覆盖核心逻辑 + 人工 TUI 冒烟
+（`pi` 运行中观察 footer）。

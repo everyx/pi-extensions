@@ -2,19 +2,43 @@
  * pi-status-line — TPS / TTFT pure calculation.
  *
  * No pi dependency, no side effects — the interface is the test surface.
- * Industry convention (OpenCode / pi-tps-status):
- *   numerator = output + reasoning tokens (chars/4 estimate when provider
- *     counts unavailable), denominator = pure decode time
- *     (firstToken → now, tool wait excluded, <250ms debounced).
- *   TTFT = turn_start → firstToken, reported separately.
+ *
+ * Semantics (aligned with the researched consensus — see SPEC):
+ *   numerator   = output + reasoning tokens. Provider-exact `usage.output`
+ *     at message_end when available; otherwise a single ceil estimate on the
+ *     cumulative chars (CJK/Kana/Hangul ≈ 1 token/char, other ≈ 4 chars/token).
+ *     NEVER per-delta ceil: Σceil(cᵢ/4) ≥ ceil(Σcᵢ/4) inflates the sum by
+ *     ~0.375 tokens/delta (measured +40% on token-aligned streams, +284% on
+ *     char-level ones).
+ *   denominator = wall clock firstToken → now/end — the industry decode-TPS
+ *     definition (AI SDK outputTokensPerSecond; MLPerf ITL). Gaps during the
+ *     generation count; TTFT is excluded and reported separately.
+ *   live value  = the running average (the final's intermediate form), not an
+ *     instantaneous rate — chunks are a transport artifact, an "instantaneous"
+ *     client-side rate measures buffering/network, not the model.
+ *   tool waits  = excluded structurally: pi emits turn_start per generation
+ *     segment, so tool execution falls between turns (verified in
+ *     pi-agent-core agent-loop).
  */
 
 const DEBOUNCE_MS = 250;
 const CHARS_PER_TOKEN = 4;
 
+/** CJK unified ideographs, ext A, kana, compat ideographs, Hangul — these cost
+ *  ~1 token per char (cl100k/o200k ≈ 1.1–1.6 chars/token), not 4. */
+const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/;
+
+function countCjkChars(text: string): number {
+	let n = 0;
+	for (const ch of text) if (CJK_RE.test(ch)) n++;
+	return n;
+}
+
+/** Token estimate for a full text — single ceil, CJK-aware. */
 export function estimateTokens(text: string): number {
 	if (text.length === 0) return 0;
-	return Math.ceil(text.length / CHARS_PER_TOKEN);
+	const cjk = countCjkChars(text);
+	return Math.ceil(cjk + (text.length - cjk) / CHARS_PER_TOKEN);
 }
 
 export function formatTps(tps: number): string {
@@ -25,39 +49,6 @@ export function formatTps(tps: number): string {
 export function formatTtft(ms: number): string {
 	if (ms >= 1000) return `T${(ms / 1000).toFixed(1)}s`;
 	return `T${ms}ms`;
-}
-
-/** Sliding window that sums tokens inside windowMs. */
-export class SlidingWindow {
-	readonly windowMs: number;
-	#samples: Array<{ t: number; tokens: number }> = [];
-
-	constructor(windowMs = 1000) {
-		this.windowMs = windowMs;
-	}
-
-	push(now: number, tokens: number): void {
-		this.#samples.push({ t: now, tokens });
-		const cutoff = now - this.windowMs;
-		while (this.#samples.length > 0 && this.#samples[0].t < cutoff) {
-			this.#samples.shift();
-		}
-	}
-
-	get tokens(): number {
-		let sum = 0;
-		for (const s of this.#samples) sum += s.tokens;
-		return sum;
-	}
-
-	get spanMs(): number {
-		if (this.#samples.length < 2) return 0;
-		return this.#samples[this.#samples.length - 1].t - this.#samples[0].t;
-	}
-
-	clear(): void {
-		this.#samples = [];
-	}
 }
 
 /** Session-level TTFT average — sum/count, no debounce. */
@@ -81,28 +72,26 @@ export class TtftAvg {
 	}
 }
 
-/** Per-turn decode state — one instance lives for the current turn. */
+/** Per-turn decode state — one instance lives for the current generation. */
 export class TurnMetrics {
 	turnStartMs: number | null = null;
 	firstTokenMs: number | null = null;
-	totalTokens = 0;
-	readonly window = new SlidingWindow(1000);
+	totalChars = 0;
+	totalCjkChars = 0;
 
 	startTurn(now: number): void {
 		this.turnStartMs = now;
 		this.firstTokenMs = null;
-		this.totalTokens = 0;
-		this.window.clear();
+		this.totalChars = 0;
+		this.totalCjkChars = 0;
 	}
 
-	/** Returns newly estimated tokens for this delta. */
-	addDelta(text: string, now: number): number {
-		const tokens = estimateTokens(text);
-		if (tokens === 0) return 0;
+	/** Accumulate chars only — tokens are estimated ONCE on the running total. */
+	addDelta(text: string, now: number): void {
+		if (text.length === 0) return;
 		if (this.firstTokenMs === null) this.firstTokenMs = now;
-		this.totalTokens += tokens;
-		this.window.push(now, tokens);
-		return tokens;
+		this.totalCjkChars += countCjkChars(text);
+		this.totalChars += text.length;
 	}
 
 	get ttftMs(): number | null {
@@ -110,31 +99,36 @@ export class TurnMetrics {
 		return this.firstTokenMs - this.turnStartMs;
 	}
 
-	/** Live TPS over the sliding window; null when debounced / insufficient data. */
-	liveTps(now: number): number | null {
+	/** Estimated tokens for the generation so far — one ceil, no per-delta inflation. */
+	get estimatedTokens(): number {
+		return Math.ceil(this.totalCjkChars + (this.totalChars - this.totalCjkChars) / CHARS_PER_TOKEN);
+	}
+
+	#rate(now: number, exactTokens?: number): number | null {
 		if (this.firstTokenMs === null) return null;
 		const elapsed = now - this.firstTokenMs;
 		if (elapsed < DEBOUNCE_MS) return null;
-		const span = this.window.spanMs;
-		// Need at least two samples spanning some time; fall back to total/elapsed.
-		if (span < 100) {
-			return this.totalTokens / (elapsed / 1000);
-		}
-		return this.window.tokens / (span / 1000);
+		const tokens = exactTokens && exactTokens > 0 ? exactTokens : this.estimatedTokens;
+		if (tokens <= 0) return null;
+		return tokens / (elapsed / 1000);
 	}
 
-	/** Completed-turn average: total / pure decode time. */
-	averageTps(now: number): number | null {
-		if (this.firstTokenMs === null || this.totalTokens === 0) return null;
-		const elapsed = now - this.firstTokenMs;
-		if (elapsed < DEBOUNCE_MS) return null;
-		return this.totalTokens / (elapsed / 1000);
+	/** Live TPS — the running average over the generation so far: the final's
+	 *  intermediate form. Gaps count, TTFT excluded, <250ms debounced. */
+	liveTps(now: number): number | null {
+		return this.#rate(now);
+	}
+
+	/** Completed-turn TPS — same formula; prefers the provider's exact output
+	 *  tokens when available, falls back to the estimate. */
+	averageTps(now: number, exactTokens?: number): number | null {
+		return this.#rate(now, exactTokens);
 	}
 
 	clear(): void {
 		this.turnStartMs = null;
 		this.firstTokenMs = null;
-		this.totalTokens = 0;
-		this.window.clear();
+		this.totalChars = 0;
+		this.totalCjkChars = 0;
 	}
 }
