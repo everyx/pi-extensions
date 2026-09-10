@@ -16,6 +16,10 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 /** Which step produced the document (card echo + diagnostics). */
 export type ConvertedVia = "anydoc" | "anydoc:hosted" | "rapid";
 
+/** Where OCR may run: auto = full chain (may upload to hosted Parse),
+ *  local = native + local rapidocr only, off = native extraction only. */
+export type OcrPolicy = "auto" | "local" | "off";
+
 export interface ConvertedDocument {
 	/** Full converted text — the LLM-budget truncation is the caller's
 	 *  concern (root SPEC: UI 渲染源不截断). */
@@ -99,16 +103,24 @@ export const fileQuota: QuotaStore = {
  * 2. `needsOcr` → hosted OCR, gated by the monthly quota (charged on success)
  * 3. `needsOcr` + pdf → local rapidocr
  * 4. otherwise the original error propagates (the caller adds the hint).
+ *
+ * `policy` gates the OCR steps: "local" never attempts hosted (step 2),
+ * "off" skips OCR entirely (steps 2-3).
  */
-export async function convertDocument(path: string, ext: string, deps: ConvertDeps): Promise<ConvertedDocument> {
+export async function convertDocument(
+	path: string,
+	ext: string,
+	deps: ConvertDeps,
+	policy: OcrPolicy = "auto",
+): Promise<ConvertedDocument> {
 	let md: string;
 	try {
 		md = await deps.toMarkdown(path);
 	} catch (err) {
 		if ((err as { code?: string })?.code !== "needsOcr") throw err;
+		if (policy === "off") throw err;
 
-		const used = await deps.quota.used();
-		if (used < QUOTA_LIMIT) {
+		if (policy === "auto" && (await deps.quota.used()) < QUOTA_LIMIT) {
 			try {
 				const hosted = await deps.limit(() => deps.toMarkdown(path, { ocr: "hosted" }));
 				const pages = Math.max(1, (err as { pages?: unknown[] })?.pages?.length ?? 1);

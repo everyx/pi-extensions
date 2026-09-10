@@ -152,6 +152,53 @@ describe("convertDocument — chain", () => {
 		assert.deepEqual(h.rapidCalls, []);
 	});
 
+	it("local policy: rapid succeeds — hosted never attempted, no charge", async () => {
+		const h = harness({ rapidOcr: async () => "rapid text" });
+		const doc = await convertDocument("a.pdf", ".pdf", h, "local");
+		assert.equal(doc.via, "rapid");
+		assert.equal(doc.text, "rapid text");
+		assert.equal(h.hostedCalls, 0, "hosted skipped even with quota open");
+		assert.deepEqual(h.charged, []);
+	});
+
+	it("local policy: rapid unavailable — needsOcr propagates, hosted never attempted", async () => {
+		const h = harness({});
+		await assert.rejects(
+			() => convertDocument("a.pdf", ".pdf", h, "local"),
+			(err: Error & { code?: string }) => err.code === "needsOcr",
+		);
+		assert.equal(h.hostedCalls, 0);
+		assert.deepEqual(h.rapidCalls, ["a.pdf"]);
+	});
+
+	it("local policy: non-pdf — needsOcr propagates, neither hosted nor rapid attempted", async () => {
+		const h = harness({ rapidOcr: async () => "rapid text" });
+		await assert.rejects(
+			() => convertDocument("a.docx", ".docx", h, "local"),
+			(err: Error & { code?: string }) => err.code === "needsOcr",
+		);
+		assert.equal(h.hostedCalls, 0);
+		assert.deepEqual(h.rapidCalls, []);
+	});
+
+	it("off policy: needsOcr propagates immediately — no hosted, no rapid", async () => {
+		const h = harness({ rapidOcr: async () => "rapid text" });
+		await assert.rejects(
+			() => convertDocument("a.pdf", ".pdf", h, "off"),
+			(err: Error & { code?: string }) => err.code === "needsOcr",
+		);
+		assert.equal(h.hostedCalls, 0);
+		assert.deepEqual(h.rapidCalls, []);
+	});
+
+	it("local/off policies do not touch native anydoc success", async () => {
+		for (const policy of ["local", "off"] as const) {
+			const h = harness({ mdResult: "# doc" });
+			const doc = await convertDocument("a.docx", ".docx", h, policy);
+			assert.equal(doc.via, "anydoc");
+		}
+	});
+
 	it("an empty page list still charges one page (the floor)", async () => {
 		const h = harness({
 			mdResult: () => Promise.reject(needsOcrError([])),

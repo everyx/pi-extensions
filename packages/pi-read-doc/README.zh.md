@@ -20,6 +20,7 @@ pi install npm:@everyx/pi-read-doc
 | 环境变量 | 作用 |
 |---|---|
 | `FIRECRAWL_API_KEY` | 提升 **hosted OCR** 的免费层额度——扫图页（`needsOcr`）走 Firecrawl Parse，而非回落本地 `rapidocr`（仅 pdf）。keyless 开箱可用（per-IP 限速），设 key 升额；keyed 池与 pi-web-tools 搜索共享。 |
+| `PI_READ_DOC_OCR` | **OCR 策略**：`auto`（默认）保留完整回退链——扫图页可能上传到 hosted Firecrawl Parse；`local` 绝不访问 hosted OCR——只走本地提取 + 本地 `rapidocr`（仅 pdf），失败报错而非上传；`off` 完全禁用 OCR——扫图页直接返回 `needsOcr` 错误。`local`/`off` 不受 `FIRECRAWL_API_KEY` 或剩余配额影响；未知值报错（绝不静默回退 `auto`）。`local` 模式需安装 `rapidocr`（`pip install rapidocr`）——模型在首次 OCR 时下载，之后可离线使用。 |
 
 ```bash
 export FIRECRAWL_API_KEY="fc-..."   # 或加进你的启动器 env 文件

@@ -22,6 +22,7 @@ all office formats convert locally).
 | Env var | Effect |
 |---|---|
 | `FIRECRAWL_API_KEY` | Lifts the keyless tier of **hosted OCR** — scanned pages (`needsOcr`) go to Firecrawl Parse instead of falling back to local `rapidocr` (pdf only). Keyless works out of the box with per-IP rate limits; setting the key raises them. The keyed pool is shared with pi-web-tools search. |
+| `PI_READ_DOC_OCR` | **OCR policy**: `auto` (default) keeps the full fallback chain — scanned pages may be uploaded to hosted Firecrawl Parse; `local` never contacts hosted OCR — native extraction, then local `rapidocr` only (pdf), and a failure there is an error, not an upload; `off` disables OCR entirely — scanned pages return the `needsOcr` error. `local`/`off` hold regardless of `FIRECRAWL_API_KEY` or remaining quota; unknown values are rejected (never silently `auto`). For `local` mode install `rapidocr` (`pip install rapidocr`) — its models download on the first OCR run, after which it works offline. |
 
 ```bash
 export FIRECRAWL_API_KEY="fc-..."   # or add it to your launcher's env file

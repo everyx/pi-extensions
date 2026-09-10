@@ -17,6 +17,12 @@ Walk 在 `convert.ts`（`convertDocument(path, ext, deps)`，deps 注入——fa
 3. rapidocr (local `python-rapidocr`, official `from rapidocr import RapidOCR`; python/python3 双试是二进制名枚举) — pdf only。
 4. 全落空 → 原 needsOcr 错误抛出（execute 加配置提示，错误分层）。
 
+## OCR 策略（`PI_READ_DOC_OCR`）
+
+- `auto`（默认）= 完整链路；`local` = 跳过 hosted（第 2 步，不读 quota），只走本地 rapidocr；`off` = needsOcr 直接抛出（跳过 2-3）。策略作为 `convertDocument` 参数传入，execute 每次调用时读 env。
+- **local-only 是硬保证**：`local`/`off` 下无论 `FIRECRAWL_API_KEY`/配额状态如何、本地 OCR 成败，都绝不调 hosted。解析严格（`parseOcrPolicy`）：未知值是工具错误，不静默回退 `auto`——typo 不能把隐私承诺降级成上传。
+- needsOcr 的 hint（details 层）按策略分叉：auto 提示 hosted/本地两条路，local 提示装 rapidocr，off 说明 OCR 已禁用。
+
 ## LLM 截断（根 SPEC：LLM context 截断保护）
 
 - 进 LLM 的 content 头部截断——直接用 pi 官方 `truncateHead`（2000 行 / 50KB，**UTF-8 字节**计数，与 pi bash/read 同一实现，预算真对齐）+ 截断标记（真实输出/总量行数与字节数）。

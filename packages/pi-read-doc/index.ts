@@ -16,7 +16,7 @@ import { type ExtensionAPI, truncateHead } from "@earendil-works/pi-coding-agent
 import { createToolView } from "@everyx/pi-ui/view.js";
 import { Type } from "typebox";
 
-import { type ConvertDeps, type ConvertedDocument, convertDocument, fileQuota } from "./convert.js";
+import { type ConvertDeps, type ConvertedDocument, convertDocument, fileQuota, type OcrPolicy } from "./convert.js";
 import { createRateLimiter } from "./rate-limit.js";
 
 const hostedLimiter = createRateLimiter(2); // 2 qps for hosted Parse
@@ -50,6 +50,15 @@ export const OFFICE_EXTS = new Set([
 export function extOf(path: string): string {
 	const i = path.lastIndexOf(".");
 	return i >= 0 ? path.slice(i).toLowerCase() : "";
+}
+
+/** Strict parse of PI_READ_DOC_OCR: null on unknown values — a typo must
+ *  surface as an error, never silently degrade local/off into an upload. */
+export function parseOcrPolicy(raw: string | undefined): OcrPolicy | null {
+	const v = (raw ?? "").trim().toLowerCase();
+	if (v === "" || v === "auto") return "auto";
+	if (v === "local" || v === "off") return v;
+	return null;
 }
 
 const ReadDocSchema = Type.Object({
@@ -179,16 +188,27 @@ export default function (pi: ExtensionAPI) {
 					return { content: [{ type: "text" as const, text: msg }], details: { error: msg }, isError: true as const };
 				}
 			}
+			const policy = parseOcrPolicy(process.env.PI_READ_DOC_OCR);
+			if (policy === null) {
+				const msg = `Invalid PI_READ_DOC_OCR value "${process.env.PI_READ_DOC_OCR}" (expected auto|local|off)`;
+				return { content: [{ type: "text" as const, text: msg }], details: { error: msg }, isError: true as const };
+			}
 			let doc: ConvertedDocument;
 			try {
-				doc = await convertDocument(path, ext, defaultDeps);
+				doc = await convertDocument(path, ext, defaultDeps, policy);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				const code = (e as { code?: string })?.code;
 				// LLM text stays terse; the config path (hosted OCR key, local
 				// rapidocr) is a UI-side hint — the LLM cannot act on it.
 				const hint =
-					code === "needsOcr" ? "Scanned pages: run hosted OCR (FIRECRAWL_API_KEY) or local rapidocr; see docs." : "";
+					code !== "needsOcr"
+						? ""
+						: policy === "local"
+							? "Scanned pages: local rapidocr unavailable or failed; hosted OCR disabled by PI_READ_DOC_OCR=local. Install python-rapidocr; see docs."
+							: policy === "off"
+								? "Scanned pages need OCR, but OCR is disabled (PI_READ_DOC_OCR=off)."
+								: "Scanned pages: run hosted OCR (FIRECRAWL_API_KEY) or local rapidocr; see docs.";
 				return {
 					content: [{ type: "text" as const, text: msg }],
 					details: { error: msg, code, ...(hint ? { hint } : {}) },

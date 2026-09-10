@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extOf, OFFICE_EXTS, truncateForLlm } from "../index.js";
+import { extOf, OFFICE_EXTS, parseOcrPolicy, truncateForLlm } from "../index.js";
 import { createRateLimiter } from "../rate-limit.js";
 
 describe("pi-read-doc", () => {
@@ -8,6 +8,16 @@ describe("pi-read-doc", () => {
 		assert.equal(extOf("a.docx"), ".docx");
 		assert.equal(extOf("A.PDF"), ".pdf");
 		assert.equal(extOf("noext"), "");
+	});
+
+	it("PI_READ_DOC_OCR parsing: strict — unknown values are errors, not auto", () => {
+		assert.equal(parseOcrPolicy(undefined), "auto");
+		assert.equal(parseOcrPolicy(""), "auto");
+		assert.equal(parseOcrPolicy(" Auto "), "auto");
+		assert.equal(parseOcrPolicy("local"), "local");
+		assert.equal(parseOcrPolicy("OFF"), "off");
+		assert.equal(parseOcrPolicy("locall"), null);
+		assert.equal(parseOcrPolicy("hosted"), null);
 	});
 
 	it("office ext set covers the anydoc table", () => {
