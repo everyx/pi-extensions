@@ -36,6 +36,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
+import { createLiveChannels } from "./live-output.js";
 import { resolveModel } from "./model.js";
 import { maybeWriteFullOutput, notifyCompletion, truncateForContext } from "./notification.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
@@ -554,6 +555,28 @@ export default function (pi: ExtensionAPI) {
 					sessionId: agent.sessionId,
 				});
 			};
+			const live = createLiveChannels({
+				// getWidget, not widget: the widget is created on first use, so a
+				// captured reference would be null for every update before that.
+				surfaces: { getWidget: () => widget ?? undefined, tree },
+				...(params.run_in_background
+					? {}
+					: {
+							card: {
+								delta: (text: string) => {
+									streamed += text;
+									onUpdate?.({
+										content: [{ type: "text", text: streamed }],
+										details: liveDetails(agent.getLatestActivity()),
+									});
+								},
+								activity: (activity: AgentActivity) => {
+									onUpdate?.({ content: [{ type: "text", text: streamed }], details: liveDetails(activity) });
+								},
+							},
+						}),
+			});
+
 			const agent = new AgentProcess({
 				agentId,
 				cwd: ctx.cwd,
@@ -592,29 +615,12 @@ export default function (pi: ExtensionAPI) {
 						.then(() => registry.stopAndRemove(agentId))
 						.catch(() => {}); // best-effort: a cleanup failure must not crash the host
 				},
-				onDelta: (delta) => {
-					if (params.run_in_background) {
-						// Live widget excerpt: the latest streamed text tail.
-						widget?.updateActivity(agent.agentId, agent.getLatestActivity());
-						tree.activity(agent);
-						return;
-					}
-					streamed += delta;
-					onUpdate?.({
-						content: [{ type: "text", text: streamed }],
-						details: liveDetails(agent.getLatestActivity()),
-					});
-				},
-				onActivityChange: (activity) => {
-					if (params.run_in_background) {
-						// Live widget excerpt for thinking/tool transitions.
-						widget?.updateActivity(agent.agentId, activity);
-						tree.activity(agent);
-						return;
-					}
-					if (activity.kind === "text") return; // covered by onDelta
-					onUpdate?.({ content: [{ type: "text", text: streamed }], details: liveDetails(activity) });
-				},
+				// Where live output goes lives in live-output.ts: the widget row and
+				// the tree fold hear about every update (a woken resident agent has a
+				// row and no card), and the card below exists only for a foreground
+				// spawn while its tool call runs.
+				onDelta: (delta) => live.onDelta(agent, delta),
+				onActivityChange: (activity) => live.onActivity(agent, activity),
 			});
 
 			// Lifecycle lives in spawn-session.ts — this switch only formats

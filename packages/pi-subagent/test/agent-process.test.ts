@@ -559,6 +559,23 @@ describe("AgentProcess — persistent / in-tree messages", () => {
 		assert.equal(agent.status, "running");
 	});
 
+	it("a woken agent streams its follow-up output (issue #30: the widget excerpt must move)", async () => {
+		const deltas: string[] = [];
+		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true, onDelta: (d) => deltas.push(d) });
+		await agent.spawnAndSend("count to 3");
+		const done = agent.waitForCompletion();
+		fake.emitSettled();
+		await done;
+
+		// No deltas for the first turn: everything asserted below came from the wake.
+		await agent.sendMessage("count to 5");
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "1 2 3" } });
+		fake.emitEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " 4 5" } });
+
+		assert.deepEqual(deltas, ["1 2 3", " 4 5"], "唤醒轮的增量必须送出来");
+		assert.deepEqual(agent.getLatestActivity(), { kind: "text", text: "1 2 3 4 5" }, "摘要要跟上，widget 才有内容");
+	});
+
 	it("a settle after wake returns the persistent agent to completed (idle)", async () => {
 		const { agent, fake } = makeAgent({ cwd: "/tmp", persistent: true });
 		await agent.spawnAndSend("do it");
