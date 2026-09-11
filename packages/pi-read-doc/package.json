@@ -1,6 +1,6 @@
 {
 	"name": "@everyx/pi-read-doc",
-	"version": "1.0.6",
+	"version": "1.1.0",
 	"description": "Enhanced read for pi – office docs (docx/pdf/pptx/xlsx etc.) via anydoc, header-only, OCR for scanned pages (Firecrawl or local rapidocr, in the order you configure).",
 	"keywords": [
 		"pi-package"

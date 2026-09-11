@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.1.2...pi-ui-v1.2.0) (2026-09-11)
+
+
+### Features
+
+* **pi-ui:** let a card shell take any theme background ([2bd0fd8](https://github.com/everyx/pi-extensions/commit/2bd0fd826b5bfd2e8b1186fee054fdbab4cf09c4))
+
 ## [1.1.2](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.1.1...pi-ui-v1.1.2) (2026-09-01)
 
 
