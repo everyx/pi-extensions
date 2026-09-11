@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { candidatesFor, searchFuse } from "../search/fuse.js";
+import { candidatesFor, searchFuse, summarizeFailures } from "../search/fuse.js";
 import type { SearchChannel, SearchResultItem, WebSearchParams } from "../types.js";
 
 const bare: WebSearchParams = { query: "hello" };
@@ -65,6 +65,16 @@ describe("search fuse walk", () => {
 		const a = fake({ id: "tinyfish", search: async () => Promise.reject(err) });
 		const out = await searchFuse(bare, [a], {});
 		assert.deepEqual(out.failures, [{ channel: "tinyfish", error: "no key", hint: "Set TINYFISH_API_KEY" }]);
+		// The hint is dead weight in the failure record alone — it must reach the
+		// text the card renders (details.error), or the user never sees it.
+		const { message, detail } = summarizeFailures(out.failures);
+		assert.equal(message, "All search channels failed: tinyfish (no key)");
+		assert.equal(detail, "All search channels failed: tinyfish (no key)\nSet TINYFISH_API_KEY");
+	});
+
+	it("summarizeFailures: no hints — the detail is the plain aggregate", () => {
+		const { message, detail } = summarizeFailures([{ channel: "exa", error: "HTTP 500" }]);
+		assert.equal(detail, message);
 	});
 
 	it("no candidates: nothing is attempted, failures stay empty", async () => {

@@ -21,7 +21,8 @@ import type {
 export interface SearchFuseFailure {
 	channel: string;
 	error: string;
-	/** Config guidance (UI-visible only — never in the LLM text). */
+	/** Config guidance — folded into the card's rendered error text by
+	 *  summarizeFailures; never in the LLM text (错误分层). */
 	hint?: string;
 }
 
@@ -37,6 +38,19 @@ export interface SearchFuseOutcome {
 	/** The LLM-visible error when all candidates failed: the last channel's
 	 *  raw error (the aggregate "All channels failed: …" goes to details). */
 	lastError?: string;
+}
+
+/**
+ * The two texts an all-channels-failed outcome needs: `message` for the LLM
+ * fallback (terse aggregate), `detail` for the card. The hints are config
+ * guidance — only the user can act on them — so they ride the detail text
+ * (`details.error` is the one details field the card renders; a `hint` field
+ * nothing reads is written to nobody).
+ */
+export function summarizeFailures(failures: SearchFuseFailure[]): { message: string; detail: string } {
+	const message = `All search channels failed: ${failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`;
+	const hints = failures.map((f) => f.hint).filter((h): h is string => Boolean(h));
+	return { message, detail: hints.length ? `${message}\n${hints.join("\n")}` : message };
 }
 
 /** Channels that are available AND can honor this exact request, in fuse

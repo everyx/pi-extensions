@@ -13,7 +13,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { webFetch } from "./fetch/fetch.js";
 import { buildWebSearchSchema, type WebFetchParams, WebFetchParamsSchema } from "./schema.js";
 import { CHANNELS } from "./search/channels.js";
-import { searchFuse } from "./search/fuse.js";
+import { searchFuse, summarizeFailures } from "./search/fuse.js";
 import type { ChannelId, FetchToolData, SearchResultItem, SearchToolData, WebSearchParams } from "./types.js";
 import { fetchView, searchView } from "./views.js";
 
@@ -100,10 +100,10 @@ async function executeSearch(
 			isError: true,
 		};
 	}
-	const message = `All search channels failed: ${out.failures.map((f) => `${f.channel} (${f.error})`).join("; ")}`;
+	const { message, detail } = summarizeFailures(out.failures);
 	return {
 		content: [{ type: "text", text: out.lastError || message }],
-		details: { error: message, failures: out.failures, query: params.query, startedAt, endedAt: Date.now() },
+		details: { error: detail, failures: out.failures, query: params.query, startedAt, endedAt: Date.now() },
 		isError: true,
 	};
 }
