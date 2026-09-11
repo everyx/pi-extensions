@@ -15,16 +15,15 @@ import type { RecoveredBlock, Recovery } from "./pdf/recover.js";
 /**
  * Two shapes, one rule: everything anydoc converts locally is markdown; a
  * document it refused (needsOcr) comes back as page blocks — from hosted OCR
- * or from local recovery — so a page read from an image always carries its
- * note.
+ * or from local recovery.
  */
 export type ConvertedDocument = (
 	| { kind: "markdown"; text: string; via: "anydoc" }
 	| { kind: "blocks"; blocks: RecoveredBlock[]; via: "anydoc:hosted" | "local" }
 ) & {
 	/** A short, user-facing note about HOW this conversion happened (a parked
-	 *  gate, a rejected key). UI only — the model gets the blocks and their
-	 *  notes, not this. */
+	 *  gate, a rejected key, where a hosted conversion ran). UI only — the model
+	 *  gets the blocks and their notes, not this. */
 	hint?: string;
 };
 
@@ -96,8 +95,12 @@ export async function convertDocument(
 				const hosted = await deps.limit(() => deps.toMarkdown(path, { ocr: "hosted" }));
 				return {
 					kind: "blocks",
-					blocks: [{ pages: pageRange(pageCount), text: hosted, note: hostedNote(pages, pageCount) }],
+					// No note on the block: where the text came from is nothing the model
+					// can act on. The provenance rides `hint` — the user is the one who
+					// cares that this document left the machine.
+					blocks: [{ pages: pageRange(pageCount), text: hosted }],
 					via: "anydoc:hosted",
+					hint: hostedNote(pages, pageCount),
 				};
 			} catch (hostedErr) {
 				const message = hostedErr instanceof Error ? hostedErr.message : String(hostedErr);

@@ -173,15 +173,9 @@ describe("blocksToText — 卡片的人读形态（JSON 只给模型）", () => 
 		assert.equal(text, "## Page 1-2\n# 合同\n正文\n\n## Page 3\nOCR 文本\n[source page image: /tmp/art/page-3.png]");
 	});
 
-	it("文本与 note 并存（机器识别的告警不能盖掉内容）", () => {
-		const text = blocksToText([
-			{ pages: [3], text: "SIGNATURE PAGE PROBE", image: "/tmp/art/page-3.jpg", note: "OCR — verify against image" },
-		]);
-		assert.equal(
-			text,
-			"## Page 3\nSIGNATURE PAGE PROBE\n(OCR — verify against image)\n[source page image: /tmp/art/page-3.jpg]",
-		);
-	});
+	// 「文本 + note 并存」的那条旧用例已删：note 现在只在没有文字时出现（见
+	// recover.ts），真实载荷里不再有这种组合——上面第一条已经钉住了有文字时
+	// 的块形态（页头 + 文本 + 页图路径）。
 
 	it("没有文字的页显示原因，而不是留白（离散页号也紧凑）", () => {
 		const text = blocksToText([{ pages: [21, 137], text: "", note: "not read: time budget" }]);

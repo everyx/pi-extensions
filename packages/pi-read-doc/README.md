@@ -47,13 +47,13 @@ read from images come back as a JSON array of page blocks:
 [
   { "pages": "1-2", "text": "# Contract\n..." },
   { "pages": "3", "text": "SIGNATURE PAGE PROBE",
-    "image": "/tmp/pi-read-doc-8f2a/page-9c1f-3.jpg",
-    "note": "OCR — verify against image" }
+    "image": "/tmp/pi-read-doc-8f2a/page-9c1f-3.jpg" }
 ]
 ```
 
 `text` holds what the engine read (our confidence floor — `0.5`, documented, not invisible — decides which lines count as text);
-`note` says what you should know about the block — that it was machine-read, that
-a page held no text, or why a page is missing. The `image` is the original page,
-kept so the model can look when a number or name matters. It is a 1500px copy
-(~2300 tokens per read), not the 200dpi render used for OCR.
+`note` appears only when the reader cannot see the fact for itself: a page that
+held no text, or why a page is missing. It never repeats that a block was read
+from an image — the `image` field already says that. The `image` is the original
+page, kept so the model can look when a number or name matters. It is a 1500px
+copy (~2300 tokens per read), not the 200dpi render used for OCR.

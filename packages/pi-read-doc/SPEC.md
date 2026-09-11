@@ -35,7 +35,7 @@ anydoc **整份文档一把梭**：只要一页需要 OCR，整个文档被拒�
 - **OCR 分批**（每批 5 页：渲染 → 识别 → 下一批）：一次引擎调用最多押 5 页，超时或崩溃只损失这一批（其余照常交付），模型加载（~0.8s）也摊薄到每批一次。磁盘不由分批封顶——**没有单批清理**，页图落满 scratch 直到整次调用结束才删；封顶它的是时间预算（一页几秒，120s 也就几十页）。
 - **中止（Esc）全链传导**：`execute` 的 signal → `convertDocument` → `recoverPdf` → `recognize` → `spawn`，按 Esc 真的杀掉 python 进程；中止是 **cancelled 失败**，不拿半截结果冒充读完了。
 - **进度可见**（`onProgress` → 工具的 `onUpdate`，落在卡片真会渲染的 `details.data`）：开始时报「N of M pages」，之后每批报当前页。一页扫描要几秒，一张全程只有 `working…` 的卡片看起来就是卡死了。
-- hosted 的整份 blob 切不开，但**哪几页**读过 OCR 我们知道：结果仍带一句 `pages 3, 7 were read by OCR — may misread`（`page-labels.ts` 的 `hostedNote`）——同样的页，同样的告诫，不因为走了云上就省略。
+- hosted 的整份 blob 切不开，但**哪几页**读过 OCR 我们知道：这句话只进**卡片的 hint**（`pages 3, 7 were read by hosted OCR`，`page-labels.ts` 的 `hostedNote`），**不进模型载荷**——文本从哪来不是模型能据此行动的信息，而「可能读错」是模型自己的先验（根 AGENTS.md LLM 文案：自省的不写）。
 - 预算耗尽 / 未渲染 / 整批读不出 → 都进 note 块（按原因合并、页号列全），**不静默丢**；预算耗尽是**部分结果不是错误**。
 - **没有内容阈值**：引擎读到的都进 `text`（实测：示意图出 1 个垃圾字符 `_`@0.82，噪点图 0 行）；不可信由每块的 `note` 标注，而不是删掉内容（见下节字段规则）。
 
@@ -53,9 +53,9 @@ JSON 只用在没有 markdown 需要保护的路径上（全扫描档正文本�
 - `pages`：页归属，**紧凑字符串**（`"3"` / `"1-2"` / `"3, 7"` / `"21-137"`）——模型引用"第 5 页写了…"用；一长串数字是白付 token
 - `text`：**一律装引擎真实识别到的内容**——没有任何**长度**阈值可以把"读到了 `_`"改写成"没有文字"（那是对事实的篡改；曾经的 `MIN_PAGE_CHARS` 因此被删）。**置信度下限**（`DEFAULT_TEXT_SCORE = 0.5`，我们对引擎输出的过滤）另说：低于它的行不进 `text`——这是**显式**的过滤，不是隐形的长度阈值；页面因此被判为空时，note 说的是 `only low-confidence text in the page image`（引擎如实报告被丢的行数），**不谎称图里没有文字**
 - `image`：来源页图路径，**只出现在本地 OCR 块**上（hosted 没有页图；图是页面的载体，不是文档里的插图——插图的缺口见上节）
-- `note`：**唯一一条"读者应该知道的事"**，自然语言（模型读它，没有代码解析它）：机器识别 `OCR — verify against image`、空页 `no text found in the page image`、只有低置信度文字 `only low-confidence text in the page image — see it (N lines)`、页图渲染失败时的 `OCR — may misread`、超预算/中止/渲染失败 `not read: …`、回复放不下 `read but omitted: output budget`。它**与 text 并存**，不替换 text
+- `note`：**只在「读者自己看不出来」时出现**（2026-09 收紧）：空页 `no text found in the page image`、只有低置信度文字 `only low-confidence text in the page image (N lines)`、超预算/中止/渲染失败/没渲染 `not read: …`、回复放不下 `read but omitted: output budget`。**有文字就没有 note**——「这段是 OCR 读的」已由 `image` 字段自证，「可能读错」是模型自己的先验，都不是我们该替它说的话（根 AGENTS.md「LLM 文案五约」：自省的不写）
 
-note 按块重复（20 页扫描件 ≈ 120 token），换来每块自证、不依赖顺序或跨块推理；因此**没有文档级 legend，也没有 `source` 枚举字段**（2026-09 决策：`source`+`note` 归一为 `note`，自然语言对模型更友好）。"verify against image" 因此只在块上出现一次——常驻 promptGuideline 里那条已删（单源）。
+note 只出现在真需要的块上（缺页原因按块重复，模型引用第 7 页时不必回头看别的块）；因此**没有文档级 legend，也不需要 `source` 枚举字段**（2026-09 决策：`source`+`note` 归一为 `note`，自然语言对模型更友好；随后又收紧为「只在读者看不出来时出现」）。
 
 ### 渲染：目标 DPI + 像素上限（两档）
 

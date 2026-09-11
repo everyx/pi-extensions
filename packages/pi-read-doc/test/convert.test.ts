@@ -102,7 +102,7 @@ describe("convertDocument — chain", () => {
 		assert.deepEqual(h.recovered, []);
 	});
 
-	it("needsOcr → hosted 成功 → 块形态 + 说明（不再是无标注的纯 markdown）", async () => {
+	it("needsOcr → hosted 成功 → 块形态；来源只进卡片的 hint，不进模型载荷", async () => {
 		const h = harness({
 			mdResult: () => Promise.reject(needsOcrError([3], 3)),
 			hostedResult: "parse markdown",
@@ -110,9 +110,8 @@ describe("convertDocument — chain", () => {
 		const doc = await convertDocument("a.pdf", ".pdf", h);
 		assert.equal(doc.kind, "blocks");
 		assert.equal(doc.via, "anydoc:hosted");
-		assert.deepEqual(doc.blocks, [
-			{ pages: [1, 2, 3], text: "parse markdown", note: "pages 3 were read by OCR — may misread" },
-		]);
+		assert.deepEqual(doc.blocks, [{ pages: [1, 2, 3], text: "parse markdown" }]);
+		assert.equal(doc.hint, "pages 3 were read by hosted OCR", "哪几页走了云上是给用户看的");
 		assert.deepEqual(h.recovered, [], "hosted 成功后不再本地恢复");
 	});
 

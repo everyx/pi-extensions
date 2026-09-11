@@ -133,7 +133,7 @@ describe("recoverPdf — 本地恢复协调", () => {
 		);
 		const ocr3 = r.blocks.find((b) => b.pages[0] === 3);
 		assert.equal(ocr3?.image, "/tmp/art/page-3.jpg", "给模型的路径是 artifacts 里的观察副本");
-		assert.match(ocr3?.note ?? "", /OCR/, "机器识别的来源必须标出来");
+		assert.equal(ocr3?.note, undefined, "有文字就不带 note：来源已由 image 字段自证，「OCR 可能读错」是模型自己的先验");
 	});
 
 	it("OCR 分批：一批最多 OCR_BATCH 页，磁盘与时间都被批次约束", async () => {
@@ -389,7 +389,7 @@ describe("recoverPdf — 本地恢复协调", () => {
 		const r = await recoverPdf("/x.pdf", [1], 1, { ...base, pdf, engine });
 		assert.ok(r.ok);
 		assert.equal(r.blocks[0]?.text, "_", "读到了就是读到了");
-		assert.match(r.blocks[0]?.note ?? "", /OCR/, "不可信由 note 表达，而不是删掉内容");
+		assert.equal(r.blocks[0]?.note, undefined, "读到了就不写 note：可不可信不由我们代为判断");
 	});
 
 	it("两档渲染：OCR 用 200dpi/PNG 进 scratch，给模型的用 150dpi/JPEG 进 artifacts", async () => {

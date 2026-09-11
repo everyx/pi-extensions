@@ -65,15 +65,17 @@ export const OCR_RENDER = { dpi: 200, maxPx: 2200, format: "png" } as const;
  *  ~4100 for a 2200px page) — no pixel is paid for twice. */
 export const VIEW_RENDER = { dpi: 150, maxPx: 1500, format: "jpeg" } as const;
 
-/** What the reader must know about a block, in natural language: a model reads
- *  it, nothing parses it. One field covers provenance, an empty page, and a
- *  page the budget never reached. */
-const NOTE_OCR = "OCR \u2014 verify against image";
-const NOTE_OCR_NO_IMAGE = "OCR \u2014 may misread";
+/**
+ * A note says only what the reader cannot see for itself. "This came from OCR"
+ * repeats the block's own shape (its `image` field is right there), and "OCR
+ * may misread" is the reader's prior, not a fact we hold — both are paid for on
+ * every read and change nothing. What IS ours to say: why a block has no text,
+ * since nothing else in the reply explains it.
+ */
 const NOTE_NO_TEXT = "no text found in the page image";
 /** The image HAS text, but every line fell under the confidence floor — a
  *  different fact from "there was nothing to read", and worth saying. */
-const NOTE_FAINT_TEXT = "only low-confidence text in the page image — see it";
+const NOTE_FAINT_TEXT = "only low-confidence text in the page image";
 
 /**
  * Collapse entries that share a note into one page list — used both for the
@@ -324,20 +326,15 @@ export async function recoverPdf(
 						continue;
 					}
 					// Whatever the engine read goes into `text`: no threshold may
-					// rewrite a read into "nothing". The caveat is the note.
+					// rewrite a read into "nothing" — and a read needs no note, only
+					// an empty block does.
 					const text = result.text.trim();
-					blocks.push({
-						pages: [r.page],
-						text,
-						...image,
-						note: text
-							? r.view
-								? NOTE_OCR
-								: NOTE_OCR_NO_IMAGE
-							: (result.droppedLines ?? 0) > 0
-								? `${NOTE_FAINT_TEXT} (${result.droppedLines} lines)`
-								: NOTE_NO_TEXT,
-					});
+					const note = text
+						? undefined
+						: (result.droppedLines ?? 0) > 0
+							? `${NOTE_FAINT_TEXT} (${result.droppedLines} lines)`
+							: NOTE_NO_TEXT;
+					blocks.push({ pages: [r.page], text, ...image, ...(note ? { note } : {}) });
 				}
 			}
 		}
