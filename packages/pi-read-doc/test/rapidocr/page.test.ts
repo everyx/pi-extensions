@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createRapidOcr, keepConfident, parseOcrOutput } from "../ocr/rapidocr.js";
-import type { RunCli } from "../run.js";
-import { fakeRun } from "./helpers.js";
+import { ocrBudgetMs } from "../../ocr/engines/rapidocr/engine.js";
+import { createRapidOcr, keepConfident, parseOcrOutput } from "../../ocr/engines/rapidocr/page.js";
+import type { RunCli } from "../../run.js";
+import { fakeRun } from "../helpers.js";
 
 /** The bridge's line for one page. */
 const line = (n: number, lines: string[], scores: number[]) => JSON.stringify({ n, lines, scores });
@@ -167,5 +168,25 @@ describe("rapidocr engine — probe caching", () => {
 		assert.equal(await e.available(), false);
 		assert.equal(await e.available(), false);
 		assert.equal(probes, 2, "两个解释器各探一次，结论被缓存");
+	});
+});
+
+describe("ocrBudgetMs — 本地恢复的时间预算（PI_READ_DOC_OCR_TIMEOUT_MS）", () => {
+	it("未设置 / 非法 / 非正数 → 默认预算", () => {
+		delete process.env.PI_READ_DOC_OCR_TIMEOUT_MS;
+		assert.equal(ocrBudgetMs(), 120_000);
+		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "abc";
+		assert.equal(ocrBudgetMs(), 120_000);
+		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "0";
+		assert.equal(ocrBudgetMs(), 120_000, "0 不是「不限制」，是配置错误");
+		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "-5";
+		assert.equal(ocrBudgetMs(), 120_000);
+		delete process.env.PI_READ_DOC_OCR_TIMEOUT_MS;
+	});
+
+	it("合法值生效", () => {
+		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "30000";
+		assert.equal(ocrBudgetMs(), 30_000);
+		delete process.env.PI_READ_DOC_OCR_TIMEOUT_MS;
 	});
 });

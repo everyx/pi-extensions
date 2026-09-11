@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { OcrEngine, OcrPage } from "../ocr/engine.js";
-import type { PdfTools } from "../pdf/poppler.js";
-import { OCR_BATCH, recoverPdf } from "../pdf/recover.js";
+import { OCR_BATCH, recoverPdf } from "../../ocr/engines/rapidocr/engine.js";
+import type { OcrPage, PageOcr } from "../../ocr/engines/rapidocr/page.js";
+import type { PdfTools } from "../../pdf/poppler.js";
 
 function fakePdf(
 	opts: {
@@ -73,7 +73,7 @@ function fakeEngine(
 	opts: { available?: boolean; pages?: OcrPage[]; onRun?: () => void; fail?: "timeout" | "failed" } = {},
 ) {
 	const calls = { available: 0, recognize: [] as string[][], timeouts: [] as number[] };
-	const engine: OcrEngine = {
+	const engine: PageOcr = {
 		installHint: () => "install fake",
 		available: async (runOpts?: { timeoutMs?: number; signal?: AbortSignal }) => {
 			calls.available++;
@@ -318,7 +318,7 @@ describe("recoverPdf — 本地恢复协调", () => {
 	it("中止撞在引擎探测上 → 同样是 cancelled", async () => {
 		const controller = new AbortController();
 		const { base } = deps();
-		const engine: OcrEngine = {
+		const engine: PageOcr = {
 			installHint: () => "install fake",
 			available: async () => {
 				controller.abort();
@@ -358,7 +358,11 @@ describe("recoverPdf — 本地恢复协调", () => {
 			convertSubset: async () => "md",
 			dirs: { scratch: "/s", artifacts: "/a" },
 		});
-		assert.deepEqual(r, { ok: false, reason: "poppler-missing" });
+		assert.equal(r.ok, false);
+		assert.equal(r.ok === false ? r.reason : "", "poppler-missing");
+		// The install guidance now comes from the engine that needs the tool
+		// (it used to be looked up by reason in index.ts).
+		assert.match(r.ok === false ? (r.hint ?? "") : "", /poppler/, "缺 poppler 要说清怎么装");
 		assert.equal(calls.separate + calls.render.length + engineCalls.available, 0);
 	});
 

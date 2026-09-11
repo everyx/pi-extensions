@@ -1,11 +1,14 @@
 /**
- * pi-read-doc — local recovery of a PDF anydoc refused.
+ * pi-read-doc — the rapidocr engine: a PDF anydoc refused, read on this machine.
  *
- * The coordinator the engine seam was designed around: probe the flagged
- * pages, plan the routes (pdf/plan.ts), convert the text runs with anydoc,
- * OCR the image-only pages, and hand back the document as blocks in page
- * order. Every external tool arrives through a dep, so the whole flow runs
+ * Probe the flagged pages, plan the routes (pdf/plan.ts), convert the text runs
+ * with anydoc, OCR the image-only pages, and hand back the document as blocks in
+ * page order. Every external tool arrives through a dep, so the whole flow runs
  * against fakes in tests.
+ *
+ * Nothing here reaches the network — the bundle's only upload call site is the
+ * firecrawl engine next door. That is the whole point of configuring
+ * `PI_READ_DOC_OCR_ENGINE=rapidocr`.
  *
  * **Time is the budget, pages are not.** A scanned page costs ~2-3s, but a
  * page's cost varies with how much text it carries, so the knob is wall clock
@@ -22,23 +25,16 @@
  *   - a missing tool is a failure with a reason, not an empty document.
  */
 
-import { randomBytes } from "node:crypto";
-import type { OcrEngine, OcrPage } from "../ocr/engine.js";
-import { planPages } from "./plan.js";
-import { type PdfTools, resolveDpi } from "./poppler.js";
-
-/** One slice of the recovered document, in page order. */
-export interface RecoveredBlock {
-	/** Pages this block covers (1-based, ascending). */
-	pages: number[];
-	text: string;
-	/** Source page image — only on pages whose text came from OCR. */
-	image?: string;
-	/** Anything the reader should know: that the text was machine-read, that a
-	 *  page held no text, why a page is missing. Natural language, and it
-	 *  accompanies text rather than replacing it. */
-	note?: string;
-}
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type Engine, joinHints, type ServeContext, type ServeResult } from "../../../convert.js";
+import { planPages } from "../../../pdf/plan.js";
+import { createPdfTools, type PdfTools, POPPLER_HINT, resolveDpi } from "../../../pdf/poppler.js";
+import { createRunCli } from "../../../run.js";
+import type { RecoveredBlock } from "../../recovered-block.js";
+import { type OcrPage, type PageOcr, rapidocrPage } from "./page.js";
 
 export type Recovery =
 	| {
@@ -98,7 +94,7 @@ export const OCR_BATCH = 5;
 
 export interface RecoveryDeps {
 	pdf: PdfTools;
-	engine: OcrEngine;
+	engine: PageOcr;
 	/** Where the recovery is, for a UI that can show it: a scanned page costs
 	 *  seconds, so a silent card looks hung. Never fails the read. */
 	onProgress?: (note: string) => void;
@@ -169,7 +165,7 @@ export async function recoverPdf(
 			const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
 			return { ok: true, blocks: [{ pages, text: "", note: reasonNote(why) as string }] };
 		}
-		return abortedFailure() ?? { ok: false, reason: "poppler-missing" };
+		return abortedFailure() ?? { ok: false, reason: "poppler-missing", hint: POPPLER_HINT };
 	}
 
 	// anydoc's list is a hint: pages it flagged may still carry a text layer
@@ -311,7 +307,8 @@ export async function recoverPdf(
 			);
 			if (aborted()) return { ok: false, reason: "cancelled" };
 			if (!run.ok) {
-				if (run.reason === "engine-missing") return { ok: false, reason: "engine-missing" };
+				if (run.reason === "engine-missing")
+					return { ok: false, reason: "engine-missing", hint: deps.engine.installHint() };
 				// A run that produced nothing usable: the pages stay failed, the
 				// reason rides each note, and the engine's stderr goes to the user
 				// — "not read: failed" alone leaves nothing to act on.
@@ -359,5 +356,87 @@ export async function recoverPdf(
 		ok: true,
 		blocks: blocks.sort((a, b) => (a.pages[0] ?? 0) - (b.pages[0] ?? 0)),
 		...(ocrHint ? { hint: ocrHint } : {}),
+	};
+}
+
+// ── The engine (what the config names) ────────────────────────
+
+/**
+ * How long one local recovery may take, in milliseconds
+ * (`PI_READ_DOC_OCR_TIMEOUT_MS`). Time is the knob, not page count: a scanned
+ * page costs seconds, but how many seconds depends on how much text it
+ * carries, so pages cannot express "how long may this take". Read per call so
+ * a launcher can change it without editing code.
+ */
+export function ocrBudgetMs(): number {
+	const raw = Number(process.env.PI_READ_DOC_OCR_TIMEOUT_MS);
+	return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_BUDGET_MS;
+}
+
+/** Where a document's page images live — the model may `read` any of them later
+ *  to check the original, and a resumed session's transcript still points at
+ *  them, so they outlive us (tmp's own cleanup is the janitor). One directory
+ *  per document, so a document always lands in the same place. The images are
+ *  NOT reused across reads (each read renders its own, tagged), so the
+ *  directory keeps the history until tmp's own cleanup takes it. */
+function artifactDir(pdfPath: string): string {
+	return join(tmpdir(), `pi-read-doc-${createHash("sha1").update(pdfPath).digest("hex").slice(0, 8)}`);
+}
+
+export interface RapidocrEngineDeps {
+	/** Injected so tests never touch the machine. */
+	pdf?: PdfTools;
+	pageOcr?: PageOcr;
+	convertSubset?: (subPdfPath: string, opts?: { timeoutMs?: number; signal?: AbortSignal }) => Promise<string>;
+	budgetMs?: () => number;
+}
+
+export function createRapidocrEngine(overrides: RapidocrEngineDeps = {}): Engine {
+	const pdf = overrides.pdf ?? createPdfTools({ run: createRunCli() });
+	const pageOcr = overrides.pageOcr ?? rapidocrPage;
+	const budgetMs = overrides.budgetMs ?? ocrBudgetMs;
+	// anydoc on a sub-PDF: injected on purpose (this engine imports no parser),
+	// and it is the LOCAL half of anydoc — no network anywhere in this file.
+	const convertSubset =
+		overrides.convertSubset ??
+		(async (subPdf: string, opts?: { timeoutMs?: number; signal?: AbortSignal }) => {
+			void opts;
+			const { toMarkdown } = await import("@firecrawl/anydoc");
+			return toMarkdown(subPdf);
+		});
+
+	return {
+		id: "rapidocr",
+		async serve(ctx: ServeContext): Promise<ServeResult> {
+			// Not a PDF: this engine has nothing to offer (the caller moves on).
+			if (ctx.ext !== ".pdf") return { ok: false, notApplicable: true };
+
+			const artifacts = artifactDir(ctx.path);
+			await mkdir(artifacts, { recursive: true });
+			// Scratch holds the intermediate single-page PDFs — removed as soon as
+			// the recovery returns, unlike the page images.
+			const scratch = await mkdtemp(join(tmpdir(), "pi-read-doc-scratch-"));
+			try {
+				const r = await recoverPdf(ctx.path, ctx.pages, ctx.pageCount, {
+					pdf,
+					engine: pageOcr,
+					convertSubset,
+					dirs: { scratch, artifacts },
+					budgetMs: budgetMs(),
+					...(ctx.signal ? { signal: ctx.signal } : {}),
+					...(ctx.onProgress ? { onProgress: ctx.onProgress } : {}),
+				});
+				if (r.ok) {
+					const hint = r.hint ? joinHints([`read by rapidocr`, r.hint]) : "read by rapidocr";
+					return { ok: true, blocks: r.blocks, hint };
+				}
+				// Cancelled is not a failure: the walk stops on it, and the card
+				// shows the stop state rather than a ✗.
+				if (r.reason === "cancelled") return { ok: false, cancelled: true };
+				return { ok: false, ...(r.hint ? { hint: r.hint } : {}) };
+			} finally {
+				await rm(scratch, { recursive: true, force: true }).catch(() => {});
+			}
+		},
 	};
 }

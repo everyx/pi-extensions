@@ -7,7 +7,7 @@
  * and is driven by a table of cases in the tests.
  *
  * It does NOT bound the work: how long the recovery may take is a wall-clock
- * budget (recover.ts), because a page's cost varies with how much text it
+ * budget (ocr/engines/rapidocr/engine.ts), because a page's cost varies with how much text it
  * carries. A page count cannot express "how long may this take", and capping
  * pages would truncate a document whose pages happen to be cheap.
  *

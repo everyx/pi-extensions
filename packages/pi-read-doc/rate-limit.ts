@@ -1,5 +1,6 @@
 /**
- * pi-read-doc — rate limiter for the hosted Parse API (2 qps).
+ * pi-read-doc — a minimum-interval queue (qps). The firecrawl engine uses
+ * one at 2 qps, which is what Firecrawl Parse asks for.
  *
  * Serializes callers on a promise chain and spaces call starts by 1000/qps.
  * pi-web-tools has a similar rate-limit.ts, but with a per-channel queue that

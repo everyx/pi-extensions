@@ -13,7 +13,7 @@
  * asked for) and big ones at 47 (text too small to read).
  *
  * Thin on purpose: no chain logic here (that is pdf/plan.ts), no engine here
- * (that is ocr/engine.ts). Every call takes its paths from the caller, so the
+ * (that is ocr/engines/rapidocr/page.ts). Every call takes its paths from the caller, so the
  * temp-dir lifecycle stays in one place.
  */
 

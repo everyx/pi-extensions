@@ -14,10 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createRapidOcr } from "../ocr/rapidocr.js";
-import { createPdfTools } from "../pdf/poppler.js";
-import { recoverPdf } from "../pdf/recover.js";
-import { createRunCli } from "../run.js";
+import { recoverPdf } from "../../ocr/engines/rapidocr/engine.js";
+import { createRapidOcr } from "../../ocr/engines/rapidocr/page.js";
+import { createPdfTools } from "../../pdf/poppler.js";
+import { createRunCli } from "../../run.js";
 
 const enabled = process.env.PI_READ_DOC_TEST_LOCAL === "1";
 const run = createRunCli();
@@ -93,7 +93,7 @@ describe("local recovery — real poppler + rapidocr", { skip: !enabled }, () =>
 	it("bridge: 「这页没文字」与「输出形状不认识」必须是两个答案", async () => {
 		// 只有真跑 python 才能钉住它：把「引擎换了返回结构」报成「这页没有文字」
 		// 是一句用户与模型都无法察觉的假话（第 15 轮走读发现）。
-		const bridge = fileURLToPath(new URL("../ocr/rapidocr_bridge.py", import.meta.url));
+		const bridge = fileURLToPath(new URL("../../ocr/engines/rapidocr/bridge.py", import.meta.url));
 		const script = [
 			"import importlib.util, json, sys",
 			"spec = importlib.util.spec_from_file_location('bridge', sys.argv[1])",
@@ -284,6 +284,8 @@ describe("local recovery — real poppler + rapidocr", { skip: !enabled }, () =>
 			convertSubset: async () => "",
 			dirs: { scratch: dir, artifacts: dir },
 		});
-		assert.deepEqual(res, { ok: false, reason: "poppler-missing" });
+		assert.equal(res.ok, false);
+		assert.equal(res.ok === false ? res.reason : "", "poppler-missing");
+		assert.match(res.ok === false ? (res.hint ?? "") : "", /poppler/);
 	});
 });

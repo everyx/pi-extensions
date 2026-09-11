@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatPages, hostedNote } from "../page-labels.js";
+import { formatPages } from "../page-labels.js";
 
 describe("formatPages — 紧凑页号", () => {
 	it("单页、连续段、离散页", () => {
@@ -22,20 +22,5 @@ describe("formatPages — 紧凑页号", () => {
 
 	it("空 → 空串", () => {
 		assert.equal(formatPages([]), "");
-	});
-});
-
-describe("hostedNote — 只给用户看的一句来源", () => {
-	it("点名被 OCR 的页（hosted 返回整份 blob，切不开，但哪几页我们知道）", () => {
-		assert.equal(hostedNote([3, 7], 400), "pages 3, 7 were read by hosted OCR");
-	});
-
-	it("整份都要 OCR 时说 every page", () => {
-		assert.equal(hostedNote([1, 2, 3], 3), "every page was read by hosted OCR");
-	});
-
-	it("散页太多时给数量而不是一长串页号", () => {
-		const scattered = [1, 3, 5, 7, 9, 11, 13, 15, 17];
-		assert.equal(hostedNote(scattered, 100), "9 pages were read by hosted OCR");
 	});
 });

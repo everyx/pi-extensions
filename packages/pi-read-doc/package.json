@@ -1,7 +1,7 @@
 {
 	"name": "@everyx/pi-read-doc",
 	"version": "1.0.6",
-	"description": "Enhanced read for pi – office docs (docx/pdf/pptx/xlsx etc.) via anydoc, header-only, OCR for scanned pages (hosted or local).",
+	"description": "Enhanced read for pi – office docs (docx/pdf/pptx/xlsx etc.) via anydoc, header-only, OCR for scanned pages (Firecrawl or local rapidocr, in the order you configure).",
 	"keywords": [
 		"pi-package"
 	],
@@ -11,7 +11,7 @@
 	},
 	"type": "module",
 	"scripts": {
-		"test": "tsx --test test/*.test.ts"
+		"test": "tsx --test 'test/**/*.test.ts'"
 	},
 	"repository": {
 		"type": "git",

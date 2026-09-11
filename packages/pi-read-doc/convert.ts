@@ -1,159 +1,186 @@
 /**
- * pi-read-doc — the conversion chain: anydoc local → hosted OCR → local
- * recovery.
+ * pi-read-doc — the conversion contract and the walk that follows it.
  *
- * Behind an injected interface, so tests drive it with fakes — no engine, no
- * network, no filesystem. The two things that are NOT the chain have their own
- * homes: the hosted gate (`hosted-gate.ts`, a reaction to what the service
- * reported) and page labels (`page-labels.ts`, page numbers as text).
+ * A document is first handed to the parser (anydoc, local, whole-document). If
+ * it comes back as `needsOcr`, the walk asks each configured engine in order
+ * until one serves it, then hands back the page blocks.
+ *
+ * The engine knows nothing but this file: it gets a context and returns a
+ * result, so the walk can be driven by fakes and no engine can reach into it.
+ * `asNeedsOcr` is the only place anydoc's error shape appears.
+ *
+ * The two things that are NOT the walk have their own homes: page labels
+ * (`page-labels.ts`) and the payload type (`ocr/recovered-block.ts`).
  */
 
-import { type HostedGate, hostedExhaustion, hostedKeyRejected } from "./hosted-gate.js";
-import { hostedNote } from "./page-labels.js";
-import type { RecoveredBlock, Recovery } from "./pdf/recover.js";
+import type { RecoveredBlock } from "./ocr/recovered-block.js";
 
-/**
- * Two shapes, one rule: everything anydoc converts locally is markdown; a
- * document it refused (needsOcr) comes back as page blocks — from hosted OCR
- * or from local recovery.
- */
+// ── The contract ──────────────────────────────────────────────
+
+/** The names `PI_READ_DOC_OCR_ENGINE` accepts. Adding one means adding a file
+ *  in ocr/engines/ and a factory in its registry. */
+export const ENGINE_IDS = ["firecrawl", "rapidocr"] as const;
+export type EngineId = (typeof ENGINE_IDS)[number];
+
+export interface ServeContext {
+	path: string;
+	/** Lower-case extension, so an engine can say "not my job" (rapidocr is
+	 *  PDF-only). */
+	ext: string;
+	/** Pages the parser flagged as scanned/image-only (1-based). */
+	pages: readonly number[];
+	/** Pages in the document. */
+	pageCount: number;
+	now: Date;
+	signal?: AbortSignal;
+	onProgress?: (note: string) => void;
+}
+
+export type ServeResult =
+	/** Served: the document's blocks, in page order. */
+	| { ok: true; blocks: RecoveredBlock[]; hint?: string }
+	/** The user stopped the read: the walk stops too, this is not a failure. */
+	| { ok: false; cancelled: true }
+	/** Not this engine's kind of document — the walk moves on without noise. */
+	| { ok: false; notApplicable: true }
+	/** Tried and did not deliver. A `hint` only when the user can act on it. */
+	| { ok: false; hint?: string };
+
+export interface Engine {
+	readonly id: EngineId;
+	serve(ctx: ServeContext): Promise<ServeResult>;
+}
+
+/** Join user-facing notes: drop empties, dedupe, separate with " · ". Shared by
+ *  the walk and the engines so one rule governs every hint on the card. */
+export function joinHints(parts: readonly (string | undefined)[]): string {
+	return [...new Set(parts.filter((p): p is string => Boolean(p)))].join(" · ");
+}
+
+/** Two shapes, one rule: everything the parser converts locally is markdown; a
+ *  document it refused (needsOcr) comes back as page blocks. */
 export type ConvertedDocument = (
 	| { kind: "markdown"; text: string; via: "anydoc" }
-	| { kind: "blocks"; blocks: RecoveredBlock[]; via: "anydoc:hosted" | "local" }
+	| { kind: "blocks"; blocks: RecoveredBlock[]; via: EngineId }
 ) & {
 	/** A short, user-facing note about HOW this conversion happened (a parked
-	 *  gate, a rejected key, where a hosted conversion ran). UI only — the model
-	 *  gets the blocks and their notes, not this. */
+	 *  gate, a rejected key, which engine ran). UI only — the model gets the
+	 *  blocks and their notes, not this. */
 	hint?: string;
 };
 
-/** Why local recovery could not deliver — travels on the rethrown needsOcr
- *  error so the tool can turn it into an install hint (UI-side). Derived from
- *  the recovery's own union, so a new reason cannot drift apart. */
-export type LocalFailure = Extract<Recovery, { ok: false }>["reason"];
-
-// ── The fallback chain ────────────────────────────────────────
-
-export interface ConvertDeps {
-	/** The anydoc engine (dynamic import in prod; `{ ocr: "hosted" }` runs the
-	 *  server-side OCR path). */
-	toMarkdown: (path: string, opts?: { ocr: "hosted"; apiKey?: string }) => Promise<string>;
-	/** The hosted gate (see HostedGate). */
-	hosted: HostedGate;
-	/** Rate limit around hosted calls. */
-	limit: <T>(fn: () => Promise<T>) => Promise<T>;
-	/** Local recovery of a PDF anydoc refused: text runs (anydoc on a page
-	 *  subset) + OCR'd image-only pages, as page-ordered blocks. */
-	recover: (
-		pdfPath: string,
-		flagged: number[],
-		pageCount: number,
-		opts?: { signal?: AbortSignal; onProgress?: (note: string) => void },
-	) => Promise<Recovery>;
+/** What a failed conversion tells its caller. This is the one definition — the
+ *  error we throw, the tool that reads it and the tests all share it. */
+export interface ConversionFailure {
+	/** The parser's own code, when the parser is what failed. */
+	code?: string;
+	/** The user stopped it (the card shows the stop state, not a ✗). */
+	cancelled?: true;
+	/** We reached `needsOcr` with a usable page count: OCR is really what was
+	 *  needed, so the configuration is worth explaining. */
+	ocrNeeded?: true;
+	/** What each engine that failed had to say (already user-facing). */
+	engineHints?: string[];
+	/** The legal `PI_READ_DOC_OCR_ENGINE` values, when the config is invalid. */
+	configLegal?: string;
 }
 
-/**
- * Run the chain:
- * 1. anydoc local (all office formats) → markdown;
- * 2. `needsOcr` → hosted OCR (unless the gate has it parked) → blocks;
- * 3. `needsOcr` + pdf → local recovery → blocks;
- * 4. otherwise the original error propagates (the caller adds the hint).
- */
+export interface WalkDeps {
+	/** The parser: anydoc, local, whole document or nothing. */
+	parse: (path: string) => Promise<string>;
+	/** Engines in the order the configuration asked for (see the registry). */
+	engines: readonly Engine[];
+}
+
+// ── The walk ──────────────────────────────────────────────────
+
+/** The extension of anydoc's rejection for a document that needs OCR. Only
+ *  this file knows that shape; engines deal in `RecoveredBlock`. */
+export function asNeedsOcr(err: unknown): { pages: number[]; pageCount: number } | null {
+	const e = err as { code?: string; pages?: number[]; pageCount?: number } | null;
+	if (e?.code !== "needsOcr") return null;
+	return { pages: e.pages ?? [], pageCount: e.pageCount ?? 0 };
+}
+
+/** The user stopped the read: one sentence on both layers, and the card shows
+ *  the stop state rather than a ✗ that reads like a broken document. */
+function cancelledError(): Error {
+	return Object.assign(new Error("read cancelled"), { cancelled: true as const });
+}
+
+/** The config is unusable. Reported only once we know OCR is actually needed —
+ *  the same document converts fine without it. */
+function withConfigInvalid(err: unknown, info: { legal: string }): Error {
+	const e = err instanceof Error ? err : new Error(String(err));
+	return Object.assign(e, { ocrNeeded: true as const, configLegal: info.legal });
+}
+
+/** Attach every engine's own reason to the propagated error, keeping the
+ *  original `code` (the tool branches on it) and noting that engines were tried. */
+function withEngineHints(err: unknown, hints: string[], notApplicable: number, total: number): Error {
+	const e = err instanceof Error ? err : new Error(String(err));
+	// Only when EVERY engine said "not my kind of document": otherwise the
+	// format is not the reason, and blaming it would point the user the wrong way.
+	const formatNote =
+		total > 0 && notApplicable === total ? "no configured OCR engine can read this kind of document" : undefined;
+	// One entry per engine (its own hints are already merged): no round-trip
+	// through the separator, which would split a hint that itself used " · ".
+	const notes = [...new Set([...hints, ...(formatNote ? [formatNote] : [])])];
+	return Object.assign(e, { ocrNeeded: true as const, ...(notes.length ? { engineHints: notes } : {}) });
+}
+
 export async function convertDocument(
 	path: string,
 	ext: string,
-	deps: ConvertDeps,
-	opts: { signal?: AbortSignal; now?: Date; onProgress?: (note: string) => void } = {},
+	deps: WalkDeps,
+	opts: {
+		signal?: AbortSignal;
+		now?: Date;
+		onProgress?: (note: string) => void;
+		configInvalid?: { legal: string };
+	} = {},
 ): Promise<ConvertedDocument> {
-	const now = opts.now ?? new Date();
 	try {
-		// anydoc converts the whole document or nothing: one scanned page makes
-		// it reject everything, text pages included (verified).
-		return { kind: "markdown", text: await deps.toMarkdown(path), via: "anydoc" };
+		// The parser converts the whole document or nothing: one scanned page
+		// makes it reject everything, text pages included (verified).
+		return { kind: "markdown", text: await deps.parse(path), via: "anydoc" };
 	} catch (err) {
-		if ((err as { code?: string })?.code !== "needsOcr") throw err;
+		const needs = asNeedsOcr(err);
+		if (!needs) throw err;
+		// Configuration errors are about the document being unreadable, not about
+		// the page count: report them before any engine-shaped reasoning.
+		if (opts.configInvalid) throw withConfigInvalid(err, opts.configInvalid);
+		// Without a page count nothing an engine returns can be attributed, and a
+		// block with an empty `pages` would contradict the shape we promise.
+		if (needs.pageCount <= 0) throw err;
 
-		const pages = (err as { pages?: number[] }).pages ?? [];
-		const pageCount = (err as { pageCount?: number }).pageCount ?? 0;
+		const shared = {
+			now: opts.now ?? new Date(),
+			...(opts.signal ? { signal: opts.signal } : {}),
+			...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+		};
+		const hints: string[] = [];
+		let notApplicable = 0;
 
-		/**
-		 * Anything the user should hear about the HOSTED side: a parked gate, an
-		 * exhausted quota, a rejected key. It is the same slot in both endings —
-		 * a local failure must not bury it (`withLocalReason` carries it), and a
-		 * successful local recovery still surfaces it as the result's hint.
-		 */
-		let hostedHint: string | undefined;
-		// Without a page count we cannot attribute anything hosted returns, and
-		// a block with an empty `pages` would contradict the shape we promise.
-		const canAttribute = pageCount > 0;
-		const parked = canAttribute ? await deps.hosted.skipped(now) : null;
-		if (canAttribute && parked) {
-			// Say why we did not ask: otherwise a parked gate is invisible.
-			hostedHint = `hosted OCR paused until ${new Date(parked.until).toLocaleDateString()}: ${parked.reason}`;
-		} else if (canAttribute) {
-			try {
-				const hosted = await deps.limit(() => deps.toMarkdown(path, { ocr: "hosted" }));
+		for (const engine of deps.engines) {
+			// Esc means stop: never start the next engine, let alone upload after
+			// the user asked us to stop.
+			if (opts.signal?.aborted) throw cancelledError();
+			const out = await engine.serve({ path, ext, pages: needs.pages, pageCount: needs.pageCount, ...shared });
+			if (out.ok) {
+				const hint = joinHints([...hints, out.hint]);
 				return {
 					kind: "blocks",
-					// No note on the block: where the text came from is nothing the model
-					// can act on. The provenance rides `hint` — the user is the one who
-					// cares that this document left the machine.
-					blocks: [{ pages: pageRange(pageCount), text: hosted }],
-					via: "anydoc:hosted",
-					hint: hostedNote(pages, pageCount),
+					blocks: out.blocks,
+					via: engine.id,
+					...(hint ? { hint } : {}),
 				};
-			} catch (hostedErr) {
-				const message = hostedErr instanceof Error ? hostedErr.message : String(hostedErr);
-				const exhausted = hostedExhaustion(message, now);
-				if (exhausted) {
-					await deps.hosted.record(exhausted);
-					hostedHint = `hosted OCR paused: ${exhausted.reason}`;
-				} else if (hostedKeyRejected(message)) {
-					// Worth surfacing even when local recovery succeeds — silence
-					// would hide a broken configuration.
-					hostedHint = "Firecrawl Parse rejected the API key — check FIRECRAWL_API_KEY";
-				}
 			}
+			if ("cancelled" in out) throw cancelledError();
+			if ("notApplicable" in out) notApplicable++;
+			else if (out.hint) hints.push(out.hint);
 		}
 
-		// Recovery restores the text pages anydoc dropped, so it needs to know
-		// the document's shape; without it we would silently lose pages.
-		if (ext === ".pdf" && pageCount > 0) {
-			const recovered = await deps.recover(path, pages, pageCount, opts);
-			if (recovered.ok) {
-				// Both hints can be true at once (a broken key AND a local
-				// diagnostic); the user should see whichever exist.
-				const notes = [hostedHint, recovered.hint].filter(Boolean).join(" · ");
-				return { kind: "blocks", blocks: recovered.blocks, via: "local", ...(notes ? { hint: notes } : {}) };
-			}
-			throw withLocalReason(err, { localReason: recovered.reason, localHint: recovered.hint, hostedHint });
-		}
-		throw hostedHint ? Object.assign(err as Error, { hostedHint }) : err;
+		throw withEngineHints(err, hints, notApplicable, deps.engines.length);
 	}
-}
-
-const pageRange = (pageCount: number): number[] => Array.from({ length: pageCount }, (_, i) => i + 1);
-
-/** What a failed conversion tells its caller: anydoc's code, plus the recovery
- *  and local-engine guidance that belongs beside it. This is the one definition
- *  — the error we throw, the tool that reads it and the tests all share it. */
-export interface ConversionFailure {
-	code?: string;
-	localReason?: LocalFailure;
-	/** A hosted-side problem worth telling the user about. */
-	hostedHint?: string;
-	/** The local engine's own guidance, when it is the thing missing. */
-	localHint?: string;
-}
-
-/** Attach the recovery failure to the propagated error — the tool turns it
- *  into the install hint, and nothing else needs to change shape. */
-function withLocalReason(err: unknown, info: Omit<ConversionFailure, "code"> & { localReason: LocalFailure }): Error {
-	const e = err instanceof Error ? err : new Error(String(err));
-	// Separate slots: one failing reason must not swallow the other's advice.
-	return Object.assign(e, {
-		localReason: info.localReason,
-		...(info.localHint ? { localHint: info.localHint } : {}),
-		...(info.hostedHint ? { hostedHint: info.hostedHint } : {}),
-	});
 }

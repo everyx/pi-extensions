@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { blocksForLlm, blocksToText } from "../blocks.js";
-import { conversionFailure, extOf, OFFICE_EXTS, ocrBudgetMs, truncateForLlm } from "../index.js";
+import { conversionFailure, extOf, OFFICE_EXTS, parseOcrEngine, truncateForLlm } from "../index.js";
 import { createRateLimiter } from "../rate-limit.js";
 
 describe("pi-read-doc", () => {
@@ -18,25 +18,86 @@ describe("pi-read-doc", () => {
 		assert.ok(!OFFICE_EXTS.has(".ts"));
 	});
 
-	it("conversionFailure: terse LLM text, guidance on details.error (the rendered channel)", () => {
-		const r = conversionFailure("PDF pages 1, 2 need OCR", { code: "needsOcr" });
+	it("conversionFailure: 模型只拿引擎的原话，指引走 details.error（卡片唯一渲染的通道）", () => {
+		const r = conversionFailure(
+			"PDF pages 1, 2 need OCR",
+			{ code: "needsOcr", ocrNeeded: true, engineHints: ["Local OCR needs poppler"] },
+			{ engines: ["rapidocr"] },
+		);
 		assert.equal(r.content[0]?.text, "PDF pages 1, 2 need OCR", "the LLM keeps the engine message alone");
-		assert.match(r.details.error, /Scanned pages: run hosted OCR/);
+		assert.match(r.details.error, /Local OCR needs poppler/);
+		assert.match(r.details.error, /nothing was uploaded/, "只配本地时必须说清：这次没尝试上传");
 		assert.ok(!("hint" in r.details), "no field the card never renders");
 		assert.ok(!("code" in r.details), "nor one the card never renders either");
 	});
 
 	it("conversionFailure: 中止不是失败 —— 两边同一句话，卡片走 stop 而不是 ✗", () => {
-		const r = conversionFailure("PDF pages 1, 2 need OCR", { code: "needsOcr", localReason: "cancelled" });
+		const r = conversionFailure("PDF pages 1, 2 need OCR", { code: "needsOcr", cancelled: true });
 		assert.equal(r.content[0]?.text, "read cancelled", "模型听到的也是中止，不是引擎的 needsOcr");
 		assert.equal(r.details.error, "read cancelled");
 		assert.equal((r.details as { status?: string }).status, "stop", "用户按的 Esc 不该显示成读取失败");
+	});
+
+	it("conversionFailure: 配置非法 → 模型一句简洁错误，合法取值只给卡片", () => {
+		const r = conversionFailure(
+			"PDF pages 1, 2 need OCR",
+			{ code: "needsOcr", ocrNeeded: true, configLegal: "firecrawl, rapidocr, off" },
+			{ invalid: true, legal: "firecrawl, rapidocr, off" },
+		);
+		assert.match(r.content[0]?.text ?? "", /PI_READ_DOC_OCR_ENGINE is invalid/);
+		assert.doesNotMatch(r.content[0]?.text ?? "", /rapidocr/, "合法取值列表是给用户看的，不进模型上下文");
+		assert.match(r.details.error, /firecrawl, rapidocr, off/);
+	});
+
+	it("conversionFailure: =off → 卡片说清这次不做 OCR", () => {
+		const r = conversionFailure("PDF pages 1, 2 need OCR", { code: "needsOcr", ocrNeeded: true }, { engines: [] });
+		assert.equal(r.details.error.split("\n").at(-1), "PI_READ_DOC_OCR_ENGINE=off: OCR is disabled for this read");
+	});
+
+	it("conversionFailure: 引擎没话可说时仍给用户一个去处（旧兜底句的岗位）", () => {
+		const r = conversionFailure(
+			"PDF pages 1, 2 need OCR",
+			{ code: "needsOcr", ocrNeeded: true },
+			{ engines: ["firecrawl", "rapidocr"] },
+		);
+		assert.match(r.details.error, /no configured OCR engine could read them/);
 	});
 
 	it("conversionFailure: no guidance for codes the user cannot act on", () => {
 		const r = conversionFailure("malformed: junk", { code: "malformed" });
 		assert.equal(r.content[0]?.text, "malformed: junk");
 		assert.equal(r.details.error, "malformed: junk");
+	});
+
+	it("parseOcrEngine: 未设置 → 默认本地优先（装了本地引擎就不外传）；只要本地是 rapidocr", () => {
+		assert.deepEqual(parseOcrEngine(undefined), { engines: ["rapidocr", "firecrawl"] });
+		assert.deepEqual(parseOcrEngine("rapidocr"), { engines: ["rapidocr"] });
+		assert.deepEqual(parseOcrEngine("rapidocr,firecrawl"), { engines: ["rapidocr", "firecrawl"] });
+	});
+
+	it("parseOcrEngine: trim / 小写 / 去重；off（大小写皆可）→ 空列表", () => {
+		assert.deepEqual(parseOcrEngine(" RapidOCR , rapidocr "), { engines: ["rapidocr"] });
+		assert.deepEqual(parseOcrEngine("off"), { engines: [] });
+		assert.deepEqual(parseOcrEngine("OFF"), { engines: [] });
+	});
+
+	it("parseOcrEngine: 非法值一律拒绝（fail-closed，绝不静默回退默认）", () => {
+		for (const raw of [
+			"",
+			"   ",
+			"firecrawl,off",
+			"off,firecrawl",
+			"rapidocr,,firecrawl",
+			"rapidocr,",
+			",rapidocr",
+			"pdf-inspector",
+			" rap idocr ",
+			"auto",
+		]) {
+			const config = parseOcrEngine(raw);
+			assert.ok("invalid" in config, `${JSON.stringify(raw)} 必须被拒绝`);
+			assert.match(config.legal, /firecrawl, rapidocr, off/, "错误里要列出合法取值");
+		}
 	});
 
 	it("rate limiter serializes and enforces the gap (qps<=0 passes through)", async () => {
@@ -144,26 +205,6 @@ describe("blocksForLlm — 结构化结果的 LLM 预算", () => {
 	});
 });
 
-describe("ocrBudgetMs — 本地恢复的时间预算（PI_READ_DOC_OCR_TIMEOUT_MS）", () => {
-	it("未设置 / 非法 / 非正数 → 默认预算", () => {
-		delete process.env.PI_READ_DOC_OCR_TIMEOUT_MS;
-		assert.equal(ocrBudgetMs(), 120_000);
-		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "abc";
-		assert.equal(ocrBudgetMs(), 120_000);
-		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "0";
-		assert.equal(ocrBudgetMs(), 120_000, "0 不是「不限制」，是配置错误");
-		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "-5";
-		assert.equal(ocrBudgetMs(), 120_000);
-		delete process.env.PI_READ_DOC_OCR_TIMEOUT_MS;
-	});
-
-	it("合法值生效", () => {
-		process.env.PI_READ_DOC_OCR_TIMEOUT_MS = "30000";
-		assert.equal(ocrBudgetMs(), 30_000);
-		delete process.env.PI_READ_DOC_OCR_TIMEOUT_MS;
-	});
-});
-
 describe("blocksToText — 卡片的人读形态（JSON 只给模型）", () => {
 	it("页头 + 文本 + 页图路径；单页用 Page N，跨页用范围", () => {
 		const text = blocksToText([
@@ -174,7 +215,7 @@ describe("blocksToText — 卡片的人读形态（JSON 只给模型）", () => 
 	});
 
 	// 「文本 + note 并存」的那条旧用例已删：note 现在只在没有文字时出现（见
-	// recover.ts），真实载荷里不再有这种组合——上面第一条已经钉住了有文字时
+	// ocr/engines/rapidocr/engine.ts），真实载荷里不再有这种组合——上面第一条已经钉住了有文字时
 	// 的块形态（页头 + 文本 + 页图路径）。
 
 	it("没有文字的页显示原因，而不是留白（离散页号也紧凑）", () => {

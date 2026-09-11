@@ -6,8 +6,8 @@
  */
 
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import type { RecoveredBlock } from "./ocr/recovered-block.js";
 import { formatPages } from "./page-labels.js";
-import type { RecoveredBlock } from "./pdf/recover.js";
 
 /** The block form's budget, in bytes — pi's own truncation envelope, imported
  *  rather than copied, so the two cannot drift apart. */

@@ -1,26 +1,76 @@
 /**
- * pi-read-doc — rapidocr: the first OcrEngine.
+ * pi-read-doc — the rapidocr page reader: page images in, per-page text out.
  *
- * Runs the shipped Python bridge once for a whole batch of page images (one
- * process, one model load) and turns its JSONL into per-page text. Everything
- * version-fragile lives here and nowhere else: the engine's API shape, the
- * Python it runs under, and the confidence threshold.
+ * The page-level half of the rapidocr engine, which lives next door in
+ * `engine.ts`: it runs the shipped Python bridge once for a whole batch of
+ * page images (one process, one model load) and turns its JSONL into per-page
+ * text. Everything version-fragile lives here and nowhere else: the engine's
+ * API shape, the Python it runs under, and the confidence threshold.
  *
- * Salvage: the bridge prints a line per page as it finishes, so a run that
- * hits the wall still yields the pages it completed — the rest are reported
- * as unread rather than silently dropped.
+ * Salvage: the bridge prints a line per page as it finishes, so a run that hits
+ * the wall still yields the pages it completed — the rest are reported as
+ * unread rather than silently dropped.
+ *
+ * The contract below is NOT a cross-module port: its only consumer is the
+ * rapidocr engine. It exists so that engine can be driven by fakes.
  */
 
 import { fileURLToPath } from "node:url";
-import type { RunCli } from "../run.js";
-import type { OcrEngine, OcrPage, OcrRunErr, OcrRunOk } from "./engine.js";
+import { createRunCli, type RunCli } from "../../../run.js";
+
+// ── The page contract (images in, per-page text out) ──────────
+
+/** Why an OCR run produced nothing the caller can use. */
+export type OcrFailure =
+	/** The engine (or its Python/CLI runtime) is not installed here. */
+	| "engine-missing"
+	/** The run exceeded its budget. */
+	| "timeout"
+	/** The engine ran but failed (crash, unreadable output, …). */
+	| "failed";
+
+export interface OcrPage {
+	/** Recognized text — "" when the image carried no text (a photo page). */
+	text: string;
+	/** Lines the confidence floor rejected. Reported so callers can tell "the
+	 *  image has no text" from "the text we read was too faint to trust". */
+	droppedLines?: number;
+	/** Set when this page could not be read at all (engine error, or the run
+	 *  ended before reaching it). Distinct from an empty page. */
+	error?: string;
+}
+
+export interface OcrRunOk {
+	ok: true;
+	/** Per-image result, 1:1 and in the order the images were passed. */
+	pages: OcrPage[];
+}
+
+export interface OcrRunErr {
+	ok: false;
+	reason: OcrFailure;
+	/** Raw detail for diagnostics (never the user-facing hint). */
+	detail?: string;
+}
+
+export interface PageOcr {
+	/** Usable on this machine? Probed once and cached by the adapter. Takes the
+	 *  caller's budget so a wedged probe cannot outlive the read's deadline. */
+	available(opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<boolean>;
+	/** Recognize each image, 1:1 and in order. */
+	recognize(images: string[], opts?: { signal?: AbortSignal; timeoutMs?: number }): Promise<OcrRunOk | OcrRunErr>;
+	/** What the user must install to make this reader work (UI-only text). */
+	installHint(): string;
+}
+
+// ── The bridge client ─────────────────────────────────────────
 
 /** Below this recognition confidence a line is dropped (engine noise). */
 export const DEFAULT_TEXT_SCORE = 0.5;
 /**
  * Budget for one batch when the caller names none: interpreter start plus model
- * load (~0.8s) and a few seconds per page. The recovery always passes what is
- * left of its own deadline instead, so this is the standalone default.
+ * load (~0.8s) and a few seconds per page. The recover step always passes what
+ * is left of its own deadline instead, so this is the standalone default.
  */
 const STARTUP_MS = 20_000;
 /** Probe budget: an import check is fast; a hang means "not usable". */
@@ -69,11 +119,11 @@ export interface RapidOcrDeps {
 	textScore?: number;
 }
 
-export function createRapidOcr(deps: RapidOcrDeps): OcrEngine {
+export function createRapidOcr(deps: RapidOcrDeps): PageOcr {
 	// NOT `rapidocr.py`: Python puts the script's own directory on sys.path[0],
 	// so a file named after the module imports itself (circular import, script
 	// dies). Fakes never catch this — the opt-in integration test did.
-	const script = deps.scriptPath ?? fileURLToPath(new URL("./rapidocr_bridge.py", import.meta.url));
+	const script = deps.scriptPath ?? fileURLToPath(new URL("./bridge.py", import.meta.url));
 	const minScore = deps.textScore ?? DEFAULT_TEXT_SCORE;
 	/** The interpreter that answered the probe (null = none did). */
 	let interpreter: string | null | undefined;
@@ -147,3 +197,12 @@ export function createRapidOcr(deps: RapidOcrDeps): OcrEngine {
 		},
 	};
 }
+
+// ── The process-wide instance ─────────────────────────────────
+
+/**
+ * One reader for the process: its interpreter probe is worth ~0.5s and answers
+ * the same thing every time, so the cache must outlive a single read. Tests
+ * that want their own get it by injecting `pageOcr` into the engine.
+ */
+export const rapidocrPage: PageOcr = createRapidOcr({ run: createRunCli() });
