@@ -239,12 +239,11 @@ export function renderCard(config: CardConfig, theme: Theme): Component {
 	return cardContent(theme, sections);
 }
 
-/** Background shell (Box 1,1) for surfaces rendering outside the tool shell. */
-export function cardShell(
-	theme: Theme,
-	bg: "toolSuccessBg" | "toolErrorBg" | "toolPendingBg",
-	...children: BodyComponent[]
-): Box {
+/** Background shell (Box 1,1) for surfaces rendering outside the tool shell.
+ *  The key is whatever the surface's own semantics call for: a tool box for a
+ *  tool call, `customMessageBg` for a message this extension injects (pi
+ *  reserves that one for non-tool content). */
+export function cardShell(theme: Theme, bg: Parameters<Theme["bg"]>[0], ...children: BodyComponent[]): Box {
 	const cmp = new Box(1, 1, (t: string) => theme.bg(bg, t));
 	for (const child of children) cmp.addChild(child);
 	return cmp;
