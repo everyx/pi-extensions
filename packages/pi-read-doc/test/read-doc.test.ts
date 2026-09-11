@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extOf, OFFICE_EXTS, truncateForLlm } from "../index.js";
+import { conversionFailure, extOf, OFFICE_EXTS, truncateForLlm } from "../index.js";
 import { createRateLimiter } from "../rate-limit.js";
 
 describe("pi-read-doc", () => {
@@ -15,6 +15,20 @@ describe("pi-read-doc", () => {
 			assert.ok(OFFICE_EXTS.has(ext), `${ext} in OFFICE_EXTS`);
 		}
 		assert.ok(!OFFICE_EXTS.has(".ts"));
+	});
+
+	it("conversionFailure: terse LLM text, guidance on details.error (the rendered channel)", () => {
+		const r = conversionFailure("PDF pages 1, 2 need OCR", "needsOcr");
+		assert.equal(r.content[0]?.text, "PDF pages 1, 2 need OCR", "the LLM keeps the engine message alone");
+		assert.match(r.details.error, /Scanned pages: run hosted OCR/);
+		assert.ok(!("hint" in r.details), "no field the card never renders");
+		assert.equal(r.details.code, "needsOcr");
+	});
+
+	it("conversionFailure: no guidance for codes the user cannot act on", () => {
+		const r = conversionFailure("malformed: junk", "malformed");
+		assert.equal(r.content[0]?.text, "malformed: junk");
+		assert.equal(r.details.error, "malformed: junk");
 	});
 
 	it("rate limiter serializes and enforces the gap (qps<=0 passes through)", async () => {

@@ -52,6 +52,23 @@ export function extOf(path: string): string {
 	return i >= 0 ? path.slice(i).toLowerCase() : "";
 }
 
+/**
+ * Failure result for a conversion error. The LLM gets the terse engine
+ * message; the config guidance — only the user can act on it — rides
+ * `details.error`, the one details field the card renders (`pi-ui/view.ts`
+ * forwards just `data` + `error` to the view; a sibling `hint` key has no
+ * reader and is written to nobody).
+ */
+export function conversionFailure(msg: string, code: string | undefined) {
+	const hint =
+		code === "needsOcr" ? "Scanned pages: run hosted OCR (FIRECRAWL_API_KEY) or local rapidocr; see docs." : "";
+	return {
+		content: [{ type: "text" as const, text: msg }],
+		details: { error: hint ? `${msg}\n${hint}` : msg, code },
+		isError: true as const,
+	};
+}
+
 const ReadDocSchema = Type.Object({
 	path: Type.String(),
 });
@@ -184,16 +201,7 @@ export default function (pi: ExtensionAPI) {
 				doc = await convertDocument(path, ext, defaultDeps);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
-				const code = (e as { code?: string })?.code;
-				// LLM text stays terse; the config path (hosted OCR key, local
-				// rapidocr) is a UI-side hint — the LLM cannot act on it.
-				const hint =
-					code === "needsOcr" ? "Scanned pages: run hosted OCR (FIRECRAWL_API_KEY) or local rapidocr; see docs." : "";
-				return {
-					content: [{ type: "text" as const, text: msg }],
-					details: { error: msg, code, ...(hint ? { hint } : {}) },
-					isError: true as const,
-				};
+				return conversionFailure(msg, (e as { code?: string })?.code);
 			}
 			const { text, truncated } = truncateForLlm(doc.text);
 			return {

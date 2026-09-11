@@ -15,7 +15,7 @@ Walk 在 `convert.ts`（`convertDocument(path, ext, deps)`，deps 注入——fa
 1. anydoc (`@firecrawl/anydoc`, Rust) — `OFFICE_EXTS` 格式本地转换，无网络。
 2. anydoc:hosted (Firecrawl Parse, keyless) — only for scanned pages needing OCR (`needsOcr`), 2 qps.
 3. rapidocr (local `python-rapidocr`, official `from rapidocr import RapidOCR`; python/python3 双试是二进制名枚举) — pdf only。
-4. 全落空 → 原 needsOcr 错误抛出（execute 加配置提示，错误分层）。
+4. 全落空 → 原 needsOcr 错误抛出；execute 用 `conversionFailure(msg, code)` 组装结果：LLM 只拿引擎的简洁错误，配置指引（hosted key / 本地 rapidocr）拼进 `details.error`——那是卡片唯一渲染的文字通道（`details.hint` 无人读，等于写给空气，根 AGENTS.md 错误分层）。
 
 ## LLM 截断（根 SPEC：LLM context 截断保护）
 
