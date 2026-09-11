@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.7](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.3.6...pi-subagent-v1.3.7) (2026-09-11)
+
+
+### Bug Fixes
+
+* **pi-subagent:** cascade widget-row removal down the spawn subtree ([ebe4f59](https://github.com/everyx/pi-extensions/commit/ebe4f59b4123d44788c22c09ba122cd7216fa476))
+* **pi-subagent:** route a woken agent's output to the widget ([092f793](https://github.com/everyx/pi-extensions/commit/092f793a97d139d51eff7f1de91692ceebc2e362))
+* **pi-subagent:** stop the completion card reading as a spawn ([a6cf5c4](https://github.com/everyx/pi-extensions/commit/a6cf5c40eb8bf9c9362c7fe549a773c59ee4a5a1))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.2.0
+
 ## [1.3.6](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.3.5...pi-subagent-v1.3.6) (2026-09-01)
 
 

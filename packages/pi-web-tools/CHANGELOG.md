@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.4](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.3...pi-web-tools-v1.2.4) (2026-09-11)
+
+
+### Bug Fixes
+
+* **pi-web-tools:** surface the channel config hint in the rendered error text ([065a60b](https://github.com/everyx/pi-extensions/commit/065a60b9adafc526a764b5e309c5a5684dfc855f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.2.0
+
 ## [1.2.3](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.2...pi-web-tools-v1.2.3) (2026-09-04)
 
 
