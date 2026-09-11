@@ -31,7 +31,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 4. 为每个子 agent 独立覆盖模型和工具白名单（如廉价模型做侦察，强模型做实现）。
 5. 子 agent 完成后从主会话（工具卡/通知卡）找到 session 路径，`pi --session <path>` 复盘完整过程。
 6. 嵌套：子 agent 是完整 pi 实例，天然可再 spawn 孙 agent，无深度控制。
-7. 父级退出时子进程经 stdin EOF 自动优雅退出（无孤儿进程），会话文件永不删除。
+7. 父级退出时子进程经 stdin EOF 自动优雅退出（无孤儿进程）；显示行由显示面按 parent 链级联摘除（无孤儿行）——会话文件永不删除。
 8. 协作：子 agent 中途遇到阻塞（缺信息/需决策），发消息给父会话请求帮助；父回复后子 agent 继续，上下文不丢。
 9. 常驻：`persistent` 子 agent 完成后进程驻留 idle（零 token），之后随时被 `agent_send` 唤醒继续追问，无需重新 spawn。
 
@@ -237,6 +237,8 @@ queued → running ──→ completed（通知）
 配合「子代理只允许前台 spawn」：子代理子树内不再产生后台边，卡内子树天然纯前台；widget 上只有 root 直接后台链及其后代。
 
 **persistent 前台子的关卡后归属**：persistent 子在卡完成后仍存活（驻留），其唤醒期间新 spawn 的后代不能再折进已冻结的卡——execute 结算即关闭折叠（`cardClosed`），此后该子树的事件转 widget 行（与后台链同路径）。
+
+**父行消失即子树消失**：节点被停/完成时，它自己就是「报告子孙行 remove」的那个进程——进程一死，遥测随之中断（stdin EOF 会级联杀死后代进程，但不产生任何事件）。所以每个 add 事件携带**直系父 id**（`parent`，逐跳转发时原样保留、只有 depth 增长），持有行的显示面（`AgentWidget`）在 remove 时递归摘掉该行整棵子树，结果一律记 `stopped`——按构造，此时仍在世的后代都是被祖先的退出带走的，没有更精确的真相可取。此前缺口：停掉后台父代理后进程确实全死，但它上报的那些孙代 widget 行无人摘除，永久转 spinner。
 
 **词汇单源**（不再靠注释同步）：计数词汇 `done n/total · …` = pi-ui `counterParts`（widget 标题与卡 meta 共用，failed 段的 error 色由消费面自定）；`@id — label` 标题 = views.ts `agentTitle`（widget 行与通知卡共用）；状态图标 = pi-ui card.ts `iconForStatus`（card 与 view 共用）。
 

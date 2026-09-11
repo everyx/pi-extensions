@@ -26,6 +26,7 @@ function applyTreeEvent(widget: AgentWidget, event: AgentTreeEvent): void {
 				startedAt: event.startedAt,
 				indent: event.depth,
 				status: event.status,
+				parentId: event.parent,
 			});
 			break;
 		case "activity":

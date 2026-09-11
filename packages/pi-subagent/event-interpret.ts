@@ -59,13 +59,24 @@ export const TREE_STATUS_KEY = "pi-subagent-tree";
  * surface. Ids are globally unique (name-gen), so activity/remove need no
  * depth.
  *
- * Orphan note: if the reporting node dies before its child finishes, the
- * child's remove still arrives eventually — the parent's deadline-bounded
- * waitForCompletion rejects and emits a best-effort "stopped". The row never
- * hangs forever; it may just outlive the truth by up to one deadline.
+ * Orphan note: when a reporting node is stopped its descendants die with it
+ * (stdin EOF cascades down the process tree) — but the node that would have
+ * reported their removal is the one that died. Every add therefore carries
+ * the direct parent's id (`parent`, stable through forwarding), so the
+ * surface owning the row can take the whole subtree down with it.
  */
 export type AgentTreeEvent =
-	| { op: "add"; id: string; label: string; startedAt: number; depth: number; status: "running" | "idle" }
+	| {
+			op: "add";
+			id: string;
+			label: string;
+			startedAt: number;
+			depth: number;
+			status: "running" | "idle";
+			/** Direct parent's agent id (the reporting node). Absent when the
+			 *  reporter predates this field — the row then simply has no parent. */
+			parent?: string;
+	  }
 	| { op: "activity"; id: string; activity: AgentActivity }
 	| { op: "remove"; id: string; status: WidgetResult };
 
@@ -205,7 +216,17 @@ function parseTreeEvent(value: unknown): AgentTreeEvent | undefined {
 				return undefined;
 			}
 			if (v.status !== "running" && v.status !== "idle") return undefined;
-			return { op: "add", id: v.id, label: v.label, startedAt: v.startedAt, depth: v.depth, status: v.status };
+			return {
+				op: "add",
+				id: v.id,
+				label: v.label,
+				startedAt: v.startedAt,
+				depth: v.depth,
+				status: v.status,
+				// Omitted when absent (older reporter) rather than defaulted — an
+				// unknown parent must not be invented.
+				...(typeof v.parent === "string" && v.parent ? { parent: v.parent } : {}),
+			};
 		case "activity":
 			return isActivity(v.activity) ? { op: "activity", id: v.id, activity: v.activity } : undefined;
 		case "remove":

@@ -145,7 +145,18 @@ function createTreeTelemetry(hasParent: boolean) {
 		add(agent: { agentId: string; label: string; startedAt: number }, status: "running" | "idle"): void {
 			if (!hasParent) return;
 			tracked.add(agent.agentId);
-			report({ op: "add", id: agent.agentId, label: agent.label, startedAt: agent.startedAt, depth: 1, status });
+			// `parent` is my own id: I am the direct parent of every child I spawn.
+			// Forwarding nodes pass the event through verbatim, so the link stays
+			// anchored at the real parent however deep the chain runs.
+			report({
+				op: "add",
+				id: agent.agentId,
+				label: agent.label,
+				startedAt: agent.startedAt,
+				depth: 1,
+				status,
+				parent: MY_AGENT_ID,
+			});
 		},
 		activity(agent: { agentId: string; getLatestActivity(): AgentActivity | undefined }): void {
 			if (!tracked.has(agent.agentId)) return;

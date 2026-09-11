@@ -21,6 +21,10 @@ import { agentTitle } from "./views.js";
 
 export class AgentWidget {
 	private readonly widget: StatusWidget;
+	/** Nested-row parent links (childId → parentId). A dead parent can never
+	 *  report its children's removal, so the surface that owns the rows drops
+	 *  the subtree with it — otherwise a stopped agent leaves spinners behind. */
+	private readonly parentOf = new Map<string, string>();
 
 	constructor(ui: ExtensionUIContext) {
 		// Widget title marks the strip as the Agent plugin's background tasks
@@ -52,6 +56,8 @@ export class AgentWidget {
 		startedAt: number;
 		indent: number;
 		status: "running" | "idle";
+		/** Direct parent's agent id — absent when the reporter predates the field. */
+		parentId?: string;
 	}): void {
 		this.widget.add({
 			id: agent.agentId,
@@ -60,11 +66,20 @@ export class AgentWidget {
 			status: agent.status === "idle" ? "idle" : "running",
 			indent: agent.indent,
 		});
+		if (agent.parentId) this.parentOf.set(agent.agentId, agent.parentId);
 	}
 
-	/** Stop tracking; the end result feeds the lifetime progress meta. */
+	/** Stop tracking; the end result feeds the lifetime progress meta. Removing
+	 *  a row also removes every row nested under it, at any depth: nothing will
+	 *  ever report their removal (their reporter is the process that died), and
+	 *  by construction each of them was still live when its ancestor went away
+	 *  — so they were stopped, never done. */
 	remove(agentId: string, result?: WidgetResult): void {
 		this.widget.remove(agentId, result);
+		this.parentOf.delete(agentId);
+		for (const [id, parent] of [...this.parentOf]) {
+			if (parent === agentId) this.remove(id, "stopped");
+		}
 	}
 
 	/** Update one row's status in place (idle ⇄ running for persistent agents). */
@@ -79,6 +94,7 @@ export class AgentWidget {
 
 	/** Clear everything (session shutdown). */
 	dispose(): void {
+		this.parentOf.clear();
 		this.widget.dispose();
 	}
 }

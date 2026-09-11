@@ -251,6 +251,23 @@ describe("tree telemetry events (TREE_STATUS_KEY)", () => {
 		]);
 	});
 
+	it("parses the direct parent id when present, and never invents one", () => {
+		assert.deepEqual(
+			treeEvent({ op: "add", id: "n3", label: "t", startedAt: 1, depth: 2, status: "running", parent: "a" }),
+			[
+				{
+					type: "agent_tree",
+					event: { op: "add", id: "n3", label: "t", startedAt: 1, depth: 2, status: "running", parent: "a" },
+				},
+			],
+		);
+		// A malformed/empty parent is dropped, not carried as an empty string.
+		assert.deepEqual(
+			treeEvent({ op: "add", id: "n4", label: "t", startedAt: 1, depth: 1, status: "running", parent: "" }),
+			[{ type: "agent_tree", event: { op: "add", id: "n4", label: "t", startedAt: 1, depth: 1, status: "running" } }],
+		);
+	});
+
 	it("parses activity with each activity kind", () => {
 		assert.deepEqual(treeEvent({ op: "activity", id: "n1", activity: { kind: "tool", name: "bash", args: "ls" } }), [
 			{ type: "agent_tree", event: { op: "activity", id: "n1", activity: { kind: "tool", name: "bash", args: "ls" } } },

@@ -6,9 +6,12 @@ import { createSubtreeDisplay } from "../tree-display.js";
 /** Recording fake: captures every widget mutation through the real surface. */
 function fakeWidget() {
 	const calls: string[] = [];
+	const nested: Array<{ agentId: string; indent: number; parentId?: string }> = [];
 	return {
 		calls,
-		addNested(a: { agentId: string; indent: number }) {
+		nested,
+		addNested(a: { agentId: string; indent: number; parentId?: string }) {
+			nested.push(a);
 			calls.push(`add:${a.agentId}@${a.indent}`);
 		},
 		updateActivity(id: string) {
@@ -46,8 +49,14 @@ function harness(opts: { hasParent?: boolean; foregroundEdge?: boolean } = {}) {
 	};
 }
 
-const addAt = (depth: number) =>
-	({ op: "add", id: "k1", label: "K", startedAt: 1, depth, status: "running" }) as AgentTreeEvent;
+const addAt = (depth: number): Extract<AgentTreeEvent, { op: "add" }> => ({
+	op: "add",
+	id: "k1",
+	label: "K",
+	startedAt: 1,
+	depth,
+	status: "running",
+});
 
 describe("createSubtreeDisplay — 显示面统一规则 full chain", () => {
 	it("root + open foreground card → folds, refreshes card, never touches widget", () => {
@@ -80,5 +89,20 @@ describe("createSubtreeDisplay — 显示面统一规则 full chain", () => {
 		h.display.closeCard();
 		h.display.onTreeEvent({ op: "remove", id: "k1", status: "done" }); // post-return ending
 		assert.ok(h.w.calls.includes("remove:k1:done"), `widget got: ${h.w.calls}`);
+	});
+
+	it("add carries the direct parent id through to the widget row", () => {
+		const h = harness({ foregroundEdge: false });
+		h.openWidget();
+		h.display.onTreeEvent({ ...addAt(1), parent: "a" });
+		assert.equal(h.w.nested[0]?.parentId, "a");
+	});
+
+	it("forwarding keeps the parent link — only depth grows", () => {
+		const h = harness({ hasParent: true });
+		h.display.onTreeEvent({ ...addAt(1), parent: "a" });
+		assert.deepEqual(h.forward, [
+			{ op: "add", id: "k1", label: "K", startedAt: 1, depth: 2, status: "running", parent: "a" },
+		]);
 	});
 });
