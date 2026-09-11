@@ -10,7 +10,7 @@ My personal [pi](https://github.com/earendil-works/pi) extensions — five publi
 | [`@everyx/pi-web-tools`](./packages/pi-web-tools/README.md) | Web primitives — search + URL fetch (URL → Markdown), channel-routed + rate-limited. |
 | [`@everyx/pi-sleep-guard`](./packages/pi-sleep-guard/README.md) | Block system sleep while any pi agent runs — per-process caffeinate/systemd-inhibit. |
 | [`@everyx/pi-status-line`](./packages/pi-status-line/README.md) | Pi-native footer — TPS/TTFT inline after `↓` (`T/s`). |
-| [`@everyx/pi-read-doc`](./packages/pi-read-doc/README.md) | Enhanced read — office docs (Word/Excel/PowerPoint/PDF) via anydoc → markdown, hosted→rapid fallback. |
+| [`@everyx/pi-read-doc`](./packages/pi-read-doc/README.md) | Enhanced read — office docs (Word/Excel/PowerPoint/PDF) via anydoc → markdown, OCR for scanned pages (hosted or local). |
 
 ## Layout
 

@@ -134,9 +134,14 @@ export function createRapidOcr(deps: RapidOcrDeps): OcrEngine {
 			const read = pages.filter((p) => !p.error).length;
 			if (read === 0) {
 				// Nothing usable: report the run, not a page — the caller's hint
-				// depends on knowing whether this was a timeout or a crash.
+				// depends on knowing whether this was a timeout or a crash. When
+				// stderr says nothing, a page's own error is the only diagnosis we
+				// have (the bridge writes there, e.g. "unrecognized rapidocr
+				// output shape"), and without it the user is told "failed" only.
 				const reason = res.timedOut ? "timeout" : "failed";
-				return { ok: false, reason, detail: res.stderr.trim().slice(0, 300) || undefined };
+				const firstError = pages.find((p) => p.error && p.error !== "not read")?.error;
+				const detail = res.stderr.trim().slice(0, 300) || firstError;
+				return { ok: false, reason, ...(detail ? { detail } : {}) };
 			}
 			return { ok: true, pages };
 		},

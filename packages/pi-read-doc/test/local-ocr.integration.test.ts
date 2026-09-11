@@ -13,6 +13,7 @@ import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { createRapidOcr } from "../ocr/rapidocr.js";
 import { createPdfTools } from "../pdf/poppler.js";
 import { recoverPdf } from "../pdf/recover.js";
@@ -87,6 +88,34 @@ describe("local recovery — real poppler + rapidocr", { skip: !enabled }, () =>
 	});
 	after(async () => {
 		await rm(dir, { recursive: true, force: true }).catch(() => {});
+	});
+
+	it("bridge: 「这页没文字」与「输出形状不认识」必须是两个答案", async () => {
+		// 只有真跑 python 才能钉住它：把「引擎换了返回结构」报成「这页没有文字」
+		// 是一句用户与模型都无法察觉的假话（第 15 轮走读发现）。
+		const bridge = fileURLToPath(new URL("../ocr/rapidocr_bridge.py", import.meta.url));
+		const script = [
+			"import importlib.util, json, sys",
+			"spec = importlib.util.spec_from_file_location('bridge', sys.argv[1])",
+			"bridge = importlib.util.module_from_spec(spec)",
+			"spec.loader.exec_module(bridge)",
+			"class NoText:",
+			"    txts = None",
+			"    scores = None",
+			"print(json.dumps({",
+			"    'empty_new_api': bridge.extract(NoText()),",
+			"    'empty_old_api': bridge.extract([None, 0.5]),",
+			"    'text_new_api': bridge.extract(type('T', (), {'txts': ['hi'], 'scores': [0.9]})()),",
+			"    'unknown_shape': bridge.extract(object()),",
+			"}))",
+		].join("\n");
+		const res = await run("python3", ["-c", script, bridge], { timeoutMs: 120_000 });
+		assert.equal(res.code, 0, `bridge probe failed: ${res.stderr}`);
+		const got = JSON.parse(res.stdout) as Record<string, unknown>;
+		assert.deepEqual(got.empty_new_api, [[], []], "新 API 的空页 = 空文字，不是错误");
+		assert.deepEqual(got.empty_old_api, [[], []], "旧 API 的空页同理");
+		assert.deepEqual(got.text_new_api, [["hi"], [0.9]], "有字照旧");
+		assert.equal(got.unknown_shape, null, "不认识的形状要能区分出来（bridge 会写成 error 行）");
 	});
 
 	it("reads a scanned page end-to-end and keeps its source image", async () => {

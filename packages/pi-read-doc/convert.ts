@@ -1,128 +1,156 @@
 /**
- * pi-read-doc — document conversion (fallback chain + quota gate).
+ * pi-read-doc — the conversion chain: anydoc local → hosted OCR → local
+ * recovery.
  *
- * The package's core concept behind one interface: office path → clean
- * markdown. The chain (anydoc local → hosted OCR → local rapidocr) and its
- * quota gate live here; the real adapters (anydoc engine, quota file, rapid
- * CLI) are injected via ConvertDeps, so tests drive the chain with fakes —
- * no engine binary, no network.
+ * Behind an injected interface, so tests drive it with fakes — no engine, no
+ * network, no filesystem. The two things that are NOT the chain have their own
+ * homes: the hosted gate (`hosted-gate.ts`, a reaction to what the service
+ * reported) and page labels (`page-labels.ts`, page numbers as text).
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { type HostedGate, hostedExhaustion, hostedKeyRejected } from "./hosted-gate.js";
+import { hostedNote } from "./page-labels.js";
+import type { RecoveredBlock, Recovery } from "./pdf/recover.js";
 
-/** Which step produced the document (card echo + diagnostics). */
-export type ConvertedVia = "anydoc" | "anydoc:hosted" | "rapid";
-
-export interface ConvertedDocument {
-	/** Full converted text — the LLM-budget truncation is the caller's
-	 *  concern (root SPEC: UI 渲染源不截断). */
-	text: string;
-	via: ConvertedVia;
-}
-
-/** Monthly hosted-OCR budget (user-level cost self-defense, not the
- *  upstream quota). */
-export const QUOTA_LIMIT = 1000;
-
-/** Quota store for hosted OCR (user-level, monthly reset). */
-export interface QuotaStore {
-	/** Pages used this month. */
-	used(): Promise<number>;
-	/** Record newly-used pages. */
-	charge(pages: number): Promise<void>;
-}
-
-export interface ConvertDeps {
-	/** The anydoc engine (dynamic import in prod; `{ ocr: "hosted" }` runs
-	 *  the server-side OCR path). */
-	toMarkdown: (path: string, opts?: { ocr: "hosted"; apiKey?: string }) => Promise<string>;
-	/** Monthly hosted-OCR budget gate. */
-	quota: QuotaStore;
-	/** Rate limit around hosted calls. */
-	limit: <T>(fn: () => Promise<T>) => Promise<T>;
-	/** Local rapidocr for scanned PDFs; null when unavailable or failed. */
-	rapidOcr: (pdfPath: string) => Promise<string | null>;
-}
-
-// ── File-backed quota store (~/.pi/read-doc.json) ──────────────
-
-// User-scoped extension state lives at the pi config root (~/.pi/), not
-// inside pi's managed agent dir (settings/trust/auth…): quota is a
-// user-level consumption counter, and we deliberately do NOT follow
-// PI_CODING_AGENT_DIR (an agent dir may point at sandbox/tmp — a counter
-// should not wander). CONFIG_DIR_NAME honors a custom configDir.
-function quotaPath(): string {
-	return join(homedir(), CONFIG_DIR_NAME, "read-doc.json");
-}
-function monthKey(d = new Date()): string {
-	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
 /**
- * Local calendar date (YYYY-MM-DD). The quota month boundary is user-facing
- * (1k pages/month resets on the local month), so the local calendar — not
- * UTC — governs; monthKey() must stay on the same calendar (loadQuota
- * slices updatedAt with monthKey()).
+ * Two shapes, one rule: everything anydoc converts locally is markdown; a
+ * document it refused (needsOcr) comes back as page blocks — from hosted OCR
+ * or from local recovery — so a page read from an image always carries its
+ * note.
  */
-function dateKey(d = new Date()): string {
-	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-export const fileQuota: QuotaStore = {
-	async used(): Promise<number> {
-		try {
-			const raw = await readFile(quotaPath(), "utf-8");
-			const j = JSON.parse(raw) as { quota?: { updatedAt?: string; used?: number } };
-			if (!j.quota?.updatedAt || j.quota.updatedAt.slice(0, 7) !== monthKey()) return 0;
-			return j.quota?.used ?? 0;
-		} catch {
-			return 0;
-		}
-	},
-	async charge(pages: number): Promise<void> {
-		try {
-			const p = quotaPath();
-			await mkdir(dirname(p), { recursive: true });
-			const quota = { updatedAt: dateKey(), used: (await fileQuota.used()) + pages };
-			await writeFile(p, JSON.stringify({ quota }, null, 2), "utf-8");
-		} catch {}
-	},
+export type ConvertedDocument = (
+	| { kind: "markdown"; text: string; via: "anydoc" }
+	| { kind: "blocks"; blocks: RecoveredBlock[]; via: "anydoc:hosted" | "local" }
+) & {
+	/** A short, user-facing note about HOW this conversion happened (a parked
+	 *  gate, a rejected key). UI only — the model gets the blocks and their
+	 *  notes, not this. */
+	hint?: string;
 };
+
+/** Why local recovery could not deliver — travels on the rethrown needsOcr
+ *  error so the tool can turn it into an install hint (UI-side). Derived from
+ *  the recovery's own union, so a new reason cannot drift apart. */
+export type LocalFailure = Extract<Recovery, { ok: false }>["reason"];
 
 // ── The fallback chain ────────────────────────────────────────
 
+export interface ConvertDeps {
+	/** The anydoc engine (dynamic import in prod; `{ ocr: "hosted" }` runs the
+	 *  server-side OCR path). */
+	toMarkdown: (path: string, opts?: { ocr: "hosted"; apiKey?: string }) => Promise<string>;
+	/** The hosted gate (see HostedGate). */
+	hosted: HostedGate;
+	/** Rate limit around hosted calls. */
+	limit: <T>(fn: () => Promise<T>) => Promise<T>;
+	/** Local recovery of a PDF anydoc refused: text runs (anydoc on a page
+	 *  subset) + OCR'd image-only pages, as page-ordered blocks. */
+	recover: (
+		pdfPath: string,
+		flagged: number[],
+		pageCount: number,
+		opts?: { signal?: AbortSignal; onProgress?: (note: string) => void },
+	) => Promise<Recovery>;
+}
+
 /**
  * Run the chain:
- * 1. anydoc local (all office formats)
- * 2. `needsOcr` → hosted OCR, gated by the monthly quota (charged on success)
- * 3. `needsOcr` + pdf → local rapidocr
+ * 1. anydoc local (all office formats) → markdown;
+ * 2. `needsOcr` → hosted OCR (unless the gate has it parked) → blocks;
+ * 3. `needsOcr` + pdf → local recovery → blocks;
  * 4. otherwise the original error propagates (the caller adds the hint).
  */
-export async function convertDocument(path: string, ext: string, deps: ConvertDeps): Promise<ConvertedDocument> {
-	let md: string;
+export async function convertDocument(
+	path: string,
+	ext: string,
+	deps: ConvertDeps,
+	opts: { signal?: AbortSignal; now?: Date; onProgress?: (note: string) => void } = {},
+): Promise<ConvertedDocument> {
+	const now = opts.now ?? new Date();
 	try {
-		md = await deps.toMarkdown(path);
+		// anydoc converts the whole document or nothing: one scanned page makes
+		// it reject everything, text pages included (verified).
+		return { kind: "markdown", text: await deps.toMarkdown(path), via: "anydoc" };
 	} catch (err) {
 		if ((err as { code?: string })?.code !== "needsOcr") throw err;
 
-		const used = await deps.quota.used();
-		if (used < QUOTA_LIMIT) {
+		const pages = (err as { pages?: number[] }).pages ?? [];
+		const pageCount = (err as { pageCount?: number }).pageCount ?? 0;
+
+		/**
+		 * Anything the user should hear about the HOSTED side: a parked gate, an
+		 * exhausted quota, a rejected key. It is the same slot in both endings —
+		 * a local failure must not bury it (`withLocalReason` carries it), and a
+		 * successful local recovery still surfaces it as the result's hint.
+		 */
+		let hostedHint: string | undefined;
+		// Without a page count we cannot attribute anything hosted returns, and
+		// a block with an empty `pages` would contradict the shape we promise.
+		const canAttribute = pageCount > 0;
+		const parked = canAttribute ? await deps.hosted.skipped(now) : null;
+		if (canAttribute && parked) {
+			// Say why we did not ask: otherwise a parked gate is invisible.
+			hostedHint = `hosted OCR paused until ${new Date(parked.until).toLocaleDateString()}: ${parked.reason}`;
+		} else if (canAttribute) {
 			try {
 				const hosted = await deps.limit(() => deps.toMarkdown(path, { ocr: "hosted" }));
-				const pages = Math.max(1, (err as { pages?: unknown[] })?.pages?.length ?? 1);
-				await deps.quota.charge(pages);
-				return { text: hosted, via: "anydoc:hosted" };
-			} catch {
-				// hosted failed → fall through to rapid
+				return {
+					kind: "blocks",
+					blocks: [{ pages: pageRange(pageCount), text: hosted, note: hostedNote(pages, pageCount) }],
+					via: "anydoc:hosted",
+				};
+			} catch (hostedErr) {
+				const message = hostedErr instanceof Error ? hostedErr.message : String(hostedErr);
+				const exhausted = hostedExhaustion(message, now);
+				if (exhausted) {
+					await deps.hosted.record(exhausted);
+					hostedHint = `hosted OCR paused: ${exhausted.reason}`;
+				} else if (hostedKeyRejected(message)) {
+					// Worth surfacing even when local recovery succeeds — silence
+					// would hide a broken configuration.
+					hostedHint = "Firecrawl Parse rejected the API key — check FIRECRAWL_API_KEY";
+				}
 			}
 		}
-		if (ext === ".pdf") {
-			const rapid = await deps.rapidOcr(path);
-			if (rapid) return { text: rapid, via: "rapid" };
+
+		// Recovery restores the text pages anydoc dropped, so it needs to know
+		// the document's shape; without it we would silently lose pages.
+		if (ext === ".pdf" && pageCount > 0) {
+			const recovered = await deps.recover(path, pages, pageCount, opts);
+			if (recovered.ok) {
+				// Both hints can be true at once (a broken key AND a local
+				// diagnostic); the user should see whichever exist.
+				const notes = [hostedHint, recovered.hint].filter(Boolean).join(" · ");
+				return { kind: "blocks", blocks: recovered.blocks, via: "local", ...(notes ? { hint: notes } : {}) };
+			}
+			throw withLocalReason(err, { localReason: recovered.reason, localHint: recovered.hint, hostedHint });
 		}
-		throw err;
+		throw hostedHint ? Object.assign(err as Error, { hostedHint }) : err;
 	}
-	return { text: md, via: "anydoc" };
+}
+
+const pageRange = (pageCount: number): number[] => Array.from({ length: pageCount }, (_, i) => i + 1);
+
+/** What a failed conversion tells its caller: anydoc's code, plus the recovery
+ *  and local-engine guidance that belongs beside it. This is the one definition
+ *  — the error we throw, the tool that reads it and the tests all share it. */
+export interface ConversionFailure {
+	code?: string;
+	localReason?: LocalFailure;
+	/** A hosted-side problem worth telling the user about. */
+	hostedHint?: string;
+	/** The local engine's own guidance, when it is the thing missing. */
+	localHint?: string;
+}
+
+/** Attach the recovery failure to the propagated error — the tool turns it
+ *  into the install hint, and nothing else needs to change shape. */
+function withLocalReason(err: unknown, info: Omit<ConversionFailure, "code"> & { localReason: LocalFailure }): Error {
+	const e = err instanceof Error ? err : new Error(String(err));
+	// Separate slots: one failing reason must not swallow the other's advice.
+	return Object.assign(e, {
+		localReason: info.localReason,
+		...(info.localHint ? { localHint: info.localHint } : {}),
+		...(info.hostedHint ? { hostedHint: info.hostedHint } : {}),
+	});
 }

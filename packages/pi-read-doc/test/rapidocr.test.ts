@@ -97,6 +97,18 @@ describe("rapidocr engine", () => {
 		});
 	});
 
+	it("recognize: 整批都失败且 stderr 为空 → detail 用第一页自己的错误（否则只剩一句 failed）", async () => {
+		const { run } = fakeRun(() => ({
+			stdout: '{"n":0,"error":"unrecognized rapidocr output shape"}\n',
+		}));
+		const r = await engine({ run }).recognize(["/a.png"]);
+		assert.equal(r.ok, false);
+		if (!r.ok) {
+			assert.equal(r.reason, "failed");
+			assert.match(r.detail ?? "", /unrecognized rapidocr output shape/, "别把唯一的诊断丢掉");
+		}
+	});
+
 	it("recognize: a run that produced nothing usable reports the run, with detail", async () => {
 		const { run } = fakeRun((_cmd, args) =>
 			args[0] === "-c" ? { code: 0 } : { code: 1, stderr: "ModuleNotFoundError: no module named rapidocr" },
