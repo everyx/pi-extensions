@@ -28,14 +28,18 @@ export function renderNotification(
 		return renderNoDetailsCard(theme);
 	}
 
-	const isError = d.status !== "completed";
 	const icon: CardIcon = d.status === "completed" ? successIcon : d.status === "failed" ? errorIcon : stoppedIcon;
-	const status =
+	// The card name is the agent, never the tool that created it: a notification
+	// is a message ("that agent finished"), and spelling it agent_spawn makes it
+	// read as a fresh spawn next to the real spawn card (#31). The status word is
+	// what says the turn ended — carried by the icon + word, not the shell, so
+	// every status shares the message background.
+	const status: { text: string; color: "error" | "muted" | "warning" } =
 		d.status === "failed"
-			? { text: d.status, color: "error" as const }
+			? { text: "failed", color: "error" }
 			: d.status === "stopped"
-				? { text: d.status, color: "warning" as const }
-				: undefined;
+				? { text: "stopped", color: "warning" }
+				: { text: "completed", color: "muted" };
 
 	const metaParts: string[] = [];
 	if (d.model) metaParts.push(d.model);
@@ -53,12 +57,11 @@ export function renderNotification(
 
 	return renderNotificationCard(
 		{
-			header: { icon, name: "agent_spawn", title: d.label, tail: status, meta: metaParts },
+			header: { icon, name: "Agent", title: d.label, tail: status, meta: metaParts },
 			body,
 			footer: d.sessionPath,
 			expanded,
 		},
 		theme,
-		isError ? "error" : "success",
 	);
 }

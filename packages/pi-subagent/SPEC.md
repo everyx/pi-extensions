@@ -91,7 +91,7 @@ session: /path/...jsonl
 ### 完成通知卡片（persistent 时带 idle 标记）
 
 ```
-✓ agent_spawn "@max — 检查 CI 配置" (sonnet · high · Took 27.5s · 1,250 tokens · 3 tool uses · idle)
+✓ Agent "@max — 检查 CI 配置" completed (sonnet · high · Took 27.5s · 1,250 tokens · 3 tool uses · idle)
 <空行>
 ... (3 earlier lines, ctrl+o to expand)
 Found 5 files handling authentication: src/auth/*.ts …
@@ -99,8 +99,8 @@ Found 5 files handling authentication: src/auth/*.ts …
 session: /path/...jsonl
 ```
 
-- header：状态 icon 在最前（✓/✗/■）——icon 与 agent_spawn 工具卡同款（工具卡同样前置 icon）；通知卡独有的是追加状态词（`failed` error / `stopped` warning / `idle` muted）与 token/工具统计
-- 失败/停止时追加彩色状态词（`failed` error / `stopped` warning）；persistent 完成追加 `idle` muted
+- header：卡名是 `Agent`，不是工具名 `agent_spawn`——这张卡是「该 agent 完事了」的消息，写成工具名会与真实 spawn 卡逐字同形（#31）；状态由 icon（✓/✗/■）＋状态词（`completed` muted / `failed` error / `stopped` warning）承担，persistent 完成另在 meta 追加 `idle`
+- 底色 `customMessageBg`（pi 给 injected message 的专用色）——工具底色留给真正的工具卡；注册了自定义渲染器 pi 就不再替你套这层（custom-message.js：渲染器 "handles its own styling"），得自己选
 - 渲染数据在 `details`，不进 LLM 上下文
 
 ### Agents 状态 widget（aboveEditor）

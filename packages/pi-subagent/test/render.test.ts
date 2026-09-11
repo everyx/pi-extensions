@@ -65,7 +65,7 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(ok, 120).includes('✓ agent_spawn "research db schema"'), "completed icon");
+	assert.ok(renderText(ok, 120).includes('✓ Agent "research db schema" completed'), "completed icon + word");
 	// The result text must render in the card body (pi-ui message channel).
 	assert.ok(renderText(ok, 120).includes("found 5 tables"), "result text renders in the body");
 
@@ -82,7 +82,7 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(failed, 120).includes('✗ agent_spawn "research db schema" failed'), "failed icon + word");
+	assert.ok(renderText(failed, 120).includes('✗ Agent "research db schema" failed'), "failed icon + word");
 
 	const stopped = renderNotification(
 		{
@@ -96,7 +96,42 @@ test("notification header carries the status icon", () => {
 		{ expanded: false },
 		theme,
 	);
-	assert.ok(renderText(stopped, 120).includes('■ agent_spawn "slow query probe" stopped'), "stopped icon + word");
+	assert.ok(renderText(stopped, 120).includes('■ Agent "slow query probe" stopped'), "stopped icon + word");
+});
+
+/** The fake theme plus a log of every background key a card asks for. */
+function recordingTheme(seen: string[]): never {
+	return new Proxy(
+		{},
+		{
+			get:
+				(_, key) =>
+				(...args: string[]) => {
+					if (key === "bg") seen.push(String(args[0]));
+					return (theme as unknown as Record<string, (...a: string[]) => string>)[String(key)](...args);
+				},
+		},
+	) as never;
+}
+
+test("notification shell wears pi's custom-message background, never a tool box (#31)", () => {
+	const seen: string[] = [];
+	const t = recordingTheme(seen);
+	for (const status of ["completed", "failed", "stopped"] as const) {
+		// Box applies its background while rendering, so the card must be drawn.
+		renderText(
+			renderNotification(
+				{ details: { status, agent_id: "a1", label: "x", result: "r", usage: {} } },
+				{ expanded: false },
+				t,
+			),
+			120,
+		);
+	}
+	// pi reserves customMessageBg for content that is not a tool call
+	// (compaction/branch/skill summaries, renderer-less messages); the tool boxes
+	// would make this card read as a tool result.
+	assert.deepEqual([...new Set(seen)], ["customMessageBg"], "tool box backgrounds belong to tool cards");
 });
 test("safeTitle flattens newlines and neutralizes embedded quotes", () => {
 	assert.equal(safeTitle('research "db" schema'), "research 'db' schema");
