@@ -4,3 +4,7 @@ dist
 .env.*
 *.log
 *.tsbuildinfo
+
+# Python bytecode (the OCR bridge is real Python)
+__pycache__/
+*.pyc

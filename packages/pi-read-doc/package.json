@@ -1,7 +1,7 @@
 {
 	"name": "@everyx/pi-read-doc",
 	"version": "1.0.6",
-	"description": "Enhanced read for pi – office docs (docx/pdf/pptx/xlsx etc.) via anydoc, header-only, hosted→rapid fallback.",
+	"description": "Enhanced read for pi – office docs (docx/pdf/pptx/xlsx etc.) via anydoc, header-only, OCR for scanned pages (hosted or local).",
 	"keywords": [
 		"pi-package"
 	],
@@ -19,6 +19,9 @@
 	},
 	"files": [
 		"*.ts",
+		"ocr/",
+		"!**/__pycache__",
+		"pdf/",
 		"README.md",
 		"README.zh.md"
 	],
