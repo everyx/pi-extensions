@@ -103,6 +103,19 @@ session: /path/...jsonl
 - 底色 `customMessageBg`（pi 给 injected message 的专用色）——工具底色留给真正的工具卡；注册了自定义渲染器 pi 就不再替你套这层（custom-message.js：渲染器 "handles its own styling"），得自己选
 - 渲染数据在 `details`，不进 LLM 上下文
 
+### 待送达报告行（aboveEditor，卡片落地即消失）
+
+```
+ Agent @abe — counter (queued): bg done
+ Agent @zoe — index (failed · queued): <错误首行>
+```
+
+- 通知是 pi 的 followUp：pi 在**父进程下一个循环边界**（当前这一步工具调用跑完）才把它交给模型，不是子代理结束的那一刻。中间这段时间报告已存在（widget 行随 agent 结束已经移除）但谁都没读到——UI 必须说出来，否则「行消失」与「卡片出现」看起来像同一件事发生了两次
+- 形态取 pi 自己的排队消息块（`Steering:` / `Follow-up:`：aboveEditor、dim、单行截断）：一个未送达报告一行，按完成顺序堆叠。**不带** pi 那行 `↳ … to edit all queued messages`——那行暗示可以捞回编辑器改，而子代理报告不可编辑
+- `(queued)` 是这份报告的状态，冒号后是它的头一行（多行只取首行非空行）；异常结局带上结局词，与卡片尾部同一套词汇，`queued` 取 pi 的队列词汇
+- 生命周期：交给 pi 的那一刻出现，**卡片真正落进转录的那一刻消失**（pi 的 `message_end` 事件就是卡片出现）；会话被中途杀掉不专门兜底——widget 随会话一起走
+- 独立 widget key（`pi-subagent-pending`），不参与 Agents 的 `done n/total` 计数：同一件事不报两遍
+
 ### Agents 状态 widget（aboveEditor）
 
 ```
@@ -128,6 +141,7 @@ rpc-client.ts      — 状态化薄 JSONL 客户端（spawn + 事件流 + 退出
 event-interpret.ts — 原始 RpcEvent → AgentEvent 适配层（纯函数）
 agent-process.ts   — AgentProcess：一个常驻 rpc 子进程的语义封装
 notification.ts    — 完成通知 payload 构造（LLM JSON 截断/stash + details 卡形状单点）
+pending.ts         — 待送达报告行：通知尚未落进转录时的排队显示
 tree-display.ts    — 子树显示面（显示面统一规则锚点：fold/forward/widget 决策 + 计数）
 registry.ts        — AgentRegistry：运行中 Agent 生命周期 + 点对点投递 + 完成策略
 model.ts           — model spec → resolved model（纯函数）
@@ -209,6 +223,7 @@ queued → running ──→ completed（通知）
 - details：渲染数据，不进 LLM 上下文；persistent 通知卡追加 idle 状态词
 - spawn 失败不投递通知：isError 工具结果已经同时告知 LLM 和用户，followUp 通知会重复
 - **唤醒轮次同样投递**（2026-08-22）：persistent 代理被 agent_send 唤醒并成功完成后，输出经 onIdle → notifyCompletion 回到派发者上下文——与首轮对称（否则 `agent_send` 只回 "delivered"，答案落在父看不见的地方）。主动 stop（stoppedByControl）保持静默；失败唤醒照旧报 failed
+- **投递延迟是 pi 的语义，不是 bug**（2026-10-12 实测）：子代理完成 → widget 行当刻消失，通知卡要到父进程下一个循环边界才出现（实测父进程 `sleep 30` 在跑时差 18.2s；父进程空闲时两者同刻）。pi 0.85.1（1.0 前）行为一致，非版本回归。这段等待由「待送达报告行」显式承担
 
 ### Graceful turn limits
 

@@ -37,6 +37,11 @@ export function maybeWriteFullOutput(agentId: string, output: string): string {
 	return stashPath ? truncationMarker(stashPath) : "";
 }
 
+/** The notification message type — one spelling, read by the renderer
+ *  registration, the payload below, and the pending-report line that tracks
+ *  this message until its card lands (pending.ts). */
+export const NOTIFICATION_CUSTOM_TYPE = "subagent-notification";
+
 /** Deliver a completion notification: LLM JSON as follow-up + user card. */
 export function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: AgentCompletion): void {
 	const details: NotificationDetails = {
@@ -62,7 +67,7 @@ export function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, compl
 
 	pi.sendMessage(
 		{
-			customType: "subagent-notification",
+			customType: NOTIFICATION_CUSTOM_TYPE,
 			content: JSON.stringify({
 				status: completion.status,
 				agent_id: `@${agent.agentId}`,
