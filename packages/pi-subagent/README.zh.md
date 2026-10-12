@@ -50,11 +50,7 @@ pi-subagent 与 [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-suba
 ## 安装
 
 ```bash
-# npm（推荐）
 pi install npm:@everyx/pi-subagent
-
-# git
-pi install git:github.com/everyx/pi-subagent
 ```
 
 开发期软链接：
