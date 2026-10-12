@@ -160,6 +160,7 @@ preview.ts         — dev-only storybook（随包发布但无运行时影响）
 
 - 线格式：JSONL（LF 分隔，与 pi 的 jsonl.js 一致），命令带 id 关联
 - 子进程 detached（独立进程组）：stop 的 SIGTERM 级联到整棵进程树，不遗留孤儿孙进程
+- **Windows 启动方式**（`spawnTarget`，纯函数、带测试）：`pi` 是 npm bin shim，原生 Windows 上 Node 既执行不了 PATH 里那个无扩展名的 sh 脚本（ENOENT，该平台的 ENOENT 也覆盖「存在但不是可执行类型」），也直接 spawn 不了 `pi.cmd`（EINVAL，需 cmd.exe 包装）。因此 Windows 下用**拉起自己的那个 node** + 自己启动时用的 CLI 脚本（`process.argv[1]`，绝对化后使用——子进程 cwd 是 agent 的，不是我们的）跑子进程——就是 shim 自己干的事，既绕开 PATHEXT 解析，也不把参数交给 cmd.exe 二次解析（`shell: true` 会，且路径含空格/`&` 时危险）。非脚本启动器（打包二进制）退回 `pi`，由 libuv 自行匹配 `.exe`
 - 自写薄客户端：不绑定 pi 框架私有 RpcClient
 - **父→子消息投递（机制层自动选，LLM 无感知）**：统一发 `prompt` 并传 `streamingBehavior: "steer"`——一个命令覆盖全部状态，无 fallback、无状态判断、无竞态：
   - 子 idle → 正常起新 turn（唤醒）✓ 实证

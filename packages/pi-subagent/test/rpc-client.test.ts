@@ -1,6 +1,7 @@
 /**
  * Tests for the stateful RPC transport (rpc-client.ts) against a mock
- * child process (test/fixtures/rpc-mock.js).
+ * child process (test/fixtures/rpc-mock.js), plus the pure spawn-target
+ * choice (which executable runs the child pi, and with what argv prefix).
  *
  * Covers the two real transport bugs found in code review:
  *  1. concurrent commands must correlate by unique command id — a shared id
@@ -15,7 +16,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { RpcClient } from "../rpc-client.js";
+import { RpcClient, spawnTarget } from "../rpc-client.js";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "rpc-mock.js");
 
@@ -72,5 +73,56 @@ describe("RpcClient — UTF-8 framing", () => {
 		} finally {
 			await close(client);
 		}
+	});
+});
+
+// ── Which executable to spawn ────────────────────────────
+//
+// `pi` is an npm bin shim. On Windows the bare name resolves through PATH to
+// npm's extensionless sh script, which Node cannot execute (ENOENT), and
+// `pi.cmd` needs cmd.exe (EINVAL) — so the child pi runs as the CLI script
+// through the node that runs us, the same thing the shim does itself.
+
+describe("spawnTarget — the executable behind the child pi", () => {
+	it("Unix spawns the shim on PATH, with no argv prefix", () => {
+		assert.deepEqual(spawnTarget({ platform: "linux", scriptPath: "/usr/lib/node_modules/pi/dist/bundle/cli.js" }), {
+			command: "pi",
+			argvPrefix: [],
+		});
+	});
+
+	it("Windows runs the CLI script through node (the shim's own trick)", () => {
+		const scriptPath =
+			"C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\bundle\\cli.js";
+		assert.deepEqual(spawnTarget({ platform: "win32", execPath: "C:\\node\\node.exe", scriptPath }), {
+			command: "C:\\node\\node.exe",
+			argvPrefix: [scriptPath],
+		});
+	});
+
+	it("Windows with a non-script launcher (bundled binary) falls back to the shim", () => {
+		assert.deepEqual(spawnTarget({ platform: "win32", execPath: "C:\\pi\\pi.exe", scriptPath: "C:\\pi\\pi.exe" }), {
+			command: "pi",
+			argvPrefix: [],
+		});
+	});
+
+	it("Windows absolutizes the script — the child's cwd is the agent's, not ours", () => {
+		const target = spawnTarget({
+			platform: "win32",
+			execPath: "C:\\node\\node.exe",
+			scriptPath: "dist\\bundle\\cli.js",
+		});
+		assert.equal(target.command, "C:\\node\\node.exe");
+		assert.equal(target.argvPrefix.length, 1);
+		assert.ok(path.win32.isAbsolute(target.argvPrefix[0]), `absolute: ${target.argvPrefix[0]}`);
+		assert.match(target.argvPrefix[0], /dist\\bundle\\cli\.js$/);
+	});
+
+	it("an explicit command is the caller's business — never rewritten", () => {
+		assert.deepEqual(spawnTarget({ command: "node", platform: "win32", execPath: "x", scriptPath: "y.js" }), {
+			command: "node",
+			argvPrefix: [],
+		});
 	});
 });
