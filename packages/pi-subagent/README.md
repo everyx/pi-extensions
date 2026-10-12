@@ -18,7 +18,7 @@ Pi has no built‑in sub‑agents. So heavy, parallel, or context‑heavy work c
 ## Features
 
 - **Quiet context** — logs, search hits, and test output stay in the child's window. You get the final result, not the churn.
-- **True parallel** — fire several background agents at once; each delivers its own notification when done. No queue, no result tool.
+- **True parallel** — fire several background agents at once; each delivers its own notification when done. No queue, no result tool. A report that has to wait for the turn's next step shows as a dim `Agent … (queued)` line until its card lands.
 - **Stay in control** — `agent_send` redirects a running agent (or wakes an idle one); `agent_stop` kills it. A child's message up the tree is delivered best-effort (no ack).
 - **Persistent on demand** — spawn with `persistent: true` and the child stays resident after completion: idle at zero tokens, ready to be woken by a later `agent_send` for follow‑ups in the same context — or killed by `agent_stop`.
 - **Pi‑native** — rendering, sessions, and attach all reuse pi's own mechanisms; the cards look like built‑in tools because they are.

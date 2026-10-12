@@ -14,6 +14,8 @@
  *   nested-fold.ts    — foreground-card nested-subtree meta counters (tested)
  *   tree-display.ts   — subtree display anchor: fold / forward / widget (显示面统一规则)
  *   notification.ts   — completion-notification payloads (notifyCompletion)
+ *   pending.ts        — queued-report lines: a notification that pi has not
+ *                       delivered yet (tested)
  *   types.ts          — shared tool-output / notification shapes
  *   views.ts          — tool card views (single source for the three cards)
  *   card.ts           — notification card wrappers (via pi-ui)
@@ -34,13 +36,19 @@ import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { AgentProcess } from "./agent-process.js";
+import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { createLiveChannels } from "./live-output.js";
 import { resolveModel } from "./model.js";
-import { maybeWriteFullOutput, notifyCompletion, truncateForContext } from "./notification.js";
+import {
+	maybeWriteFullOutput,
+	NOTIFICATION_CUSTOM_TYPE,
+	notifyCompletion,
+	truncateForContext,
+} from "./notification.js";
+import { PendingReports } from "./pending.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
-import { AgentRegistry, type WidgetSurface } from "./registry.js";
+import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
 import { runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
 import { createSubtreeDisplay } from "./tree-display.js";
@@ -80,6 +88,20 @@ const HAS_PARENT = MY_AGENT_ID !== "";
 
 /** TUI-only background-agent status widget (created lazily, tui mode only). */
 let widget: AgentWidget | null = null;
+
+/**
+ * Queued-report lines above the editor (created lazily, tui mode only) — the
+ * completion reports pi has not handed to the model yet. Same lazy doctrine as
+ * the widget: created on first use, because a notification can fire long after
+ * the tool call that spawned the agent returned.
+ */
+let pending: PendingReports | null = null;
+
+function ensurePending(ctx: { mode: string; ui: unknown }): void {
+	if (pending || ctx.mode !== "tui") return;
+	// biome-ignore lint/suspicious/noExplicitAny: ExtensionUIContext shape from pi
+	pending = new PendingReports(ctx.ui as any);
+}
 
 /**
  * Lazily-captured UI handle for the child→parent channel (extension_ui_request /
@@ -400,10 +422,20 @@ export default function (pi: ExtensionAPI) {
 	// completion policy (notify unless user-stopped; cleanup on every path),
 	// and the in-tree routing (direct children only — per-hop O(1)).
 	const registry = new AgentRegistry({
-		notify: (agent, completion) => notifyCompletion(pi, agent, completion),
+		notify: (agent, completion) => deliverNotification(agent, completion),
 		getWidget: () => widgetSurface(),
 		hasParent: HAS_PARENT,
 	});
+
+	/**
+	 * Hand a completion notification to pi and show it as queued until its card
+	 * lands. The two are one delivery: pending.ts owns why the gap exists, pi
+	 * owns when it closes (message_end).
+	 */
+	function deliverNotification(agent: RegisteredAgent, completion: AgentCompletion): void {
+		pending?.add(agent, completion);
+		notifyCompletion(pi, agent, completion);
+	}
 
 	// Inbound messages (a child addresses @parent, forwards a sibling's
 	// message, or reports an unroutable target) land here from its rpc event
@@ -543,7 +575,7 @@ export default function (pi: ExtensionAPI) {
 			// identical for both endings except status/output-default.
 			const notifyWake = async (status: "completed" | "failed"): Promise<void> => {
 				const [output, stats] = await Promise.all([agent.lastOutput(), agent.getStats()]);
-				notifyCompletion(pi, agent, {
+				deliverNotification(agent, {
 					status,
 					output: output || (status === "failed" ? "Follow-up turn failed (model API error)." : output),
 					stats: {
@@ -652,6 +684,7 @@ export default function (pi: ExtensionAPI) {
 						// chain here (mechanisms stay on this side of the seam).
 						onBackgroundSettled: (a) => {
 							ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
+							ensurePending(ctx);
 							registry.register(a as AgentProcess);
 							tree.add(a, "running"); // up-report: my child exists
 							void a
@@ -672,6 +705,7 @@ export default function (pi: ExtensionAPI) {
 						},
 						onResident: (a) => {
 							ensureWidget(ctx);
+							ensurePending(ctx);
 							// Resident from birth: register the widget row as idle (‖
 							// marker, stays addressable). Registering an already-completed
 							// agent at its terminal status would be removed by the
@@ -881,6 +915,9 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, raw, _signal, onUpdate, ctx) {
 			captureUi(ctx);
+			// A wake reports through the notification path — its cards queue the
+			// same way a background spawn's do.
+			ensurePending(ctx);
 			const params = raw as SendParams;
 			const to = params.to?.trim();
 			const message = params.message?.trim();
@@ -932,7 +969,14 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// ── Notification card (user side) ───────────────────
-	pi.registerMessageRenderer("subagent-notification", renderNotification);
+	pi.registerMessageRenderer(NOTIFICATION_CUSTOM_TYPE, renderNotification);
+
+	// The card lands only when pi hands the queued follow-up to the model —
+	// that message event IS the card appearing, so it settles the queued report
+	// line (pending.ts). Until then the line is the only trace of the result.
+	pi.on("message_end", async (event) => {
+		pending?.settle(event.message);
+	});
 
 	// ── Cleanup on exit ─────────────────────────────────
 	pi.on("session_shutdown", async (event) => {
@@ -947,5 +991,6 @@ export default function (pi: ExtensionAPI) {
 		// (stdin EOF → rpc shutdown) even if the parent dies first, because
 		// the pipe closes — no tmux, no disk cleanup, no signals.
 		await registry.shutdown();
+		pending?.dispose();
 	});
 }
