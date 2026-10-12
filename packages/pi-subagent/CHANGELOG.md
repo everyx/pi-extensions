@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.3.7...pi-subagent-v1.4.0) (2026-10-12)
+
+
+### Features
+
+* **pi-subagent:** show a queued report line until its card lands ([40398f2](https://github.com/everyx/pi-extensions/commit/40398f2980220cfaa52a3ed59519cb40ce5a3a83))
+
+
+### Bug Fixes
+
+* **pi-subagent:** launch the child pi through node on Windows ([fed362e](https://github.com/everyx/pi-extensions/commit/fed362e31c7a0e11dbe83f6c9685a64f6d47525a)), closes [#32](https://github.com/everyx/pi-extensions/issues/32)
+
 ## [1.3.7](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.3.6...pi-subagent-v1.3.7) (2026-09-11)
 
 
