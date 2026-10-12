@@ -50,11 +50,7 @@ pi-subagent, [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagen
 ## Install
 
 ```bash
-# npm (recommended)
 pi install npm:@everyx/pi-subagent
-
-# git
-pi install git:github.com/everyx/pi-subagent
 ```
 
 Or symlink for development:
