@@ -18,6 +18,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { parseLine, type RpcCommand, type RpcEvent, type RpcResponse, serializeCommand } from "./protocol.js";
 
@@ -32,6 +33,47 @@ export interface RpcClientOptions {
 	onEvent?: (event: RpcEvent) => void;
 	/** Called once when the child exits (any reason). */
 	onExit?: () => void;
+}
+
+/**
+ * What to spawn for the child pi, and the argv it needs in front.
+ *
+ * `pi` is an npm bin shim, and Node cannot execute the Windows one: PATH
+ * resolves the bare name to npm's extensionless sh script (no interpreter on
+ * Windows → spawn ENOENT, which there also covers "exists but is not an
+ * executable type"), while `pi.cmd` needs cmd.exe (EINVAL) and `shell: true`
+ * hands our arguments to cmd.exe to re-parse. So on Windows we run the CLI
+ * script through the very node that runs us — what the shim does itself, with
+ * the path it was launched with. Unix keeps spawning `pi` as before.
+ *
+ * The script path is absolutized: the child runs in the agent's cwd, not ours,
+ * so a relative path would resolve against the wrong directory. Node itself
+ * already absolutizes argv[1] (measured: `node rel/probe.js` reports
+ * `/cwd/rel/probe.js`), so this is a guard for other launchers, not a live
+ * bug — and it is a guard precisely because no such launcher can be tested
+ * here.
+ */
+export function spawnTarget(opts: {
+	/** Explicit executable from the caller — run it as given. */
+	command?: string;
+	platform?: NodeJS.Platform;
+	execPath?: string;
+	/** Script node was launched with (process.argv[1]). */
+	scriptPath?: string;
+}): { command: string; argvPrefix: string[] } {
+	if (opts.command !== undefined) return { command: opts.command, argvPrefix: [] };
+	const platform = opts.platform ?? process.platform;
+	const scriptPath = opts.scriptPath ?? process.argv[1];
+	// A bundled/standalone launcher is not a script node can re-run; the npm
+	// shim is what PATH has for those installs.
+	if (platform === "win32" && /\.[cm]?js$/i.test(scriptPath ?? "")) {
+		const script = scriptPath as string;
+		// Windows path semantics, not the host's: this decides a Windows path
+		// and must stay deterministic wherever the tests run.
+		const absolute = path.win32.isAbsolute(script) ? script : path.win32.resolve(script);
+		return { command: opts.execPath ?? process.execPath, argvPrefix: [absolute] };
+	}
+	return { command: "pi", argvPrefix: [] };
 }
 
 /** How long to wait for a single command response before failing it. */
@@ -72,7 +114,8 @@ export class RpcClient {
 		});
 
 		const argv = options.command === undefined ? ["--mode", "rpc", ...options.args] : options.args;
-		const proc = spawn(options.command ?? "pi", argv, {
+		const target = spawnTarget({ command: options.command });
+		const proc = spawn(target.command, [...target.argvPrefix, ...argv], {
 			cwd: options.cwd,
 			env: { ...process.env, ...options.env },
 			stdio: ["pipe", "pipe", "pipe"],
