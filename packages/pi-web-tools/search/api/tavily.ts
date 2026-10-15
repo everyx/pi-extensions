@@ -65,7 +65,7 @@ export async function searchWithTavily(
 		...(language ? { language } : {}),
 	};
 
-	const response = await limiter.run(() =>
+	const payload = await limiter.run(() =>
 		fetchWithTimeout(
 			ENDPOINT,
 			{
@@ -74,21 +74,23 @@ export async function searchWithTavily(
 				body: JSON.stringify(body),
 			},
 			{ signal: ctx.signal },
+			async (response) => {
+				if (!response.ok) {
+					const text = await response.text().catch(() => "");
+					throw new Error(`Tavily error ${response.status}: ${text.slice(0, 300)}`);
+				}
+
+				return (await response.json()) as {
+					results?: Array<{
+						title?: string;
+						url?: string;
+						content?: string;
+						publishedDate?: string | null;
+					}>;
+				};
+			},
 		),
 	);
-	if (!response.ok) {
-		const text = await response.text().catch(() => "");
-		throw new Error(`Tavily error ${response.status}: ${text.slice(0, 300)}`);
-	}
-
-	const payload = (await response.json()) as {
-		results?: Array<{
-			title?: string;
-			url?: string;
-			content?: string;
-			publishedDate?: string | null;
-		}>;
-	};
 	return (payload.results ?? [])
 		.filter((r): r is { title?: string; url: string; content?: string; publishedDate?: string | null } => !!r?.url)
 		.map((r) => ({

@@ -10,25 +10,33 @@ interface HttpOptions {
 
 const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 
-/** fetch with a hard timeout that races the caller's AbortSignal. */
-export async function fetchWithTimeout(url: string, init: RequestInit, options: HttpOptions = {}): Promise<Response> {
+/** Keep cancellation and the deadline active until the response consumer settles. */
+export async function fetchWithTimeout<T>(
+	url: string,
+	init: RequestInit,
+	options: HttpOptions,
+	consume: (response: Response) => Promise<T>,
+): Promise<T> {
+	options.signal?.throwIfAborted();
 	const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS;
 	const controller = new AbortController();
 	let timedOut = false;
 
-	const onAbort = () => controller.abort();
+	const onAbort = () => controller.abort(options.signal?.reason);
 	options.signal?.addEventListener("abort", onAbort, { once: true });
 	const timeoutId = setTimeout(() => {
 		timedOut = true;
 		controller.abort();
 	}, timeoutMs);
 
+	let response: Response | undefined;
 	try {
-		return await fetch(url, {
+		response = await fetch(url, {
 			...init,
 			signal: controller.signal,
 			headers: { ...options.headers, ...init.headers },
 		});
+		return await consume(response);
 	} catch (err) {
 		// Distinguish our timeout abort from a caller/external cancel (which
 		// surfaces as the raw AbortError) so callers can report it honestly.
@@ -37,5 +45,7 @@ export async function fetchWithTimeout(url: string, init: RequestInit, options: 
 	} finally {
 		clearTimeout(timeoutId);
 		options.signal?.removeEventListener("abort", onAbort);
+		controller.abort();
+		await response?.body?.cancel().catch(() => {});
 	}
 }

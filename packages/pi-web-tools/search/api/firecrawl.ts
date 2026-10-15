@@ -83,7 +83,7 @@ async function searchOnce(
 	const { country } = parseLocale(params.locale);
 	if (country) body.country = country;
 
-	const response = await fetchWithTimeout(
+	const payload = await fetchWithTimeout(
 		ENDPOINT,
 		{
 			method: "POST",
@@ -94,31 +94,32 @@ async function searchOnce(
 			body: JSON.stringify(body),
 		},
 		{ signal: ctx.signal },
+		async (response) => {
+			if (response.status === 429) {
+				throw keyed
+					? new FirecrawlQuotaError(
+							"Firecrawl quota exhausted (keyed).",
+							"Firecrawl daily/credit limits reached — wait for reset or top up.",
+						)
+					: new FirecrawlQuotaError("Firecrawl keyless quota exhausted (429).");
+			}
+			if (!response.ok) {
+				const text = await response.text().catch(() => "");
+				throw new Error(`Firecrawl error ${response.status}: ${text.slice(0, 300)}`);
+			}
+
+			return (await response.json()) as {
+				data?: {
+					web?: Array<{
+						title?: string;
+						url?: string;
+						description?: string;
+						highlights?: string[];
+					}>;
+				};
+			};
+		},
 	);
-
-	if (response.status === 429) {
-		throw keyed
-			? new FirecrawlQuotaError(
-					"Firecrawl quota exhausted (keyed).",
-					"Firecrawl daily/credit limits reached — wait for reset or top up.",
-				)
-			: new FirecrawlQuotaError("Firecrawl keyless quota exhausted (429).");
-	}
-	if (!response.ok) {
-		const text = await response.text().catch(() => "");
-		throw new Error(`Firecrawl error ${response.status}: ${text.slice(0, 300)}`);
-	}
-
-	const payload = (await response.json()) as {
-		data?: {
-			web?: Array<{
-				title?: string;
-				url?: string;
-				description?: string;
-				highlights?: string[];
-			}>;
-		};
-	};
 	return (payload.data?.web ?? [])
 		.filter((r): r is { title?: string; url: string; description?: string; highlights?: string[] } => !!r?.url)
 		.map((r) => ({

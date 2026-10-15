@@ -41,17 +41,18 @@ export async function searchWithTinyfish(
 	if (params.allowed_domains?.length) url.searchParams.set("include_domains", params.allowed_domains.join(","));
 	if (params.blocked_domains?.length) url.searchParams.set("exclude_domains", params.blocked_domains.join(","));
 
-	const response = await limiter.run(() =>
-		fetchWithTimeout(url.href, { headers: { "X-API-Key": key } }, { signal: ctx.signal }),
-	);
-	if (!response.ok) {
-		const text = await response.text().catch(() => "");
-		throw new Error(`Tinyfish error ${response.status}: ${text.slice(0, 300)}`);
-	}
+	const body = await limiter.run(() =>
+		fetchWithTimeout(url.href, { headers: { "X-API-Key": key } }, { signal: ctx.signal }, async (response) => {
+			if (!response.ok) {
+				const text = await response.text().catch(() => "");
+				throw new Error(`Tinyfish error ${response.status}: ${text.slice(0, 300)}`);
+			}
 
-	const body = (await response.json()) as {
-		results?: Array<{ title?: string; url?: string; snippet?: string; date?: string }>;
-	};
+			return (await response.json()) as {
+				results?: Array<{ title?: string; url?: string; snippet?: string; date?: string }>;
+			};
+		}),
+	);
 	return (body.results ?? [])
 		.filter((r): r is { title?: string; url: string; snippet?: string; date?: string } => !!r?.url)
 		.map((r) => ({
