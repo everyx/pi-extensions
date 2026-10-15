@@ -33,7 +33,7 @@ export async function fetchWithTinyfish(url: string, signal?: AbortSignal): Prom
 	const key = process.env.TINYFISH_API_KEY?.trim();
 	try {
 		return await limiter.run(async () => {
-			const response = await fetchWithTimeout(
+			const body = await fetchWithTimeout(
 				ENDPOINT,
 				{
 					method: "POST",
@@ -44,9 +44,12 @@ export async function fetchWithTinyfish(url: string, signal?: AbortSignal): Prom
 					body: JSON.stringify({ urls: [url], format: "markdown" }),
 				},
 				{ signal, timeoutMs: 30_000 },
+				async (response) => {
+					if (!response.ok) return null;
+					return (await response.json()) as TinyfishFetchResponse;
+				},
 			);
-			if (!response.ok) return null;
-			const body = (await response.json()) as TinyfishFetchResponse;
+			if (!body) return null;
 			const result = body.results?.find((r) => r.url === url) ?? body.results?.[0];
 			const text = result?.text?.trim();
 			return text ? { text, contentType: "text/markdown" } : null;

@@ -91,7 +91,7 @@ async function searchExaMcp(params: WebSearchParams, ctx: ChannelSearchContext):
 }
 
 async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchContext): Promise<SearchResultItem[]> {
-	const response = await fetchWithTimeout(
+	const body = await fetchWithTimeout(
 		EXA_MCP_URL,
 		{
 			method: "POST",
@@ -114,15 +114,16 @@ async function searchExaMcpInner(params: WebSearchParams, ctx: ChannelSearchCont
 			}),
 		},
 		{ signal: ctx.signal },
+		async (response) => {
+			if (!response.ok) {
+				const text = await response.text().catch(() => "");
+				throw new Error(`Exa MCP error ${response.status}: ${text.slice(0, 300)}`);
+			}
+
+			// MCP streams the result as SSE (event: message / data: {jsonrpc…}).
+			return await response.text();
+		},
 	);
-
-	if (!response.ok) {
-		const text = await response.text().catch(() => "");
-		throw new Error(`Exa MCP error ${response.status}: ${text.slice(0, 300)}`);
-	}
-
-	// MCP streams the result as SSE (event: message / data: {jsonrpc…}).
-	const body = await response.text();
 	const parsed = parseMcpResponse(body);
 	if (parsed.error) {
 		const code = typeof parsed.error.code === "number" ? ` ${parsed.error.code}` : "";

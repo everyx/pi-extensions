@@ -119,6 +119,7 @@ async function curlSubprocess(url: string, options: CurlFetchOptions): Promise<C
 			child.kill();
 		};
 		options.signal?.addEventListener("abort", onAbort, { once: true });
+		if (options.signal?.aborted) onAbort();
 
 		child.stdout.on("data", (chunk: Buffer) => {
 			if (tooLarge) return;
@@ -195,15 +196,19 @@ async function readBodyCapped(response: Response, maxBytes: number): Promise<Uin
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
 	let total = 0;
-	for (;;) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		total += value.byteLength;
-		if (total > maxBytes) {
-			void reader.cancel().catch(() => {});
-			return null;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			total += value.byteLength;
+			if (total > maxBytes) {
+				await reader.cancel();
+				return null;
+			}
+			chunks.push(value);
 		}
-		chunks.push(value);
+	} finally {
+		reader.releaseLock();
 	}
 	const body = new Uint8Array(total);
 	let offset = 0;
@@ -220,24 +225,26 @@ async function fallbackFetch(url: string, options: CurlFetchOptions): Promise<Cu
 	const timeoutMs = options.timeoutMs ?? 15_000;
 	const maxBytes = options.maxBytes ?? 64 * 1024 * 1024;
 	try {
-		const response = await fetchWithTimeout(
+		return await fetchWithTimeout<CurlFetchResult>(
 			url,
 			{ headers: { "User-Agent": CURL_UA, Accept: "*/*" } },
 			{ signal: options.signal, timeoutMs },
+			async (response) => {
+				const contentType = response.headers.get("content-type") ?? "";
+				if (!response.ok) {
+					return {
+						ok: false,
+						status: response.status,
+						contentType,
+						bytes: null,
+						tooLarge: false,
+						error: `HTTP ${response.status}: ${response.statusText}`,
+					};
+				}
+				const bytes = await readBodyCapped(response, maxBytes);
+				return { ok: true, status: response.status, contentType, bytes, tooLarge: bytes === null };
+			},
 		);
-		const contentType = response.headers.get("content-type") ?? "";
-		if (!response.ok) {
-			return {
-				ok: false,
-				status: response.status,
-				contentType,
-				bytes: null,
-				tooLarge: false,
-				error: `HTTP ${response.status}: ${response.statusText}`,
-			};
-		}
-		const bytes = await readBodyCapped(response, maxBytes);
-		return { ok: true, status: response.status, contentType, bytes, tooLarge: bytes === null };
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		const code = (err as { cause?: { code?: string } }).cause?.code;
@@ -254,5 +261,16 @@ async function fallbackFetch(url: string, options: CurlFetchOptions): Promise<Cu
 
 /** Direct-fetch transport: real curl via subprocess, shallow fallback after. */
 export async function curlFetch(url: string, options: CurlFetchOptions = {}): Promise<CurlFetchResult> {
-	return (await curlAvailable()) ? curlSubprocess(url, options) : fallbackFetch(url, options);
+	const aborted = (): CurlFetchResult => ({
+		ok: false,
+		status: 0,
+		contentType: "",
+		bytes: null,
+		tooLarge: false,
+		error: "fetch aborted",
+	});
+	if (options.signal?.aborted) return aborted();
+	const available = await curlAvailable();
+	if (options.signal?.aborted) return aborted();
+	return available ? curlSubprocess(url, options) : fallbackFetch(url, options);
 }
