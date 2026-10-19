@@ -9,7 +9,6 @@
  */
 
 import type { AgentActivity } from "./event-interpret.js";
-import type { NestedCounters } from "./nested-fold.js";
 
 /**
  * One step of the sub-agent's session as shown in the card body: a thinking
@@ -30,13 +29,12 @@ export type RenderEvent =
 export type SubagentDetails = {
 	task?: string;
 	agentId?: string;
-	/** Agent label — used by the background-start status line (the tool header is empty for background). */
+	/** Agent label — the status line carries it while the spawn settles. */
 	label?: string;
 	/** Resolved "provider/id" model string, or default when omitted. */
 	model?: string;
 	/** Reasoning intensity ("off"…"max"), or inherited level when omitted. */
 	thinking?: string;
-	runInBackground?: boolean;
 	/** Spawn failure reason — rendered as `start failed: <reason>` on the status line. */
 	error?: string;
 	sessionPath?: string;
@@ -46,10 +44,8 @@ export type SubagentDetails = {
 	activity?: AgentActivity;
 	/** Ordered activity stream (thinking/tool events) for the card body. */
 	events?: RenderEvent[];
-	/** Child pi session id (foreground completion — the card footer carries the path). */
+	/** Child pi session id (the card footer carries the path). */
 	sessionId?: string;
-	/** Descendant-spawn counters folded from this child's tree telemetry. */
-	nested?: NestedCounters;
 };
 
 /**

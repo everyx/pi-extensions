@@ -18,7 +18,7 @@ Pi 没有内置 sub-agent。于是重活、并行的活、吃上下文的活，�
 ## 特性
 
 - **安静上下文** — 日志、搜索结果、测试输出留在子窗口里。你拿到最终结果，不是一片杂乱。
-- **真正并行** — 一次起多个后台 agent，各自完成时投递自己的通知。无队列、无取结果工具。需要等父进程下一步才送达的报告，先以一行 dim `Agent … (queued)` 挂在编辑器上方，直到卡片落地。
+- **真正并行** — 一次起多个 agent，各自完成时投递自己的通知。无队列、无取结果工具。需要等父进程下一步才送达的报告，先以一行 dim `Agent … (queued)` 挂在编辑器上方，直到卡片落地。
 - **全程可控** — `agent_send` 给运行中的 agent 发消息重定向（也能唤醒空闲的），`agent_stop` 终止。子 agent 发往父会话的消息是尽力投递（无确认）。
 - **按需常驻** — `agent_spawn(persistent: true)` 后，子 agent 完成后进程驻留 idle（零 token）；之后随时 `agent_send` 唤醒、在同一上下文继续追问，或 `agent_stop` 结束。
 - **Pi 原生** — 渲染、会话、attach 全复用 pi 自己的机制；卡片看起来像内置工具——因为它们就是。
@@ -69,15 +69,15 @@ ln -sf /path/to/pi-extensions/packages/pi-subagent ~/.pi/agent/extensions/subage
 让一个子 agent 分析 src/ 下的认证逻辑
 ```
 
-Pi 调用 `agent_spawn`（前台），子 agent 隔离运行，结果内联返回。
+Pi 调用 `agent_spawn` 立刻拿回 agent id，子 agent 隔离运行；结果完成时以通知送达。
 
-### 后台并行跑多个
+### 并行跑多个
 
 ```
 同时起三个子 agent 分别看 auth 模块、数据库层和 API 路由
 ```
 
-Pi 在同一块里发三次 `agent_spawn`——前台调用并行执行，每次调用的结果携带对应 agent 的最终输出（无需轮询、无需额外的取结果工具）。
+Pi 在同一块里发三次 `agent_spawn`——三次都立刻返回，每个 agent 的最终输出各自以通知送达（无需轮询、无需额外的取结果工具）。
 
 ### 发消息或停止
 
@@ -85,7 +85,7 @@ Pi 在同一块里发三次 `agent_spawn`——前台调用并行执行，每次
 那个数据层子 agent——方案行不通，改用组合式重写
 ```
 
-Pi 调用 `agent_send` 向运行中的 agent 注入重定向消息（当前 turn 结束后送达）。要停掉失控的 agent：“干掉那个后台子 agent” → `agent_stop`。两者对运行中的 agent 都适用；`persistent: true` 的话，完成后依然可寻址——`agent_send` 唤醒空闲的 agent 继续追问，`agent_stop` 结束。
+Pi 调用 `agent_send` 向运行中的 agent 注入重定向消息（当前 turn 结束后送达）。要停掉失控的 agent：“干掉那个子 agent” → `agent_stop`。两者对运行中的 agent 都适用；`persistent: true` 的话，完成后依然可寻址——`agent_send` 唤醒空闲的 agent 继续追问，`agent_stop` 结束。
 
 ## 配置
 
@@ -108,9 +108,8 @@ Pi 调用 `agent_send` 向运行中的 agent 注入重定向消息（当前 turn
 | `model` | string | 继承 | 覆盖子 agent 的模型。指定但注册表中找不到 → **报错，不静默降级**。 |
 | `thinking` | `"off"`…`"max"` | 继承 | 覆盖推理强度；省略则用当前会话的级别。 |
 | `tools` | string[] | 全部 | 子 agent 可见的工具白名单——白名单之外全部不可见。 |
-| `run_in_background` | boolean | `false` | 前台（默认）阻塞到结果就绪；`true` 立即返回 `agent_id`，完成时投递携带最终输出的通知。 |
 | `timeoutMs` | number | 无 | 可选截止时间（毫秒）。触发时扩展停止子进程、等其 settled 后优雅退出。 |
-| `persistent` | boolean | `false` | 完成后进程驻留 idle（零 token）而非退出；之后 `agent_send` 可唤醒继续同一上下文，`agent_stop` 结束。前台/后台都支持。 |
+| `persistent` | boolean | `false` | 完成后进程驻留 idle（零 token）而非退出；之后 `agent_send` 可唤醒继续同一上下文，`agent_stop` 结束。 |
 
 #### `agent_stop` — 终止一个 agent
 
@@ -153,8 +152,8 @@ LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使
 
 每个 sub-agent 都是带持久化 session 的常驻 `pi --mode rpc` 子进程：
 
-- **前台** — `agent_spawn` 等待子进程 settled，取最终输出，然后关闭 stdin（优雅退出）。
-- **后台** — `agent_spawn` 立即返回；`agent_settled` 时扩展投递 `subagent-notification`（JSON 内容给 LLM、渲染卡片给用户），子进程优雅退出。
+- **唯一路径** — `agent_spawn` 立即返回 agent id；子进程 settled 时扩展投递 `subagent-notification`（JSON 内容给 LLM、渲染卡片给用户），随后优雅退出。
+- **子树未清空则不退** — 子 agent 自己回合结束时若还有活着的子孙，它保持 idle 存活（零 token），等子孙结束；否则子孙会随它一起被管道 EOF 杀掉。
 - **发消息/停止** — `agent_send` 向子进程 stdin 投递消息（运行中入队，当前 turn settled 后送达）；`agent_stop` 关闭 stdin 优雅退出。两者对运行中的 agent 都适用。
 - **Persistent idle** — `persistent: true` 时子进程完成后驻留 idle（零 token）；之后 `agent_send` 可唤醒继续同一上下文，`agent_stop` 结束。完成通知与 widget 行带 `idle` 标记。
 - **Attach / 复盘** — sub-agent 会话存储在 `<agent 目录>/subagent-sessions/`（见[配置](#配置)）。在主会话里找到 session 路径（agent_spawn 调用结果或完成通知卡片），执行 `pi --session <path>`——通知里也带 path，直接问 LLM 也行。
@@ -168,9 +167,9 @@ LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使
 
 ## 成本与注意
 
-- **Headless 下子 agent 随宿主退出**（`pi -p`）。主进程在响应结束时退出，后台子 agent 经 stdin EOF 被清理——从不留孤儿。后台流程（等通知、发消息、stop）面向常驻的 TUI 会话。
-- **一子 agent 一进程。** 前台后台同是常驻 rpc 子进程。开多了 = 进程多了——请节制。
-- **结果一次性投递。** 后台结果只投一次；若主会话先崩，结果还在 session 文件里（`pi --session <path>`）。
+- **Headless 下子 agent 随宿主退出**（`pi -p`）。主进程在响应结束时退出，子 agent 经 stdin EOF 被清理——从不留孤儿。因为结果靠通知送达，`pi -p` 等不到它：结果能落到常驻的 TUI 会话里。
+- **一子 agent 一进程。** 每次 spawn 都是同一种常驻 rpc 子进程。开多了 = 进程多了——请节制。
+- **结果一次性投递。** 结果只投一次；若主会话先崩，结果还在 session 文件里（`pi --session <path>`）。会话结束时仍在运行的 agent 会被写进转录，恢复后会知道它们已经不在了。
 - **发消息/停止需要可寻址的子 agent。** `agent_send` 与 `agent_stop` 指向运行中的子 agent——`persistent` spawn 的话，完成后驻留的 idle 子 agent 同样可寻址。非 persistent 的子 agent 在完成通知投递后就没了，对它发消息/停止会报错。
 
 ## 清理

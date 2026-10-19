@@ -113,7 +113,11 @@ export function routeMessage(message: AgentMessage, childIds: readonly string[],
 	if (childIds.includes(target)) {
 		return { kind: "child", childId: target, message };
 	}
-	return { kind: "error", reason: `no such agent: ${message.to}` };
+	// An id we do not know is never a typo to retry: agents are addressed by
+	// ids we handed out, and an id that is gone is gone (finished, stopped, or
+	// from a previous session — a session-end note says which). Saying what to
+	// do next is what stops the retry loop.
+	return { kind: "error", reason: `${message.to} is not running any more — spawn a new agent instead.` };
 }
 
 /** LLM-visible sender prefix: "[from max] " (root session: ""). */

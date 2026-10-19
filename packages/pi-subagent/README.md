@@ -69,7 +69,7 @@ Restart pi, then tell it "ask a sub‑agent to…".
 Ask a sub‑agent to analyze the auth logic under src/
 ```
 
-Pi calls `agent_spawn` (foreground), the child runs in isolation, and the result comes back inline.
+Pi calls `agent_spawn`, gets an agent id back at once, and the child runs in isolation; the result arrives as a notification when it is done.
 
 ### Run several in parallel
 
@@ -77,7 +77,7 @@ Pi calls `agent_spawn` (foreground), the child runs in isolation, and the result
 Spawn three sub‑agents to look at the auth module, the database layer, and the API routes
 ```
 
-Pi issues three `agent_spawn` calls in one block — foreground calls run in parallel, and each call's result carries that agent's final output (no polling, no extra result tool).
+Pi issues three `agent_spawn` calls in one block — they all return immediately, and each agent's final output arrives in its own notification (no polling, no extra result tool).
 
 ### Message or stop
 
@@ -85,7 +85,7 @@ Pi issues three `agent_spawn` calls in one block — foreground calls run in par
 That data‑layer sub‑agent — the approach won't work, rewrite it with composition instead
 ```
 
-Pi calls `agent_send` to inject a redirecting message into the running agent (delivered after its current turn settles). To stop a runaway agent: "kill that background sub‑agent" → `agent_stop`. Both work on a running agent; with `persistent: true` they also work after completion — `agent_send` wakes the idle agent for follow‑ups, `agent_stop` kills it.
+Pi calls `agent_send` to inject a redirecting message into the running agent (delivered after its current turn settles). To stop a runaway agent: "kill that sub‑agent" → `agent_stop`. Both work on a running agent; with `persistent: true` they also work after completion — `agent_send` wakes the idle agent for follow‑ups, `agent_stop` kills it.
 
 ## Configuration
 
@@ -108,9 +108,8 @@ The directory lives **outside** pi's standard session tree so `pi -r` (resume) s
 | `model` | string | inherited | Override the sub‑agent's model. Specified but not registered → **error, no silent fallback**. |
 | `thinking` | `"off"`…`"max"` | inherited | Override thinking level; omit to run at your current session's level. |
 | `tools` | string[] | all | Whitelist of tool names visible to the sub‑agent — anything else is invisible. |
-| `run_in_background` | boolean | `false` | Foreground (default) blocks until the result is ready. `true` returns an `agent_id` immediately and delivers a completion notification carrying the final output. |
 | `timeoutMs` | number | none | Optional deadline (ms). On firing, the extension stops the child, waits for it to settle, and shuts down gracefully. |
-| `persistent` | boolean | `false` | Keep the child resident (idle, zero tokens) after completion instead of shutting down. A later `agent_send` wakes it to continue the same context; `agent_stop` tears it down. Works for foreground and background spawns. |
+| `persistent` | boolean | `false` | Keep the child resident (idle, zero tokens) after completion instead of shutting down. A later `agent_send` wakes it to continue the same context; `agent_stop` tears it down. |
 
 #### `agent_stop` — terminate an agent
 
@@ -168,9 +167,9 @@ The mechanism is a pure point-to-point deliverer: `agent_send` delivers to a dir
 
 ## Costs & caveats
 
-- **Headless children die with the host** (`pi -p`). The main process exits at the end of its reply; background children are then torn down via stdin EOF — never orphaned. Background flows (waiting for the notification, messaging, stopping) are for the always‑alive TUI session.
-- **One process per child.** Foreground and background are the same resident rpc child. Many children = many processes — spawn with care.
-- **One‑shot results.** A background result is delivered once; if the main session dies before delivery, the result survives in the session file (`pi --session <path>`).
+- **Headless children die with the host** (`pi -p`). The main process exits at the end of its reply; children are then torn down via stdin EOF — never orphaned. Since results arrive as notifications, `pi -p` cannot wait for them: the always‑alive TUI session is where a spawn's result can land.
+- **One process per child.** Every spawn is the same kind of resident rpc child. Many children = many processes — spawn with care.
+- **One‑shot results.** A result is delivered once; if the main session dies before delivery, the result survives in the session file (`pi --session <path>`). Agents still running when the session ends are recorded in the transcript, so a resumed session knows they are gone.
 - **Send/stop need an addressable child.** `agent_send` and `agent_stop` target a live child — or, for `persistent` spawns, the resident idle child after completion. A non‑persistent child is gone once its completion notification fires; messaging or stopping it errors.
 
 ## Cleanup
