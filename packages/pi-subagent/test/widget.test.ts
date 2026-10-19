@@ -75,6 +75,22 @@ describe("AgentWidget — a removed row takes its subtree with it", () => {
 		w.dispose();
 	});
 
+	it("a nested persistent descendant goes idle instead of spinning forever", () => {
+		const { ui, lines } = capture();
+		const w = new AgentWidget(ui);
+		w.add(agentRow("a", "Alpha"));
+		// The reporter announces the child twice: running when its spawn settles,
+		// idle when it goes resident. The second report IS the row's state.
+		w.addNested({ agentId: "b", label: "Bravo", startedAt: 0, indent: 1, status: "running", parentId: "a" });
+		w.addNested({ agentId: "b", label: "Bravo", startedAt: 0, indent: 1, status: "idle", parentId: "a" });
+
+		const out = lines();
+		assert.match(out, /\u2016 @b — Bravo/, `nested resident renders the idle marker:\n${out}`);
+		assert.match(out, /1 running · 1 idle/, "the counters must follow the transition");
+		assert.doesNotMatch(out, /\u280b @b/, "no spinner for a resident row");
+		w.dispose();
+	});
+
 	it("removing a nested row drops only its own subtree", () => {
 		const { ui, lines } = capture();
 		const w = new AgentWidget(ui);

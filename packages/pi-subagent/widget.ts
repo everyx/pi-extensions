@@ -49,7 +49,9 @@ export class AgentWidget {
 	}
 
 	/** Track a nested agent (tree telemetry from a descendant's own spawns):
-	 *  pure data — no local AgentProcess behind the row. */
+	 *  pure data — no local AgentProcess behind the row. Upsert, not add: a
+	 *  persistent descendant is reported twice (running when its spawn settles,
+	 *  idle when it goes resident), and the second report is the row's state. */
 	addNested(agent: {
 		agentId: string;
 		label: string;
@@ -59,7 +61,7 @@ export class AgentWidget {
 		/** Direct parent's agent id — absent when the reporter predates the field. */
 		parentId?: string;
 	}): void {
-		this.widget.add({
+		this.widget.upsert({
 			id: agent.agentId,
 			title: agentTitle(agent.agentId, agent.label),
 			startedAt: agent.startedAt,
