@@ -277,6 +277,14 @@ pi 退出会带走所有子 agent（stdin EOF 级联），但模型不知道：�
 
 **persistent** 语义不变：完成后不退场、可继续对话，活到宿主会话结束。
 
+### 本地 E2E：子进程也必须加载工作树（2026-10-19 踩过）
+
+`RpcClient` 起子进程时只传 `--mode rpc`（不加 `-e`），所以**子 agent 加载的是用户已安装的 npm 包，不是工作树代码**。只跑 `pi -ne -e <local index.ts>` 只能验证 root 这一层：嵌套路径（子代理自己 spawn）跑的仍是已发布的旧逻辑。
+
+后果很隐蔽——不是报错，是**测试通过但测的不是新代码**：本轮验证「非阻塞 spawn」时，外层 agent 的会话记录里 `agent_spawn` 的 tool result 直接就是子代理答案（旧版阻塞行为），而当时工作树早就不返回答案了。查了会话 JSONL 才发现。
+
+做法：E2E 期间临时给子进程 argv 加 `-ne -e <abs path to index.ts>`，跑完立刻还原（这是测试脚手架，不是产品行为）。判据：如果外层的 `agent_spawn` tool result 里出现子代理的最终答案，说明它跑的是旧包。
+
 ### 上游限制：isError 被丢弃（workaround）
 
 - **现象**：扩展工具 `execute()` 返回 `{ isError: true }` 时，TUI 卡片仍显示成功背景。
