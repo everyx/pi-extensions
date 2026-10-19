@@ -187,6 +187,28 @@ export class StatusWidget {
 	}
 
 	/**
+	 * Add a row, or update one that is already tracked.
+	 *
+	 * `add` deliberately ignores a known id (a duplicate report must not reset a
+	 * row), but a caller can legitimately report the SAME id twice with a
+	 * different status: a persistent agent is announced once when its spawn
+	 * settles and again when it goes resident (running → idle). That second
+	 * report is not a duplicate — dropping it leaves the row spinning forever.
+	 * Titles/start times are kept from the first report; the status is the
+	 * latest word.
+	 */
+	upsert(item: WidgetItem): void {
+		const row = this.rows.get(item.id);
+		if (!row) {
+			this.add(item);
+			return;
+		}
+		row.item = { ...row.item, status: item.status, rows: item.rows ?? row.item.rows };
+		this.reconcile();
+		this.tui?.requestRender();
+	}
+
+	/**
 	 * Update one row's status in place (e.g. idle ⇄ running for a persistent
 	 * agent woken by a message) without changing the lifetime counters.
 	 */
