@@ -238,6 +238,34 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		w.dispose();
 	});
 
+	it("upsert() updates a known row instead of dropping the report (#37)", () => {
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		const lines = capture(ui);
+		w.add(item("a"));
+		// add() ignores a known id by design; the second report of the same agent
+		// (running → idle) is a state change, not a duplicate.
+		w.upsert({ ...item("a"), status: "idle" });
+		const out = lines().join("\n");
+		assert.ok(out.includes("\u2016"), `resident row shows the pause marker:\n${out}`);
+		assert.ok(!out.includes("running"), `counters follow the transition:\n${out}`);
+		w.dispose();
+	});
+
+	it("upsert() keeps the first title and adds a row it has never seen", () => {
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		const lines = capture(ui);
+		w.upsert(item("a"));
+		w.upsert({ ...item("a"), title: "renamed", status: "idle" });
+		const out = lines().join("\n");
+		assert.ok(out.includes("ta"), "the first title stands");
+		assert.ok(!out.includes("renamed"));
+		w.upsert(item("b"));
+		assert.ok(lines().join("\n").includes("tb"), "an unseen id is added");
+		w.dispose();
+	});
+
 	it("updateRows refreshes the activity excerpt in place", () => {
 		const ui = { setWidget: () => {} } as never;
 		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
