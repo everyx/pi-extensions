@@ -17,7 +17,7 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 
 一个 pi 扩展，注册三个动词后缀原语工具（对齐 pi 生态动词风格：`read`/`write`/`edit`/`web_search`；无 action 枚举、家族扩展自然）：
 
-- **`agent_spawn`** — 创建隔离的子 agent（前台阻塞 / 后台异步；可选 `persistent` 常驻）。
+- **`agent_spawn`** — 创建隔离的子 agent（一律立即返回 agent id，结果以通知送达；可选 `persistent` 常驻）。
 - **`agent_stop`** — 销毁运行中的子 agent（常驻与否都适用）。
 - **`agent_send`** — 实体间点对点消息投递（直接子 / `@parent`；路由由 LLM 自行完成）。
 
@@ -26,8 +26,8 @@ Pi 不支持内置子 agent。当任务会产生大量中间输出（搜索结�
 ## 用户故事
 
 1. 委托子 agent 研究问题，不污染主会话上下文窗口，输出纯文本直接可用。
-2. 并行探索多个独立问题——多个后台子 agent 同时运行，widget 显示状态，完成通知逐个到达。
-3. 后台 agent 跑偏时发消息重定向，或直接 agent_stop 终止。
+2. 并行探索多个独立问题——多个子 agent 同时运行，widget 显示状态，完成通知逐个到达。
+3. agent 跑偏时发消息重定向，或直接 agent_stop 终止。
 4. 为每个子 agent 独立覆盖模型和工具白名单（如廉价模型做侦察，强模型做实现）。
 5. 子 agent 完成后从主会话（工具卡/通知卡）找到 session 路径，`pi --session <path>` 复盘完整过程。
 6. 嵌套：子 agent 是完整 pi 实例，天然可再 spawn 孙 agent，无深度控制。
@@ -51,12 +51,12 @@ bash: pnpm check
 session: /path/...jsonl
 ```
 
-- header：`⠋/✓/✗` + `agent_spawn` + `"label"` + muted meta——时间从 state 共享；`run_in_background` 时 renderCall 返回空（后台 spawn 用独立结果卡）；前台卡 meta 尾部追加**嵌套子树汇总段**（`done n/total · n running · …`，与 widget 标题行同词汇，见实现决策「显示面统一规则」）
+- header：`⠋/✓/✗` + `agent_spawn` + `"label"` + muted meta——时间从 state 共享；卡片只表达「spawn 是否建成」，agent 的运行状态由 widget 行承担
 - body：混合活动流——prompt 在流头，随后按事件顺序渲染子 agent 会话（Thinking... / 工具调用 / 流式文本）；随输出增长 prompt 与早期活动滚出折叠区
 - footer：仅 `session: <path>`
 - 推理强度：`thinking` 参数（"off"…"max"），省略时继承主会话当前值
 
-**后台 spawn 结果卡**（原地切换）：
+**spawn 结果卡**（原地切换）：
 
 ```
 ⠋ agent_spawn "检查 CI 配置" starting…
@@ -66,7 +66,7 @@ session: /path/...jsonl
 ```
 
 - 状态一眼可辨（icon 前置）；失败原因按统一折叠规则处理（默认尾部预览 + 展开全显，对齐 bash 工具卡）
-- 后台 agent id 只进 LLM 的 tool content，卡片上不出现
+- agent id 只进 LLM 的 tool content，卡片上不出现
 
 ### agent_stop / agent_send 结果卡
 
@@ -124,7 +124,7 @@ session: /path/...jsonl
   ‖ @zoe — 驻留探索代理
 ```
 
-- 仅跟踪后台 agent 与 persistent 前台 agent（前台非 persistent 已 inline 流式，不重复；persistent 前台完成后驻留 idle，进 widget 保持可寻址）
+- 跟踪所有 spawn 的 agent；完成后非 persistent 移除、persistent 转 idle 驻留保持可寻址
 - 非 persistent 完成/停止立即移除——完成结果由通知卡承担；**persistent 完成后保留 idle 行**（可寻址性可见，‖ 标记，不参与进度计数，可被 agent_stop 移除）
 - 嵌套行（tree telemetry）用 **upsert** 而非 add：同一个 persistent 后代会上报两次（spawn 落定 = running，驻留 = idle），第二次是状态变更不是重复——`add` 对已知 id 是 no-op，用它会让该行永远转圈
 - 标题行 meta（外层括号 + `·` 分隔，对齐 card header）：`done n/total` 进度 + 实时分段（`n running` / `n idle`）+ 异常计数（`n failed` error 色 / `n stopped`）——行空 widget 消失，计数随下次任务批重置
@@ -150,7 +150,7 @@ types.ts           — 共享协议类型（RenderEvent / SubagentDetails / Noti
 render.ts          — 通知卡渲染器（消息面）；格式化直接取自 pi-ui（spinner.js/width.js 正典出口）
 widget.ts          — Agents 状态 widget
 name-gen.ts        — 短人名代理 id（测试）
-spawn-session.ts   — spawn 生命周期（前/后台/persistent 三路）+ 结果分类（表测试）
+spawn-session.ts   — spawn 生命周期（单一非阻塞路径）+ 子树 drain 规则（表测试）
 nested-fold.ts     — 前景卡子树 telemetry 计数
 views.ts           — 三张工具卡 view（单一来源）
 card.ts            — 通知卡包装（通过 pi-ui）
@@ -178,7 +178,7 @@ queued → running ──→ completed（通知）
 ```
 
 - **就绪判定**：prompt 命令 preflight 回执
-- **persistent**：显式开启（`agent_spawn(persistent: true)`），默认不常驻（行为不变）——"不设隐藏限制，限制由调用者显式要求"；全场景可用（驻留范围 = 宿主会话生命周期）；`run_in_background` 仅 root 可用
+- **persistent**：显式开启（`agent_spawn(persistent: true)`），默认不常驻（行为不变）——"不设隐藏限制，限制由调用者显式要求"；全场景可用（驻留范围 = 宿主会话生命周期）
 - **idle 语义**：进程驻留、零 token（rpc 模式命令驱动，无 turn 不调模型）；完成通知带 `idle` 标记；widget 保留 idle 行（可寻址性可见）；可被 agent_stop 杀掉
 - **stop**：stdin EOF 优雅退出，`stoppedByControl` 抑制通知
 - **失败与超限都返回 isError 工具结果**，与 bash 的 `exit N` / `(cancelled)` 对齐
@@ -204,7 +204,7 @@ queued → running ──→ completed（通知）
 - **零 socket、零文件写入、零轮询**——纯内存事件流
 - 注入语义（已实证）：父 streaming（工具 execute 挂起/LLM 跑）→ 消息排队不抢占；父空闲 → 立即起新 turn 唤醒
 - 事件天然带身份：每个 AgentProcess 持有自己的 RpcClient 连自己的子进程——收到 extension_ui_request 的 client 即消息来源，无需 id 字段
-- 身份注入：spawn 时环境变量 `PI_SUBAGENT_AGENT_ID`（本 agent 人名 id，子进程据此自认是子）；agent_send 全实例注册（root 用它给后台子发消息），仅上行 UI 上报限子进程（hasParent）
+- 身份注入：spawn 时环境变量 `PI_SUBAGENT_AGENT_ID`（本 agent 人名 id，子进程据此自认是子）；agent_send 全实例注册，仅上行 UI 上报限子进程（hasParent）
 
 ### 基石验证（2026-08-10 实证）
 
@@ -242,28 +242,40 @@ queued → running ──→ completed（通知）
 
 子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。子进程扩展经 `PI_SUBAGENT_AGENT_ID` 获得自身身份——孙 agent 由子进程自身 registry 分配人名 id。
 
-### 显示面统一规则（2026-08-22）
+### 显示面统一规则（2026-10-19 重写：单一非阻塞 spawn）
 
-一个子树只在一个地方显示——由子树根被什么装载决定：
+**一条路径**：`agent_spawn` 永远立即返回 agent id，结果以 Completion 通知送达。没有前台/后台之分，所以也没有「卡片在开着时折叠子树」这回事——卡只表达「spawn 是否建成」，agent 的运行状态全部由 widget 行承担。
 
-- **前台 spawn 装得下**：子的整个生命周期包含在父的一次工具调用内 → 子树全部折进该卡的 meta 计数（`done n/total · n running · …`），不上 widget；嵌套卡片本身仍按会话流出现在卡 body 里。计数范围 = 该代理的**后代 spawn**（不含它自己——直接子由卡片 tail 表达）
-- **后台 spawn 溢出**：子的生命周期超出工具调用 → 子树挂 widget（自身一行，后代 indent 行）
+- **root**：把收到的树事件应用为 widget 行（自身一行，后代按 depth 缩进）
+- **非 root**：逐跳 verbatim 转发（depth + 1），最终由 root 落到 widget
 
-机制：所有节点对**所有** spawn（不分前后台）上报树事件，逐跳 verbatim 转发（depth + 1）；消费在锚点边界决定——root 对后台子的子树应用为 widget 行，对前台子的子树折叠进该卡 meta 计数。此前「前台 spawn 不上报」造成两个盲区：前台子的后台孙逃逸到 widget（indent 悬空、父退出后成陈旧行）、后台子的前台孙完全不可见。
+机制：所有节点对**所有** spawn 上报树事件，`parent`（直系父 id）逐跳原样保留、只有 depth 增长。`resolveTreeAnchor` 因此只剩两个分支（forward / widget）——fold 分支随前台 spawn 一起删除。
 
-配合「子代理只允许前台 spawn」：子代理子树内不再产生后台边，卡内子树天然纯前台；widget 上只有 root 直接后台链及其后代。
+**父行消失即子树消失**：节点被停/完成时，它自己就是「报告子孙行 remove」的那个进程——进程一死，遥测随之中断（stdin EOF 会级联杀死后代进程，但不产生任何事件）。所以 `AgentWidget.remove` 递归摘掉该行整棵子树，结果一律记 `stopped`——按构造，此时仍在世的后代都是被祖先的退出带走的。
 
-**persistent 前台子的关卡后归属**：persistent 子在卡完成后仍存活（驻留），其唤醒期间新 spawn 的后代不能再折进已冻结的卡——execute 结算即关闭折叠（`cardClosed`），此后该子树的事件转 widget 行（与后台链同路径）。
+**子树未清空则不 teardown（drain 规则）**：一个 agent 自己的回合结束，不代表它的活干完了——它 spawn 的后代还活着，而后代会随它一起死（stdin 管道关闭）。所以结算前要问 `hasLiveDescendants`：为空则正常上报 + 结束；不为空则把它标 idle（零 token，widget 显示 ‖）并等 `whenSubtreeDrained`，清空后才上报。规则本身在 `spawn-session.ts:holdUntilDrained`（有单测），widget 提供查询与等待。
 
-**父行消失即子树消失**：节点被停/完成时，它自己就是「报告子孙行 remove」的那个进程——进程一死，遥测随之中断（stdin EOF 会级联杀死后代进程，但不产生任何事件）。所以每个 add 事件携带**直系父 id**（`parent`，逐跳转发时原样保留、只有 depth 增长），持有行的显示面（`AgentWidget`）在 remove 时递归摘掉该行整棵子树，结果一律记 `stopped`——按构造，此时仍在世的后代都是被祖先的退出带走的，没有更精确的真相可取。此前缺口：停掉后台父代理后进程确实全死，但它上报的那些孙代 widget 行无人摘除，永久转 spinner。
+**词汇单源**：计数词汇 `done n/total · …` = pi-ui `counterParts`；`@id — label` 标题 = views.ts `agentTitle`（widget 行与通知卡共用）；状态图标 = pi-ui card.ts。
 
-**词汇单源**（不再靠注释同步）：计数词汇 `done n/total · …` = pi-ui `counterParts`（widget 标题与卡 meta 共用，failed 段的 error 色由消费面自定）；`@id — label` 标题 = views.ts `agentTitle`（widget 行与通知卡共用）；状态图标 = pi-ui card.ts `iconForStatus`（card 与 view 共用）。
+### 会话结束时的事实（2026-10-19）
 
-### 子代理禁止后台 spawn；persistent 全场景开放（2026-08-22）
+pi 退出会带走所有子 agent（stdin EOF 级联），但模型不知道：它的上下文还写着这些 agent 在跑。所以在 `session_shutdown` 里把「哪些 agent 随会话结束而终止」写成一条 `custom_message`（`customType: "subagent-session-end"`、`display: false`）：
 
-**后台**：子代理的生命周期被父的同步等待封顶——它的后台子要么活不过父的返回（管道 EOF 静默杀死），要么逼出收条 turn 覆盖真正的答卷、卡片计数悬空。这些是后台边与前台等待的时序纠缠，树清理解决不了，所以子代理进程（`PI_SUBAGENT_AGENT_ID` 存在）注册的 agent_spawn schema **直接不含** `run_in_background` 字段（`buildSpawnParamsSchema(HAS_PARENT)`），description/promptGuidelines 同步换为前台版文案（并行→同块多个前台调用，天然并发；长期任务→在答复中上报由调用者决定）。execute 保留一行守卫防幻觉传参。曾实现过「收割」（前台返回前 allSettled 等齐后台子），随本规则作废删除——卡内不可能再有后台边，整类问题（孤子孙、收条覆盖答卷、meta 计数不归位、强制多等一轮）灭绝于源头。
+- 机制与 pi 自己的 compaction 摘要完全一致：**写一次会话条目，恢复时由 `sessionEntryToContextMessages` 自然投影进上下文**，不做「恢复时主动注入」，也就不需要判断是不是恢复、不会重复注入
+- `display: false` 让用户看不到它，但它仍然进模型上下文（`convertToLlm` 把 custom 消息转成 user 消息，不看 display）
+- 成本：一条约 20 token，且只在真有存活 agent 时才写
+- 配套的错误文案（`routeMessage` / `agent_stop`）改成 `X is not running any more — spawn a new agent instead.`——只给出下一步动作，不重复会话事实（单源）
 
-**persistent 全场景开放**：其真实语义是「完成后不退场、可继续对话，活到宿主会话结束」——root 的 persistent 在会话退出时同样被 shutdown 清理，子代理的 persistent 在父返回时被树清理收走，二者是同一条规则的不同实例，无承诺破产。典型用例：任务期内开局一个 persistent 助手多轮 agent_send 迭代使用。
+### spawn 不再阻塞（2026-10-19 取代「子代理禁止后台 spawn」）
+
+原规则的理由是：子代理的生命周期被父的同步等待封顶，它起的后台子要么活不过父的返回，要么逼出收条 turn。**根因是「阻塞」本身**，不是子代理 —— 所以直接删掉阻塞：`run_in_background` 参数消失，所有 spawn 立即返回 agent id，结果以通知送达，任何层级都一样。
+
+由此产生的两个必须配套的规则：
+
+- **drain 规则**（见「显示面统一规则」）：子 agent 回合结束但子孙未清空时保持 idle 存活，等子树清空才上报 + 结束。这一条取代了原先「子代理不能起后台子」的禁令。
+- **答案完整性**：非阻塞意味着子 agent 可能在子孙结果回来前就产出答案。机制保证「结果一定能回来（会唤醒它）」，但「要不要等」是 LLM 的判断，由 promptGuidelines 明说：「如果你的回答依赖它的结果，等完成通知再作答」。
+
+**persistent** 语义不变：完成后不退场、可继续对话，活到宿主会话结束。
 
 ### 上游限制：isError 被丢弃（workaround）
 

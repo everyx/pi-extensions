@@ -9,36 +9,28 @@ function keys(schema: TSchema): string[] {
 }
 
 describe("buildSpawnParamsSchema", () => {
-	it("root session: full parameter set", () => {
-		const k = keys(buildSpawnParamsSchema(false));
-		for (const name of [
+	it("exposes exactly the agreed parameters, in order", () => {
+		assert.deepEqual(keys(buildSpawnParamsSchema()), [
 			"prompt",
 			"label",
 			"model",
 			"thinking",
 			"tools",
 			"timeoutMs",
-			"run_in_background",
 			"persistent",
-		]) {
-			assert.ok(k.includes(name), `missing ${name}`);
-		}
+		]);
+	});
+
+	it("no spawn waits: there is no blocking switch to set", () => {
+		assert.ok(!keys(buildSpawnParamsSchema()).includes("run_in_background"));
 	});
 
 	it("label is required — every spawn carries a short label", () => {
-		const schema = buildSpawnParamsSchema(false) as unknown as {
+		const schema = buildSpawnParamsSchema() as unknown as {
 			properties: Record<string, unknown>;
 			required?: string[];
 		};
 		assert.ok(schema.properties.label, "label present");
 		assert.ok(schema.required?.includes("label"), "label required");
-	});
-
-	it("sub-agent: only run_in_background hidden, persistent stays available", () => {
-		const k = keys(buildSpawnParamsSchema(true));
-		assert.ok(!k.includes("run_in_background"));
-		for (const name of ["prompt", "label", "model", "thinking", "tools", "timeoutMs", "persistent"]) {
-			assert.ok(k.includes(name), `missing ${name}`);
-		}
 	});
 });

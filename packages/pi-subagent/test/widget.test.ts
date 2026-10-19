@@ -106,3 +106,65 @@ describe("AgentWidget — a removed row takes its subtree with it", () => {
 		w.dispose();
 	});
 });
+
+describe("AgentWidget — the drain rule's question", () => {
+	it("reports live descendants, and keeps reporting them while one lives", () => {
+		const { ui } = capture();
+		const w = new AgentWidget(ui);
+		w.add(agentRow("a", "Alpha"));
+		assert.equal(w.hasLiveDescendants("a"), false, "a childless agent is drained already");
+
+		w.addNested({ agentId: "b", label: "Bravo", startedAt: 0, indent: 1, status: "running", parentId: "a" });
+		w.addNested({ agentId: "c", label: "Charlie", startedAt: 0, indent: 2, status: "running", parentId: "b" });
+		assert.equal(w.hasLiveDescendants("a"), true, "a grandchild counts as work still running");
+		assert.equal(w.hasLiveDescendants("b"), true);
+
+		w.remove("c", "done");
+		assert.equal(w.hasLiveDescendants("b"), false);
+		assert.equal(w.hasLiveDescendants("a"), true, "the child b is still live");
+
+		w.remove("b", "done");
+		assert.equal(w.hasLiveDescendants("a"), false);
+		w.dispose();
+	});
+
+	it("resolves the wait when the last descendant goes away", async () => {
+		const { ui } = capture();
+		const w = new AgentWidget(ui);
+		w.add(agentRow("a", "Alpha"));
+		w.addNested({ agentId: "b", label: "Bravo", startedAt: 0, indent: 1, status: "running", parentId: "a" });
+
+		let drained = false;
+		const waiting = w.whenSubtreeDrained("a").then(() => {
+			drained = true;
+		});
+		await Promise.resolve();
+		assert.equal(drained, false, "still drained: b is running");
+
+		w.remove("b", "done");
+		await waiting;
+		assert.equal(drained, true);
+		w.dispose();
+	});
+
+	it("a drained subtree resolves immediately", async () => {
+		const { ui } = capture();
+		const w = new AgentWidget(ui);
+		w.add(agentRow("a", "Alpha"));
+		await w.whenSubtreeDrained("a");
+		w.dispose();
+	});
+
+	it("removing the waiting agent itself releases the wait", async () => {
+		const { ui } = capture();
+		const w = new AgentWidget(ui);
+		w.add(agentRow("a", "Alpha"));
+		w.addNested({ agentId: "b", label: "Bravo", startedAt: 0, indent: 1, status: "running", parentId: "a" });
+
+		const waiting = w.whenSubtreeDrained("a");
+		w.remove("a", "stopped"); // stop cascades to b
+		await waiting;
+		assert.equal(w.hasLiveDescendants("a"), false);
+		w.dispose();
+	});
+});

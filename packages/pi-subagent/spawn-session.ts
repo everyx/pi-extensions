@@ -1,20 +1,24 @@
 /**
  * Spawn session lifecycle — the deep module behind the agent_spawn tool.
  *
- * One interface, three physical paths (foreground / background / persistent)
- * that never leak out: callers hand in an already-constructed agent plus
- * intent-level hooks, and get back one discriminated outcome that says how
- * the session ended. Abort wiring, late-abort guarding, teardown and outcome
- * classification all live here — the matrix that used to hide inside execute
- * is now directly table-testable.
+ * One interface, one physical path: every spawn returns as soon as the child
+ * has accepted the task. The result arrives later as a completion
+ * notification; the caller keeps an id and can intervene meanwhile.
  *
- * Streamed-text accumulation is NOT here: delta/activity callbacks are
- * AgentProcess constructor parameters, so they belong to the constructing
- * side (execute) — the module starts where the agent already exists.
+ * Why there is no blocking variant: a blocking spawn holds the caller's whole
+ * turn hostage — nothing else runs, and the caller cannot even decide to give
+ * up. Every problem a blocking spawn "solved" (having the answer inline) is
+ * solved better by the notification, which costs the same number of model
+ * requests but leaves the caller free in between.
  *
- * Hooks carry intent ("refresh the working card", "a background spawn
- * settled"), never mechanism: pi/registry/widget stay on the caller's side
- * of the seam.
+ * Nested agents are where this matters most. A sub-agent that spawns a child
+ * keeps running (it is a live pi process), and its child's result comes back
+ * as a notification like any other. The child must therefore outlive the
+ * sub-agent's turn — see the drain rule below.
+ *
+ * Abort wiring, teardown, and outcome classification live here; the caller
+ * owns the completion chain (it is the only side that knows the display
+ * surfaces).
  */
 
 import type { AgentCompletion } from "./agent-process.js";
@@ -37,49 +41,28 @@ export interface SpawnSessionAgent {
 	getEvents(): RenderEvent[];
 }
 
-/** How a spawned session ended. `background-started` means the tool result
- *  returns immediately; the completion chain is the caller's via the
- *  onBackgroundSettled hook. A user abort surfaces as finished/stopped with
- *  stoppedByControl — it is an outcome, not a separate kind. */
+/** How a spawned session ended. `started` means the tool call returns now and
+ *  the completion chain is the caller's via the onStarted hook. A spawn
+ *  failure is the only other shape: the child never accepted the task, so
+ *  there is nothing to wait for and nothing to notify. */
 export type SpawnOutcome =
 	| { kind: "spawn-failed"; error: string }
-	| { kind: "background-started"; agent: SpawnSessionAgent; startedAt: number }
-	| {
-			kind: "finished";
-			status: AgentCompletion["status"];
-			output: string;
-			stoppedByControl: boolean;
-			/** completed + persistent: the process stays resident (the caller
-			 *  was told via onResident); every other ending was torn down. */
-			resident: boolean;
-			events: RenderEvent[];
-			sessionPath?: string;
-			sessionId?: string;
-			startedAt: number;
-			endedAt: number;
-	  };
+	| { kind: "started"; agent: SpawnSessionAgent; startedAt: number };
 
 /** Intent-level callbacks. All optional; mechanisms live in the caller. */
 interface SpawnSessionHooks {
-	/** Foreground, before the spawn settles — the initial "Working…" card. */
-	onWorking?(): void;
-	/** Background, before the spawn settles — the starting spinner line. */
-	onBackgroundStarting?(): void;
-	/** Background spawn settled OK: caller wires widget/registry/completion. */
-	onBackgroundSettled?(agent: SpawnSessionAgent): void;
-	/** Foreground spawn settled OK (process up, task sent): symmetric with
-	 *  onBackgroundSettled — the caller reports the child upward (tree
-	 *  telemetry) here. */
-	onForegroundSettled?(agent: SpawnSessionAgent): void;
-	/** Foreground persistent completed: caller registers + marks idle. */
-	onResident?(agent: SpawnSessionAgent): void;
+	/** Before the spawn settles — the starting spinner line. */
+	onStarting?(): void;
+	/** The child accepted the task and runs on its own: caller wires the
+	 *  widget row, the registry entry, and the completion chain. */
+	onStarted?(agent: SpawnSessionAgent): void;
 }
 
 export async function runSpawnSession(
 	agent: SpawnSessionAgent,
-	opts: { task: string; runInBackground: boolean; signal?: AbortSignal; hooks?: SpawnSessionHooks },
+	opts: { task: string; signal?: AbortSignal; hooks?: SpawnSessionHooks },
 ): Promise<SpawnOutcome> {
-	const { task, runInBackground, signal, hooks = {} } = opts;
+	const { task, signal, hooks = {} } = opts;
 
 	// Wire the abort signal to a graceful stop. Guarded: only stop while the
 	// agent is still live — a late abort (signal outliving this call) must
@@ -90,56 +73,48 @@ export async function runSpawnSession(
 	if (signal?.aborted) onAbort();
 	else signal?.addEventListener("abort", onAbort, { once: true });
 	const detach = () => signal?.removeEventListener("abort", onAbort);
-	const teardown = async () => {
-		detach();
-		await agent.stop().catch(() => {});
-	};
 
 	try {
-		if (runInBackground) hooks.onBackgroundStarting?.();
-		else hooks.onWorking?.();
+		hooks.onStarting?.();
 
 		const started = await agent.spawnAndSend(task);
 		if (!started.ok) {
-			await teardown();
+			detach();
+			await agent.stop().catch(() => {});
 			return { kind: "spawn-failed", error: started.error };
 		}
 
-		// Background: return now. The abort listener detaches here — once the
-		// spawn settled, the agent runs on its own and a late abort must not
-		// kill it; the user controls it via agent_stop.
-		if (runInBackground) {
-			detach();
-			hooks.onBackgroundSettled?.(agent);
-			return { kind: "background-started", agent, startedAt: agent.startedAt };
-		}
-
-		hooks.onForegroundSettled?.(agent);
-
-		const completion = await agent.waitForCompletion();
+		// The spawn settled: the child owns its task now. The abort listener
+		// detaches here — once the spawn settled, the agent runs on its own and
+		// a late abort must not kill it; the caller controls it via agent_stop.
 		detach();
-
-		// Persistent: resident after completion — nothing to tear down; the
-		// caller registers it so agent_send can wake it later. Every other
-		// ending stops the child (idempotent at terminal states).
-		const resident = agent.persistent === true && completion.status === "completed";
-		if (resident) hooks.onResident?.(agent);
-		else await teardown();
-
-		return {
-			kind: "finished",
-			status: completion.status,
-			output: completion.output,
-			stoppedByControl: agent.stoppedByControl,
-			resident,
-			events: agent.getEvents(),
-			sessionPath: completion.sessionPath,
-			sessionId: completion.sessionId,
-			startedAt: agent.startedAt,
-			endedAt: Date.now(),
-		};
+		hooks.onStarted?.(agent);
+		return { kind: "started", agent, startedAt: agent.startedAt };
 	} catch (err) {
-		await teardown();
+		detach();
+		await agent.stop().catch(() => {});
 		throw err;
 	}
+}
+
+/**
+ * The drain rule: an agent's own turn ending does not mean its work is over —
+ * agents it spawned may still be running, and they die with it (their stdin
+ * pipe closes with the process). So before an agent is torn down or reported,
+ * ask whether its subtree is empty; if not, hold it (idle, zero token) until
+ * it is.
+ *
+ * Returns whether it had to wait, so the caller can mark the agent idle for
+ * exactly as long as it is held — no longer.
+ */
+export async function holdUntilDrained(opts: {
+	hasLiveDescendants(): boolean;
+	waitForDrain(): Promise<void>;
+	/** The agent is now held: show it as alive-but-not-working. */
+	onHeld(): void;
+}): Promise<boolean> {
+	if (!opts.hasLiveDescendants()) return false;
+	opts.onHeld();
+	await opts.waitForDrain();
+	return true;
 }

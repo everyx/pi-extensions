@@ -365,8 +365,7 @@ function syncWidget(agents: WidgetAgent[] | undefined): void {
 
 // ── Path definitions ─────────────────────────────────────────
 
-const p = params;
-const bgArgs: AgentParams = { ...p, run_in_background: true };
+const args: AgentParams = params;
 
 // Path A — background: three concurrent agents spawn, work, get messaged,
 // stopped, and complete; the widget tracks them at the bottom.
@@ -376,14 +375,14 @@ const pathA: LifecyclePath = {
 		{
 			name: "spawn a1",
 			ticks: 20,
-			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: true }],
+			stream: [{ kind: "agent", args: args, details: details({}), isPartial: true }],
 			widget: [],
 			status: "spawn",
 		},
 		{
 			name: "a1 started",
 			ticks: 19,
-			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false }],
+			stream: [{ kind: "agent", args: args, details: details({}), isPartial: false }],
 			widget: [{ id: "max", label: "检查 CI 配置", startedOffset: 27_500, activity: activityTool }],
 			status: "working",
 		},
@@ -391,11 +390,11 @@ const pathA: LifecyclePath = {
 			name: "spawn a2",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: true,
 				},
 			],
@@ -406,11 +405,11 @@ const pathA: LifecyclePath = {
 			name: "a2 started",
 			ticks: 19,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 			],
@@ -424,17 +423,17 @@ const pathA: LifecyclePath = {
 			name: "spawn a3",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: true,
 				},
 			],
@@ -448,17 +447,17 @@ const pathA: LifecyclePath = {
 			name: "a3 started",
 			ticks: 19,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 			],
@@ -473,17 +472,17 @@ const pathA: LifecyclePath = {
 			name: "working",
 			ticks: 40,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 			],
@@ -498,17 +497,17 @@ const pathA: LifecyclePath = {
 			name: "send a2",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
@@ -529,17 +528,17 @@ const pathA: LifecyclePath = {
 			name: "sent",
 			ticks: 19,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
@@ -563,17 +562,17 @@ const pathA: LifecyclePath = {
 			name: "stop a3",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
@@ -603,17 +602,17 @@ const pathA: LifecyclePath = {
 			name: "stopped a3",
 			ticks: 19,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
@@ -643,17 +642,17 @@ const pathA: LifecyclePath = {
 			name: "a1 completes",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
@@ -677,8 +676,8 @@ const pathA: LifecyclePath = {
 						status: "completed",
 						agent_id: "max",
 						label: "检查 CI 配置",
-						model: p.model,
-						thinking: p.thinking,
+						model: params.model,
+						thinking: params.thinking,
 						result: "Found 5 flaky tests. All share the `retries: 0` flag.",
 						usage: { durationMs: 27_500, tokens: 12_500, toolUses: 3 },
 						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
@@ -696,17 +695,17 @@ const pathA: LifecyclePath = {
 			name: "a2 completes",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args: args, details: details({}), isPartial: false },
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
-					details: details({ runInBackground: true, label: "慢查询排查" }),
+					args: { ...args, label: "慢查询排查", prompt: "Find slow queries on the orders table." },
+					details: details({ label: "慢查询排查" }),
 					isPartial: false,
 				},
 				{
 					kind: "agent",
-					args: { ...bgArgs, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
-					details: details({ runInBackground: true, label: "审计 reports 表" }),
+					args: { ...args, label: "审计 reports 表", prompt: "Audit the reports table for stale aggregates." },
+					details: details({ label: "审计 reports 表" }),
 					isPartial: false,
 				},
 				{
@@ -730,8 +729,8 @@ const pathA: LifecyclePath = {
 						status: "completed",
 						agent_id: "max",
 						label: "检查 CI 配置",
-						model: p.model,
-						thinking: p.thinking,
+						model: params.model,
+						thinking: params.thinking,
 						result: "Found 5 flaky tests. All share the `retries: 0` flag.",
 						usage: { durationMs: 27_500, tokens: 12_500, toolUses: 3 },
 						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
@@ -744,8 +743,8 @@ const pathA: LifecyclePath = {
 						status: "completed",
 						agent_id: "zoe",
 						label: "慢查询排查",
-						model: p.model,
-						thinking: p.thinking,
+						model: params.model,
+						thinking: params.thinking,
 						result: "Slow query found: orders.idx_created_at missing; added.",
 						usage: { durationMs: 42_100, tokens: 18_300, toolUses: 5 },
 						sessionPath: "/home/everyx/.pi/agent/subagent-sessions/019f…f.jsonl",
@@ -773,7 +772,7 @@ const pathB: LifecyclePath = {
 			name: "starting",
 			status: "starting",
 			ticks: 20,
-			stream: [{ kind: "agent", args: p, details: details(), isPartial: true }],
+			stream: [{ kind: "agent", args, details: details(), isPartial: true }],
 		},
 		{
 			name: "working",
@@ -792,7 +791,7 @@ const pathB: LifecyclePath = {
 				return [
 					{
 						kind: "agent",
-						args: p,
+						args,
 						details: details({ events }),
 						isPartial: true,
 					},
@@ -803,13 +802,13 @@ const pathB: LifecyclePath = {
 			name: "done",
 			status: "done",
 			ticks: 19,
-			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false }],
+			stream: [{ kind: "agent", args, details: details({ events: fgEvents }), isPartial: false }],
 		},
 		{
 			name: "expanded",
 			status: "done",
 			ticks: 19,
-			stream: [{ kind: "agent", args: p, details: details({ events: fgEvents }), isPartial: false, expanded: true }],
+			stream: [{ kind: "agent", args, details: details({ events: fgEvents }), isPartial: false, expanded: true }],
 		},
 	],
 	pauseTicks: 30,
@@ -823,7 +822,7 @@ const pathC: LifecyclePath = {
 		{
 			name: "starting",
 			ticks: 20,
-			stream: [{ kind: "agent", args: bgArgs, details: details({ runInBackground: true }), isPartial: true }],
+			stream: [{ kind: "agent", args: args, details: details({}), isPartial: true }],
 		},
 		{
 			name: "start failed",
@@ -831,9 +830,8 @@ const pathC: LifecyclePath = {
 			stream: [
 				{
 					kind: "agent",
-					args: bgArgs,
+					args: args,
 					details: details({
-						runInBackground: true,
 						label: "bad model",
 						error: 'Model "no-such-model-xyz" not available.',
 					}),
@@ -856,13 +854,13 @@ const pathD: LifecyclePath = {
 		{
 			name: "starting",
 			ticks: 20,
-			stream: [{ kind: "agent", args: p, details: details(), isPartial: true }],
+			stream: [{ kind: "agent", args, details: details(), isPartial: true }],
 		},
 		{
 			name: "working",
 			status: "working",
 			ticks: 20,
-			stream: [{ kind: "agent", args: p, details: details({ events: partialEvents }), isPartial: true }],
+			stream: [{ kind: "agent", args, details: details({ events: partialEvents }), isPartial: true }],
 		},
 		{
 			name: "failed",
@@ -870,7 +868,7 @@ const pathD: LifecyclePath = {
 			stream: [
 				{
 					kind: "agent",
-					args: p,
+					args,
 					details: details({
 						events: partialEvents,
 						error: "Agent exited with status 1: bash failed after 3 attempts.",
@@ -894,14 +892,14 @@ const pathE: LifecyclePath = {
 		{
 			name: "starting",
 			ticks: 20,
-			stream: [{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: true }],
+			stream: [{ kind: "agent", args, details: details({}), isPartial: true }],
 		},
 		{
 			name: "started",
 			status: "working",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args, details: details({}), isPartial: false },
 				{
 					kind: "notification",
 					details: {
@@ -920,7 +918,7 @@ const pathE: LifecyclePath = {
 			name: "message wakes",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args, details: details({}), isPartial: false },
 				{
 					kind: "notification",
 					details: {
@@ -946,7 +944,7 @@ const pathE: LifecyclePath = {
 			status: "send",
 			ticks: 19,
 			stream: [
-				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args, details: details({}), isPartial: false },
 				{
 					kind: "notification",
 					details: {
@@ -971,7 +969,7 @@ const pathE: LifecyclePath = {
 			name: "stop",
 			ticks: 20,
 			stream: [
-				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args, details: details({}), isPartial: false },
 				{
 					kind: "control",
 					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },
@@ -987,7 +985,7 @@ const pathE: LifecyclePath = {
 			status: "stop",
 			ticks: 19,
 			stream: [
-				{ kind: "agent", args: p, details: details({ runInBackground: true }), isPartial: false },
+				{ kind: "agent", args, details: details({}), isPartial: false },
 				{
 					kind: "control",
 					args: { to: "max", message: "继续：给 5 个问题各写一个修复 PR 描述" },

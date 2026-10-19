@@ -1,19 +1,11 @@
 /**
  * pi-subagent — live output routing: where a running agent's output goes.
  *
- * One rule, and it does not depend on how the agent was spawned:
- *   - the root widget hears about every update. It tracks background rows AND
- *     resident persistent rows, and a woken resident agent has a row and no
- *     card (its card closed when its spawn returned) — so the widget is the
- *     only surface its follow-up output can reach;
- *   - the tree telemetry hears about every update too: it folds into an open
- *     card, forwards up, or lands on the widget, per the 显示面统一规则;
- *   - the spawn card hears about it only when a foreground spawn has one, and
- *     only while its tool call runs.
- *
- * The widget and the tree ignore agents outside their surface, so telling them
- * costs nothing — and gating them on how the agent was spawned is the bug this
- * module exists to prevent.
+ * Every update goes to the root widget (which owns the row) and to the tree
+ * telemetry (which forwards it up or applies it, per the 显示面统一规则).
+ * Both ignore agents outside their surface, so telling them unconditionally
+ * costs nothing — and gating them on how the agent was spawned is the bug
+ * this module exists to prevent.
  */
 
 import type { AgentActivity } from "./event-interpret.js";

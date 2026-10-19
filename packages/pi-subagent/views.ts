@@ -10,7 +10,6 @@
 
 import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView } from "@everyx/pi-ui/view.js";
-import { counterParts } from "@everyx/pi-ui/widget.js";
 import type { SubagentDetails } from "./types.js";
 
 /** Add "@" exactly once — ids may already carry it ("@parent", "@max").
@@ -56,10 +55,9 @@ export const spawnView = createToolView<Record<string, unknown>, SubagentDetails
 			const d = ctx.result?.data;
 			return d?.events?.length ? "working\u2026" : "starting\u2026";
 		}
-		// Completed: "started" is a background spawn (task keeps running,
-		// tracked by the widget); a foreground agent is simply done.
-		const d = ctx.result?.data;
-		return d?.runInBackground ? "started" : "done";
+		// Completed: the spawn only ever hands back an id — the work itself
+		// continues and the widget tracks it until the notification lands.
+		return "started";
 	},
 	meta: (ctx) => {
 		const d = ctx.result?.data;
@@ -69,20 +67,11 @@ export const spawnView = createToolView<Record<string, unknown>, SubagentDetails
 		if (model) parts.push(String(model));
 		const thinking = d?.thinking ?? args?.thinking;
 		if (thinking) parts.push(String(thinking));
-		// Duration meta: live Elapsed while running, fixed Took on completion;
-		// a background spawn has no duration (the widget tracks it live).
+		// Duration meta: live Elapsed while the spawn settles, fixed Took once
+		// it hands back. The agent's own runtime is the widget's job.
 		if (d?.startedAt != null) {
-			if (!d.runInBackground) {
-				const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
-				if (dur) parts.push(dur);
-			}
-		}
-		// Nested-subtree summary (foreground cards): the whole descendant
-		// tree of this agent folded into one count set — the shared counter
-		// vocabulary (pi-ui counterParts; SPEC: 显示面统一规则).
-		const n = d?.nested;
-		if (n && n.total > 0) {
-			parts.push(...counterParts(n).map((p) => p.text));
+			const dur = durationMeta(ctx.status, d.startedAt, d.endedAt);
+			if (dur) parts.push(dur);
 		}
 		return parts;
 	},

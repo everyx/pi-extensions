@@ -11,7 +11,7 @@
  *   model.ts          — model-spec → ResolvedModel (testable)
  *   name-gen.ts       — short human-readable agent ids (tested)
  *   spawn-session.ts  — spawn lifecycle (fg/bg/persistent) + outcome classification (tested)
- *   nested-fold.ts    — foreground-card nested-subtree meta counters (tested)
+ *   tree-anchor.ts    — where a tree event lands: forward or widget (tested)
  *   tree-display.ts   — subtree display anchor: fold / forward / widget (显示面统一规则)
  *   notification.ts   — completion-notification payloads (notifyCompletion)
  *   pending.ts        — queued-report lines: a notification that pi has not
@@ -23,12 +23,11 @@
  *   widget.ts         — Agents status widget
  *
  * Every sub‑agent is a resident `pi --mode rpc` child with a persisted
- * session. Foreground agent_spawn calls block until completion; background
- * calls return an agent_id immediately and deliver a completion notification
- * (`customType: "subagent-notification"`, deliverAs "followUp") carrying the
- * final output. agent_send messages flow along tree edges (parent↔child);
- * persistent agents stay resident (idle, zero token) and can be woken by a
- * message.
+ * session. agent_spawn returns an agent_id immediately and the result arrives
+ * as a completion notification (`customType: "subagent-notification"`,
+ * deliverAs "followUp"). agent_send messages flow along tree edges
+ * (parent↔child); persistent agents stay resident (idle, zero token) and can
+ * be woken by a message.
  */
 
 import * as os from "node:os";
@@ -40,17 +39,12 @@ import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { createLiveChannels } from "./live-output.js";
 import { resolveModel } from "./model.js";
-import {
-	maybeWriteFullOutput,
-	NOTIFICATION_CUSTOM_TYPE,
-	notifyCompletion,
-	truncateForContext,
-} from "./notification.js";
+import { NOTIFICATION_CUSTOM_TYPE, notifyCompletion } from "./notification.js";
 import { PendingReports } from "./pending.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
-import { runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
+import { holdUntilDrained, runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
 import { createSubtreeDisplay } from "./tree-display.js";
 import type { SubagentDetails } from "./types.js";
 import { atId, sendView, spawnView, stopView } from "./views.js";
@@ -148,15 +142,9 @@ function widgetSurface(): WidgetSurface | null {
 /**
  * Tree telemetry (nested agents): a sub-agent's own spawns are invisible to
  * the user — the only TUI is the root session's. Every node reports ALL its
- * spawns upward (foreground and background alike) over the same setStatus
- * transport as @parent messages; intermediate nodes forward verbatim
- * (depth + 1). Consumption is decided at the anchor boundary — the execute
- * that owns the visible surface:
- *   • root + background child → widget rows (indent = depth)
- *   • root + foreground child → folded into that card's nested meta counters
- * A foreground card's subtree therefore never reaches the widget, and a
- * background row's subtree never leaks into a card — one subtree, one
- * surface (SPEC: 显示面统一规则).
+ * spawns upward over the same setStatus transport as @parent messages;
+ * intermediate nodes forward verbatim (depth + 1). Only the root applies
+ * them, as widget rows at the forwarded depth (SPEC: 显示面统一规则).
  */
 function createTreeTelemetry(hasParent: boolean) {
 	/** Ids reported as added — guards activity/remove so unknown ids never
@@ -201,7 +189,6 @@ interface SpawnParams {
 	model?: string;
 	thinking?: string;
 	tools?: string[];
-	run_in_background?: boolean;
 	timeoutMs?: number;
 	persistent?: boolean;
 }
@@ -217,8 +204,7 @@ interface SendParams {
 	message: string;
 }
 
-// Shared agent_spawn parameter fields — the root session gets the full set;
-// sub-agents get a foreground-only subset (see buildSpawnParamsSchema).
+// agent_spawn parameter fields — one set, every session.
 const SpawnPromptField = Type.String({
 	description: "The task for the sub-agent.",
 });
@@ -260,18 +246,15 @@ const SpawnTimeoutField = Type.Optional(
 );
 
 /**
- * Sub-agents never see run_in_background: their lifetime is bounded by the
- * parent's synchronous wait, so a background child could not outlive them nor
- * deliver its result anywhere — it would race the returned answer with forced
- * ack turns. Only the long-lived root session hosts background work. Hiding
- * the parameter beats erroring on it: the misuse cannot happen at all.
+ * Every spawn returns immediately: the call hands back an agent id and the
+ * result arrives as a notification. Nothing waits on a child, so the caller's
+ * turn never blocks on a sub-agent — the same shape at every depth.
  *
- * persistent stays available to everyone: its residency is scoped to the host
- * session by definition ("alive until your session ends") — a sub-agent using
- * an iterative helper within its own lifetime is fully served, and parent
- * exit cleans residents up like any other child.
+ * `persistent` is orthogonal: it decides what happens AFTER a result (stay
+ * resident for follow-ups vs exit), not whether the spawn waits. A sub-agent's
+ * residents live as long as the sub-agent does.
  */
-export function buildSpawnParamsSchema(hasParent: boolean): ReturnType<typeof Type.Object> {
+export function buildSpawnParamsSchema(): ReturnType<typeof Type.Object> {
 	return Type.Object({
 		prompt: SpawnPromptField,
 		label: SpawnLabelField,
@@ -284,26 +267,13 @@ export function buildSpawnParamsSchema(hasParent: boolean): ReturnType<typeof Ty
 				description:
 					"If true, keep the agent resident after it completes (idle, zero token) so you can " +
 					"send it follow-up messages later — the process stays alive until your session ends " +
-					"(a sub-agent's residents are cleaned up when it returns) or until you stop it. " +
-					"Default false (the agent exits when done).",
+					"or until you stop it. Default false (the agent exits when done).",
 			}),
 		),
-		...(hasParent
-			? {}
-			: {
-					run_in_background: Type.Optional(
-						Type.Boolean({
-							description:
-								"If true, return an agent_id immediately and notify you on completion — you can " +
-								"keep working meanwhile. If false (default), block until the result is ready. " +
-								"Root-only: as a sub-agent you cannot host background work.",
-						}),
-					),
-				}),
 	});
 }
 
-const SpawnParamsSchema = buildSpawnParamsSchema(HAS_PARENT);
+const SpawnParamsSchema = buildSpawnParamsSchema();
 
 const StopParamsSchema = Type.Object({
 	agent_id: Type.String({ description: 'The agent id to stop (e.g. "@max").' }),
@@ -453,31 +423,19 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "agent_spawn",
 		label: "Agent Spawn",
-		description: HAS_PARENT
-			? "Spawn an isolated sub-agent in your own context window. The call blocks until it " +
-				"finishes and returns the output. Background spawns are root-only — your lifetime " +
-				"ends when this call returns; persistent helpers are fine and live as long as you do."
-			: "Spawn an isolated sub-agent in its own context window. Foreground (run_in_background: " +
-				"false) blocks until it finishes and returns the output directly. Background " +
-				"(run_in_background: true) returns an agent id immediately; the completion notification " +
-				"carries the result (status + agent id + final output) — you can intervene with " +
-				"agent_stop / agent_send while it runs. persistent: true keeps it resident (idle) " +
-				"after completion — message it later to continue the same context.",
+		description:
+			"Spawn an isolated sub-agent in its own context window. The call returns an agent id " +
+			"immediately; the completion notification carries the result (status + agent id + final " +
+			"output). You can intervene with agent_stop / agent_send while it runs. persistent: true " +
+			"keeps it resident (idle) after completion — message it later to continue the same context.",
 		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
-		promptGuidelines: HAS_PARENT
-			? [
-					"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
-					"For independent parallel work, issue several foreground agent_spawn calls together — they run concurrently.",
-					"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
-					"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
-				]
-			: [
-					"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
-					"Use agent_spawn for independent parallel work: several foreground calls already run in parallel. Reserve run_in_background: true for when you need to keep working or reply to the user while the sub-agent runs.",
-					"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
-					"Never poll a background agent — its completion notification carries the result.",
-					"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
-				],
+		promptGuidelines: [
+			"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
+			"For independent parallel work, issue several agent_spawn calls together — they run concurrently.",
+			"A spawned agent works in the background: if your answer depends on its result, wait for the completion notification before answering.",
+			"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
+			"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
+		],
 		parameters: SpawnParamsSchema,
 
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
@@ -490,25 +448,6 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: "`label` is required." }],
 					details: { error: "`label` is required." },
-					isError: true,
-				};
-			}
-			// Schema hides run_in_background from sub-agents; this guard catches
-			// hallucinated args (schema validation may pass extras through).
-			if (HAS_PARENT && params.run_in_background != null) {
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								"run_in_background is root-only: your lifetime ends when this call returns, so " +
-								"background work could not outlive you nor deliver its result. For parallel " +
-								"work, issue several foreground agent_spawn calls together (they run " +
-								"concurrently); for long-running work, describe it in your reply so the " +
-								"caller can decide.",
-						},
-					],
-					details: { error: "background spawns are root-only", label },
 					isError: true,
 				};
 			}
@@ -527,46 +466,22 @@ export default function (pi: ExtensionAPI) {
 				// <reason>` (the id never exists yet — spawn didn't happen).
 				return {
 					content: [{ type: "text", text: resolved.error }],
-					details: params.run_in_background
-						? { runInBackground: true, label, error: resolved.error }
-						: { error: resolved.error },
+					details: { error: resolved.error },
 					isError: true,
 				};
 			}
 
 			const startedAt = Date.now();
 
-			// Foreground: stream the sub-agent's session as an ordered activity
-			// stream. AgentProcess accumulates RenderEvents internally at the
-			// source (RPC event handler); the callbacks here only refresh the
-			// live card via onUpdate.
-			let streamed = "";
-			// Where my child's subtree telemetry lands (SPEC: 显示面统一规则) —
-			// fold into THIS card while it's open, forward to my parent, or
-			// surface on the root widget. One module owns the whole decision.
+			// Where my child's subtree telemetry lands: forward to my parent, or
+			// surface on the root widget. One module owns the decision.
 			const subtree = createSubtreeDisplay({
 				hasParent: HAS_PARENT,
-				foregroundEdge: params.run_in_background !== true,
 				getWidget: () => {
 					ensureWidget(ctx);
 					return widget ?? undefined;
 				},
 				forward: (event) => tree.report(event),
-				onFold: () =>
-					onUpdate?.({
-						content: [{ type: "text", text: streamed }],
-						details: liveDetails(agent.getLatestActivity()),
-					}),
-			});
-			// Live-card details: the shared slice every foreground update carries.
-			const liveDetails = (activity?: AgentActivity): SubagentDetails => ({
-				task,
-				startedAt,
-				model: agent.model,
-				thinking: agent.thinking,
-				activity,
-				events: agent.getEvents(),
-				nested: subtree.nested(),
 			});
 			// Short human-name id (max, zoe…) — the LLM-facing reference. No tree
 			// structure: agents address only ids they were given, hop by hop.
@@ -591,22 +506,6 @@ export default function (pi: ExtensionAPI) {
 				// getWidget, not widget: the widget is created on first use, so a
 				// captured reference would be null for every update before that.
 				surfaces: { getWidget: () => widget ?? undefined, tree },
-				...(params.run_in_background
-					? {}
-					: {
-							card: {
-								delta: (text: string) => {
-									streamed += text;
-									onUpdate?.({
-										content: [{ type: "text", text: streamed }],
-										details: liveDetails(agent.getLatestActivity()),
-									});
-								},
-								activity: (activity: AgentActivity) => {
-									onUpdate?.({ content: [{ type: "text", text: streamed }], details: liveDetails(activity) });
-								},
-							},
-						}),
 			});
 
 			const agent = new AgentProcess({
@@ -648,9 +547,7 @@ export default function (pi: ExtensionAPI) {
 						.catch(() => {}); // best-effort: a cleanup failure must not crash the host
 				},
 				// Where live output goes lives in live-output.ts: the widget row and
-				// the tree fold hear about every update (a woken resident agent has a
-				// row and no card), and the card below exists only for a foreground
-				// spawn while its tool call runs.
+				// the tree telemetry hear about every update.
 				onDelta: (delta) => live.onDelta(agent, delta),
 				onActivityChange: (activity) => live.onActivity(agent, activity),
 			});
@@ -662,34 +559,37 @@ export default function (pi: ExtensionAPI) {
 			try {
 				outcome = await runSpawnSession(agent, {
 					task,
-					runInBackground: params.run_in_background === true,
 					signal,
 					hooks: {
-						onWorking: () =>
-							onUpdate?.({
-								content: [{ type: "text", text: "Working\u2026" }],
-								details: { task, startedAt, model: agent.model, thinking: agent.thinking },
-							}),
-						onBackgroundStarting: () =>
+						onStarting: () =>
 							onUpdate?.({
 								content: [{ type: "text", text: `Starting ${agent.label}\u2026` }],
 								details: {
-									runInBackground: true,
 									label: agent.label,
 									model: agent.model,
 									thinking: agent.thinking,
 								} satisfies SubagentDetails,
 							}),
-						// Background settled: wire widget + registry + the completion
-						// chain here (mechanisms stay on this side of the seam).
-						onBackgroundSettled: (a) => {
+						// The child accepted the task: wire widget + registry + the
+						// completion chain here (mechanisms stay on this side of the seam).
+						onStarted: (a) => {
 							ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
 							ensurePending(ctx);
 							registry.register(a as AgentProcess);
 							tree.add(a, "running"); // up-report: my child exists
 							void a
 								.waitForCompletion()
-								.then((completion) => {
+								.then(async (completion) => {
+									// The child's own turn is over; if agents it spawned are
+									// still running, hold it until they are (they die with it).
+									const w = widget;
+									if (w) {
+										await holdUntilDrained({
+											hasLiveDescendants: () => w.hasLiveDescendants(a.agentId),
+											waitForDrain: () => w.whenSubtreeDrained(a.agentId),
+											onHeld: () => registry.markIdle(a.agentId),
+										});
+									}
 									tree.remove(
 										a.agentId,
 										completion.status === "completed" ? "done" : completion.status === "failed" ? "failed" : "stopped",
@@ -703,45 +603,22 @@ export default function (pi: ExtensionAPI) {
 									registry.stopAndRemove(a.agentId);
 								});
 						},
-						onResident: (a) => {
-							ensureWidget(ctx);
-							ensurePending(ctx);
-							// Resident from birth: register the widget row as idle (‖
-							// marker, stays addressable). Registering an already-completed
-							// agent at its terminal status would be removed by the
-							// widget's terminal cleanup before markIdle could flip it.
-							registry.register(a as AgentProcess, "idle");
-							tree.add(a, "idle");
-						},
-						// Foreground settled: report the child upward (widget-rooted
-						// nodes only — at the root the card itself is the display; a
-						// card-contained node's subtree folds at its own anchor). This
-						// closes the blind spot where a background agent's foreground
-						// children were invisible entirely.
-						onForegroundSettled: (a) => {
-							if (HAS_PARENT) tree.add(a, "running");
-						},
 					},
 				});
 			} catch (err) {
 				return toErrorResult(err);
 			}
 
-			subtree.closeCard(); // from here on onUpdate cannot refresh the card
 			switch (outcome.kind) {
 				case "spawn-failed":
 					// The isError return carries the failure to the LLM and the status
 					// line shows it to the user — no follow-up notification on top.
-					return spawnErrorResult(outcome, {
-						runInBackground: params.run_in_background,
-						label: agent.label,
-					});
+					return spawnErrorResult(outcome, { label: agent.label });
 
-				case "background-started": {
+				case "started": {
 					onUpdate?.({
-						content: [{ type: "text", text: `Started ${agent.label} (background)` }],
+						content: [{ type: "text", text: `Started ${agent.label}` }],
 						details: {
-							runInBackground: true,
 							label: agent.label,
 							model: agent.model,
 							thinking: agent.thinking,
@@ -752,75 +629,14 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Started background agent @${agent.agentId}. Completion arrives as a notification.`,
+								text: `Started agent @${agent.agentId}. Its result arrives as a notification.`,
 							},
 						],
 						details: {
-							runInBackground: true,
 							label: agent.label,
 							model: agent.model,
 							thinking: agent.thinking,
 							startedAt,
-						} satisfies SubagentDetails,
-					};
-				}
-
-				case "finished": {
-					// Failures and limit-stops are both errors for the caller: the
-					// stopped case (total timeout / hard token limit) must not look
-					// like a clean success. A user cancel (abort) also produces a
-					// stop — don't blame that on the limits.
-					if (outcome.status === "failed" || outcome.status === "stopped") {
-						if (HAS_PARENT && !outcome.resident)
-							tree.remove(agentId, outcome.status === "failed" ? "failed" : "stopped");
-						const message =
-							outcome.status === "failed"
-								? outcome.output || "Sub-agent failed."
-								: outcome.stoppedByControl
-									? outcome.output || "Sub-agent stopped."
-									: `${outcome.output || "Sub-agent was stopped."}\n(stopped \u2014 reached the task time limit; the output above is partial)`;
-						return {
-							content: [{ type: "text", text: truncateForContext(message) }],
-							details: {
-								task,
-								startedAt,
-								endedAt: outcome.endedAt,
-								// Full message (uncapped) — the user reads it on the card,
-								// folded but never dropped; the LLM sees the capped copy.
-								error: message,
-								model: agent.model,
-								thinking: agent.thinking,
-								sessionPath: outcome.sessionPath,
-								events: outcome.events,
-								nested: subtree.nested(),
-							} satisfies SubagentDetails,
-							isError: true,
-						};
-					}
-					if (HAS_PARENT && !outcome.resident) tree.remove(agentId, "done");
-					return {
-						// Pure text result — no session hint: the output stands alone
-						// (the session path is the card footer, recoverable by the user).
-						// A persistent foreground agent stays resident — the LLM needs
-						// its id to wake it later with agent_send (or stop it).
-						content: [
-							{
-								type: "text",
-								text: outcome.resident
-									? `${truncateForContext(outcome.output)}${maybeWriteFullOutput(agent.agentId, outcome.output)}\n\n(agent @${agent.agentId} is resident \u2014 send it follow-ups with agent_send)`
-									: truncateForContext(outcome.output) + maybeWriteFullOutput(agent.agentId, outcome.output),
-							},
-						],
-						details: {
-							task,
-							sessionPath: outcome.sessionPath,
-							sessionId: outcome.sessionId,
-							startedAt,
-							endedAt: outcome.endedAt,
-							model: agent.model,
-							thinking: agent.thinking,
-							events: outcome.events,
-							nested: subtree.nested(),
 						} satisfies SubagentDetails,
 					};
 				}
@@ -857,8 +673,8 @@ export default function (pi: ExtensionAPI) {
 				// Card title needs the id: details.agentId drives titleFrom (the
 				// args key is snake_case agent_id, which titleFrom does not read).
 				return {
-					content: [{ type: "text", text: `agent ${params.agent_id} not found or already finished.` }],
-					details: { agentId, error: `agent ${params.agent_id} not found or already finished` },
+					content: [{ type: "text", text: `agent ${params.agent_id} is not running any more.` }],
+					details: { agentId, error: `agent ${params.agent_id} is not running any more` },
 					isError: true,
 				};
 			}
@@ -875,7 +691,7 @@ export default function (pi: ExtensionAPI) {
 				if (!stopped) {
 					// Finished between lookup and removal (rare) — don't claim
 					// a stop that never happened.
-					const message = `agent ${params.agent_id} already finished.`;
+					const message = `agent ${params.agent_id} had already finished.`;
 					return {
 						content: [{ type: "text", text: message }],
 						details: { agentId, label: agent.label, error: message },
@@ -986,6 +802,25 @@ export default function (pi: ExtensionAPI) {
 		// owns the registry and can stop its sub-agents cleanly; otherwise a
 		// /reload would leave resident rpc children whose stdin pipe stays open.
 		if (event.reason !== "quit" && event.reason !== "reload") return;
+
+		// Every tracked agent is about to die with this process, and the model
+		// is the only party who does not know: its context still says these
+		// agents are running. Write that fact into the transcript as a custom
+		// message — the same shape pi uses for compaction summaries, and for
+		// the same reason: a session-scoped fact that must still be true when
+		// the session comes back. display:false keeps it out of the user's
+		// view; it costs ~15 tokens once, and only when it is not empty.
+		const survivors = registry.survivors();
+		if (survivors.length > 0) {
+			pi.sendMessage(
+				{
+					customType: "subagent-session-end",
+					content: `These agents ended with the session and are no longer addressable: ${survivors.join(", ")}.`,
+					display: false,
+				},
+				{ triggerTurn: false },
+			);
+		}
 
 		// Graceful stop of every tracked agent. Children exit on their own
 		// (stdin EOF → rpc shutdown) even if the parent dies first, because

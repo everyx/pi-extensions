@@ -165,6 +165,12 @@ export class AgentRegistry {
 		return true;
 	}
 
+	/** Agents still tracked, as `@id — label` — what a session end would take
+	 *  down. Read before shutdown() so the fact can outlive the processes. */
+	survivors(): string[] {
+		return [...this.agents.values()].map((a) => `@${a.agentId} — ${a.label}`);
+	}
+
 	/** Stop everything (session shutdown). */
 	async shutdown(): Promise<void> {
 		for (const agent of this.agents.values()) {
