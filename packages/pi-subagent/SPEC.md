@@ -126,6 +126,7 @@ session: /path/...jsonl
 
 - 仅跟踪后台 agent 与 persistent 前台 agent（前台非 persistent 已 inline 流式，不重复；persistent 前台完成后驻留 idle，进 widget 保持可寻址）
 - 非 persistent 完成/停止立即移除——完成结果由通知卡承担；**persistent 完成后保留 idle 行**（可寻址性可见，‖ 标记，不参与进度计数，可被 agent_stop 移除）
+- 嵌套行（tree telemetry）用 **upsert** 而非 add：同一个 persistent 后代会上报两次（spawn 落定 = running，驻留 = idle），第二次是状态变更不是重复——`add` 对已知 id 是 no-op，用它会让该行永远转圈
 - 标题行 meta（外层括号 + `·` 分隔，对齐 card header）：`done n/total` 进度 + 实时分段（`n running` / `n idle`）+ 异常计数（`n failed` error 色 / `n stopped`）——行空 widget 消失，计数随下次任务批重置
 - **蜂群降级**：行数超出预算时自动切换——running（活跃）与 failed（异常）行优先，其余折叠为计数行（对齐 Kimi swarm 两档思路）
 - 每行下方追加最新活动摘录（与标题文本起点对齐，实时更新）：工具调用、Thinking...、或最新正文尾部；截断宽度感知终端宽（render 传入），尾部截断

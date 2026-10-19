@@ -238,7 +238,7 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		w.dispose();
 	});
 
-	it("upsert() updates a known row instead of dropping the report (#37)", () => {
+	it("upsert() updates a known row instead of dropping the report", () => {
 		const ui = { setWidget: () => {} } as never;
 		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
 		const lines = capture(ui);
@@ -249,6 +249,29 @@ describe("StatusWidget — idle rows (persistent agents)", () => {
 		const out = lines().join("\n");
 		assert.ok(out.includes("\u2016"), `resident row shows the pause marker:\n${out}`);
 		assert.ok(!out.includes("running"), `counters follow the transition:\n${out}`);
+		w.dispose();
+	});
+
+	it("upsert() keeps every first-report field, not just the title", () => {
+		// Identity is established once. A later telemetry report says "this agent
+		// changed state", not "this is a different agent" — so a re-report that
+		// carries a different label, start time or depth must not rewrite them.
+		// Asserted through the rendered output: an indent change is visible as
+		// leading spaces, so a silent overwrite would show up here.
+		const ui = { setWidget: () => {} } as never;
+		const w = new StatusWidget(ui as ExtensionUIContext, "Agents");
+		const lines = capture(ui);
+		const startedAt = Date.now() - 60_000;
+		w.add({ id: "a", title: "original", startedAt, status: "running", indent: 1 });
+		w.upsert({ id: "a", title: "renamed", startedAt: Date.now(), status: "idle", indent: 3 });
+
+		const out = lines().join("\n");
+		assert.ok(out.includes("original"), "the first title stands");
+		assert.ok(!out.includes("renamed"), "a re-report cannot relabel the row");
+		// The prefix is indent × 2 + 1 column: indent 1 → 3 spaces, indent 3 → 7.
+		const titleLine = lines().find((l) => l.includes("original")) ?? "";
+		const leading = titleLine.match(/^ */)?.[0].length ?? 0;
+		assert.equal(leading, 3, `indent stays at the first report's depth, got ${leading} spaces:\n${out}`);
 		w.dispose();
 	});
 
