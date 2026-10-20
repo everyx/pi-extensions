@@ -217,9 +217,9 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "read_doc",
 		label: "Read a document",
-		description: "Read office documents (Word/Excel/PowerPoint/PDF/ODT/RTF/EPUB/CSV).",
+		description: "Read Word, Excel, PowerPoint, PDF, OpenDocument (odt/ods/odp), RTF, EPUB and CSV files.",
 		promptSnippet: "Read office documents",
-		promptGuidelines: ["For office documents, use read_doc instead of read."],
+		promptGuidelines: ["Use read_doc, not read, for any format it lists."],
 		parameters: ReadDocSchema,
 		...readDocView,
 		async execute(_id, raw, signal, onUpdate) {
