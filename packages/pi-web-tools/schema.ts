@@ -17,14 +17,17 @@ export function buildWebSearchSchema() {
 	return Type.Object({
 		query: Type.String(),
 		recency: Type.Optional(StringEnum(["day", "week", "month", "year"])),
-		allowed_domains: Type.Optional(Type.Array(Type.String(), { description: "Bare hostnames, e.g. github.com." })),
-		blocked_domains: Type.Optional(Type.Array(Type.String(), { description: "Bare hostnames, e.g. reddit.com." })),
+		allowed_domains: Type.Optional(
+			Type.Array(Type.String(), { description: "Hostnames only (no scheme or path), e.g. github.com." }),
+		),
+		blocked_domains: Type.Optional(
+			Type.Array(Type.String(), { description: "Hostnames only (no scheme or path), e.g. reddit.com." }),
+		),
 		locale: Type.Optional(
 			Type.String({
 				description:
-					"Prefer results for this language/region (BCP-47, e.g. zh-CN) — best-effort: " +
-					"a language/market boost where the provider supports it. Omit for results " +
-					"matching the query's language.",
+					"Prefer results in this language/region (BCP-47, e.g. zh-CN). Best-effort; " +
+					"omit to match the query's language.",
 			}),
 		),
 	});
@@ -34,8 +37,7 @@ export const WebFetchParamsSchema = Type.Object({
 	url: Type.String({ description: "The http(s) URL to fetch." }),
 	raw: Type.Optional(
 		Type.Boolean({
-			description:
-				"Return the raw source instead (HTML stays HTML; non-HTML " + "JSON/XML/plain text returns as-is either way).",
+			description: "Return the page as raw HTML instead of markdown. No effect on other content types.",
 		}),
 	),
 });
