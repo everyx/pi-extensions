@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.2.0...pi-ui-v1.3.0) (2026-10-20)
+
+
+### Features
+
+* **pi-ui:** let a tracked row change status without being re-added ([478f0db](https://github.com/everyx/pi-extensions/commit/478f0db5195e47ea22d29636fb5dcd6efa6f374d))
+
+
+### Bug Fixes
+
+* **pi-subagent:** stop a resident nested agent from spinning forever ([f534f93](https://github.com/everyx/pi-extensions/commit/f534f93f4c86f0ed338b9a30467b6e07eb7d2dd9))
+
 ## [1.2.0](https://github.com/everyx/pi-extensions/compare/pi-ui-v1.1.2...pi-ui-v1.2.0) (2026-09-11)
 
 

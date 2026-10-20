@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.1](https://github.com/everyx/pi-extensions/compare/pi-read-doc-v1.1.0...pi-read-doc-v1.1.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **pi-read-doc:** spell out the formats instead of a slash run ([a15d576](https://github.com/everyx/pi-extensions/commit/a15d576d34b28081c5c7a67734a922a34747cd44))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.3.0
+
 ## [1.1.0](https://github.com/everyx/pi-extensions/compare/pi-read-doc-v1.0.6...pi-read-doc-v1.1.0) (2026-09-11)
 
 
