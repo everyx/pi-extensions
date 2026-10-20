@@ -16,6 +16,7 @@
  *   the child runs until it finishes or is stopped via agent_stop.
  */
 
+import { existsSync, statSync } from "node:fs";
 import type { AgentTreeEvent } from "./event-interpret.js";
 import { type AgentActivity, interpretEvent } from "./event-interpret.js";
 import type { AgentMessage, RpcCommand, RpcEvent } from "./protocol.js";
@@ -91,6 +92,35 @@ const STOP_GRACE_MS = 5_000;
 // The only task-level limit is the opt-in timeoutMs: the Agent tool passes
 // it when the caller wants a bound — the default is no limit (a Pi extension
 // should not impose hidden deadlines on sub-agents).
+
+/**
+ * Why this session path cannot be resumed, or undefined when it looks usable.
+ *
+ * Deliberately shallow — pi owns the session format, and a corrupt file gets a
+ * clear error from pi itself ("Session file is not a valid pi session: …"). The
+ * two cases worth catching here are the ones pi handles badly or silently:
+ *
+ *   - a directory: pi fails with a bare `EISDIR` that names neither the file
+ *     nor the parameter;
+ *   - an empty file: pi accepts it and starts a FRESH session, so the caller
+ *     believes it resumed while the context is empty — a wrong answer, not a
+ *     bad message.
+ *
+ * Permission errors are left to pi too: only the process that owns the file
+ * knows what it can read.
+ */
+export function resumePathError(path: string): string | undefined {
+	if (!existsSync(path)) return `session not found: ${path}`;
+	let stat: ReturnType<typeof statSync>;
+	try {
+		stat = statSync(path);
+	} catch {
+		return `cannot read session file: ${path}`;
+	}
+	if (!stat.isFile()) return `not a session file: ${path}`;
+	if (stat.size === 0) return `session file is empty (nothing to resume): ${path}`;
+	return undefined;
+}
 
 /**
  * argv for the child `pi --mode rpc` (the mode itself is added by RpcClient).
