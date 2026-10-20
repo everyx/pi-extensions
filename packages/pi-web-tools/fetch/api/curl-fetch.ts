@@ -118,7 +118,12 @@ async function curlSubprocess(url: string, options: CurlFetchOptions): Promise<C
 			killedForAbort = true;
 			child.kill();
 		};
+		// Before the first byte can arrive, and after the child exists: a signal
+		// that was already aborted fired before any listener could be attached,
+		// so the check below is what stops it. Registering first keeps the
+		// window to a single statement.
 		options.signal?.addEventListener("abort", onAbort, { once: true });
+		if (options.signal?.aborted) onAbort();
 
 		child.stdout.on("data", (chunk: Buffer) => {
 			if (tooLarge) return;
@@ -195,15 +200,21 @@ async function readBodyCapped(response: Response, maxBytes: number): Promise<Uin
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
 	let total = 0;
-	for (;;) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		total += value.byteLength;
-		if (total > maxBytes) {
-			void reader.cancel().catch(() => {});
-			return null;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			total += value.byteLength;
+			if (total > maxBytes) {
+				// Awaited: the point of the cap is to stop the transfer, not to
+				// schedule stopping it after we return.
+				await reader.cancel().catch(() => {});
+				return null;
+			}
+			chunks.push(value);
 		}
-		chunks.push(value);
+	} finally {
+		reader.releaseLock();
 	}
 	const body = new Uint8Array(total);
 	let offset = 0;
@@ -227,6 +238,9 @@ async function fallbackFetch(url: string, options: CurlFetchOptions): Promise<Cu
 		);
 		const contentType = response.headers.get("content-type") ?? "";
 		if (!response.ok) {
+			// Nobody is going to read this body: release the connection instead of
+			// leaving it to the garbage collector.
+			await response.body?.cancel().catch(() => {});
 			return {
 				ok: false,
 				status: response.status,
@@ -239,7 +253,21 @@ async function fallbackFetch(url: string, options: CurlFetchOptions): Promise<Cu
 		const bytes = await readBodyCapped(response, maxBytes);
 		return { ok: true, status: response.status, contentType, bytes, tooLarge: bytes === null };
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		// A cancelled call is a cancellation, not a transport failure: report the
+		// same word the curl path uses, whatever the abort surfaced as.
+		if (options.signal?.aborted) {
+			return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "fetch aborted" };
+		}
+		// A deadline that fires while the body streams surfaces as the platform's
+		// TimeoutError, not as the helper's own error (the helper is no longer on
+		// the stack at that point). Report it in the same words as the headers
+		// phase so callers see one message per condition.
+		const message =
+			(err as { name?: string }).name === "TimeoutError"
+				? `Timed out after ${timeoutMs}ms`
+				: err instanceof Error
+					? err.message
+					: String(err);
 		const code = (err as { cause?: { code?: string } }).cause?.code;
 		return {
 			ok: false,
@@ -254,5 +282,18 @@ async function fallbackFetch(url: string, options: CurlFetchOptions): Promise<Cu
 
 /** Direct-fetch transport: real curl via subprocess, shallow fallback after. */
 export async function curlFetch(url: string, options: CurlFetchOptions = {}): Promise<CurlFetchResult> {
-	return (await curlAvailable()) ? curlSubprocess(url, options) : fallbackFetch(url, options);
+	const aborted = (): CurlFetchResult => ({
+		ok: false,
+		status: 0,
+		contentType: "",
+		bytes: null,
+		tooLarge: false,
+		error: "fetch aborted",
+	});
+	// Cancellation must not spend a subprocess probing for curl, and must not
+	// start a request after the probe returns.
+	if (options.signal?.aborted) return aborted();
+	const available = await curlAvailable();
+	if (options.signal?.aborted) return aborted();
+	return available ? curlSubprocess(url, options) : fallbackFetch(url, options);
 }
