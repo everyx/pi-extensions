@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.4.0...pi-subagent-v1.5.0) (2026-10-20)
+
+
+### Features
+
+* **pi-subagent:** continue a session instead of starting over ([347f76f](https://github.com/everyx/pi-extensions/commit/347f76fceda4cea494d85d55b3ab1fb2b3165a84))
+* **pi-subagent:** every spawn returns immediately ([fb00a6c](https://github.com/everyx/pi-extensions/commit/fb00a6ccb7812ef22e1f5d525a10ac263575cc1a))
+
+
+### Bug Fixes
+
+* **pi-subagent:** make the drain rule independent of the TUI ([fb09d7d](https://github.com/everyx/pi-extensions/commit/fb09d7d957ceacb795f6d9192f3e2a6597ffa404))
+* **pi-subagent:** one file for the copy the model reads, and a budget ([ca25e77](https://github.com/everyx/pi-extensions/commit/ca25e778b2d38dc1c2c3727a2e4a9a1e7339c63e))
+* **pi-subagent:** stop a resident nested agent from spinning forever ([f534f93](https://github.com/everyx/pi-extensions/commit/f534f93f4c86f0ed338b9a30467b6e07eb7d2dd9))
+* **pi-subagent:** stop an empty session file from resuming as a blank one ([801c8a2](https://github.com/everyx/pi-extensions/commit/801c8a225374cbfe92b08e91610834687813139e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.3.0
+
 ## [1.4.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.3.7...pi-subagent-v1.4.0) (2026-10-12)
 
 

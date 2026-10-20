@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.5](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.4...pi-web-tools-v1.2.5) (2026-10-20)
+
+
+### Bug Fixes
+
+* **pi-web-tools:** keep parameter meaning out of the tool-list line ([266e35b](https://github.com/everyx/pi-extensions/commit/266e35bb1d463b9cacf16104c2a3ae48bd67945a))
+* **pi-web-tools:** keep the deadline and cancellation alive for the body ([e5a0044](https://github.com/everyx/pi-extensions/commit/e5a00448df9f81044cf5767a2c14333754ead1db))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @everyx/pi-ui bumped to 1.3.0
+
 ## [1.2.4](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.3...pi-web-tools-v1.2.4) (2026-09-11)
 
 
