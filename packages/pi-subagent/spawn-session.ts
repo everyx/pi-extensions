@@ -118,3 +118,37 @@ export async function holdUntilDrained(opts: {
 	await opts.waitForDrain();
 	return true;
 }
+
+/** What the drain rule needs to know about the live tree — structural so a
+ *  test can hand in a fake or the real one. */
+export interface DrainSource {
+	hasLiveDescendants(agentId: string): boolean;
+	whenDrained(agentId: string): Promise<void>;
+}
+
+/**
+ * The whole completion policy for one spawn: wait for its turn, hold it while
+ * descendants are still running, then run `finish` (report + cleanup).
+ *
+ * This lives here — not inline in the tool callback — because it is the one
+ * place the two halves of the lifecycle meet (a child's own turn vs. work
+ * still running beneath it). An integration test can drive it with the real
+ * registry and the real live tree, which is the only way to lock the
+ * guarantee down: a unit test of each half would pass even if the wiring
+ * between them were wrong.
+ */
+export async function finishWhenDrained(opts: {
+	agentId: string;
+	live: DrainSource;
+	/** The agent is now held: show it as alive-but-not-working. */
+	onHeld(): void;
+	/** Report + clean up. Runs exactly once, after the subtree drains. */
+	finish(): void | Promise<void>;
+}): Promise<void> {
+	await holdUntilDrained({
+		hasLiveDescendants: () => opts.live.hasLiveDescendants(opts.agentId),
+		waitForDrain: () => opts.live.whenDrained(opts.agentId),
+		onHeld: opts.onHeld,
+	});
+	await opts.finish();
+}
