@@ -253,7 +253,11 @@ queued → running ──→ completed（通知）
 
 **父行消失即子树消失**：节点被停/完成时，它自己就是「报告子孙行 remove」的那个进程——进程一死，遥测随之中断（stdin EOF 会级联杀死后代进程，但不产生任何事件）。所以 `AgentWidget.remove` 递归摘掉该行整棵子树，结果一律记 `stopped`——按构造，此时仍在世的后代都是被祖先的退出带走的。
 
-**子树未清空则不 teardown（drain 规则）**：一个 agent 自己的回合结束，不代表它的活干完了——它 spawn 的后代还活着，而后代会随它一起死（stdin 管道关闭）。所以结算前要问 `hasLiveDescendants`：为空则正常上报 + 结束；不为空则把它标 idle（零 token，widget 显示 ‖）并等 `whenSubtreeDrained`，清空后才上报。规则本身在 `spawn-session.ts:holdUntilDrained`（有单测），widget 提供查询与等待。
+**子树未清空则不 teardown（drain 规则）**：一个 agent 自己的回合结束，不代表它的活干完了——它 spawn 的后代还活着，而后代会随它一起死（stdin 管道关闭）。所以结算前要问 `hasLiveDescendants`：为空则正常上报 + 结束；不为空则把它标 idle（零 token，widget 显示 ‖）并等 `whenDrained`，清空后才上报。规则本身在 `spawn-session.ts:holdUntilDrained`。
+
+**生命周期不依赖显示面**（2026-10-19 review 抓到的 blocker）：谁是活的、谁挂在谁下面，唯一权威是 `live-tree.ts`。widget 只是它的一个视图，**不能**用「行在不在」判断「进程活不活」——每个子 agent 都以 `pi --mode rpc` 运行，那里根本没有 widget（`ensureWidget` 在非 tui 模式返回 null）。早先把 drain 判断写成 `if (widget) holdUntilDrained(...)`，等于在子 agent 进程里整条规则空转：深度 2 时靠 root 的 hold 侥幸存活，深度 ≥3 时中间层的子 agent 回合一结束就把自己的子进程连带杀掉。实测对照：同一脚本下旧写法在 T+31s 就让 L1 上报 completed（L3 尚需 40s），新写法等到 T+61s 才上报。
+
+注册表的 `widgetSurface()` 因此**永远返回**（不再在非 TUI 下返回 null）：`add`/`remove` 负责更新 `liveTree`，只有绘制部分才看 widget 是否存在。
 
 **词汇单源**：计数词汇 `done n/total · …` = pi-ui `counterParts`；`@id — label` 标题 = views.ts `agentTitle`（widget 行与通知卡共用）；状态图标 = pi-ui card.ts。
 
