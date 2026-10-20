@@ -261,6 +261,14 @@ queued → running ──→ completed（通知）
 
 **词汇单源**：计数词汇 `done n/total · …` = pi-ui `counterParts`；`@id — label` 标题 = views.ts `agentTitle`（widget 行与通知卡共用）；状态图标 = pi-ui card.ts。
 
+### 恢复既有会话（2026-10-19）
+
+`agent_spawn(resume: "<session path>", prompt, label)`：子进程用 `--session <path>` 启动（不再是 `--session-dir`），pi 加载那段历史，本次 prompt 在其上继续。恢复后是**新 id**——旧 id 已随进程消失，复用会让「id ↔ 进程」的对应关系带条件。
+
+路径来源：完成通知的 LLM 可见 JSON 里有 `session_path`，卡片 footer 里也给人看。会话文件不存在或传空串时直接报错，不把坏参数丢给子进程。
+
+`--session` 与 `--session-dir` 互斥地表达同一件事（会话落在哪里），所以恢复时不传后者。
+
 ### 会话结束时的事实（2026-10-19）
 
 pi 退出会带走所有子 agent（stdin EOF 级联），但模型不知道：它的上下文还写着这些 agent 在跑。所以在 `session_shutdown` 里把「哪些 agent 随会话结束而终止」写成一条 `custom_message`（`customType: "subagent-session-end"`、`display: false`）：

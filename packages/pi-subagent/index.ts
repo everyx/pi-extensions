@@ -30,6 +30,7 @@
  * be woken by a message.
  */
 
+import { existsSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -214,6 +215,8 @@ interface SpawnParams {
 	tools?: string[];
 	timeoutMs?: number;
 	persistent?: boolean;
+	/** Existing session file to continue (see agent_spawn.resume). */
+	resume?: string;
 }
 
 /** agent_stop tool params. */
@@ -285,6 +288,13 @@ export function buildSpawnParamsSchema(): ReturnType<typeof Type.Object> {
 		thinking: SpawnThinkingField,
 		tools: SpawnToolsField,
 		timeoutMs: SpawnTimeoutField,
+		resume: Type.Optional(
+			Type.String({
+				description:
+					"Session file to continue instead of starting fresh — the path a previous completion " +
+					"notification reported. The agent picks up that history and runs `prompt` on top of it.",
+			}),
+		),
 		persistent: Type.Optional(
 			Type.Boolean({
 				description:
@@ -456,6 +466,7 @@ export default function (pi: ExtensionAPI) {
 			"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
 			"For independent parallel work, issue several agent_spawn calls together — they run concurrently.",
 			"A spawned agent works in the background: if your answer depends on its result, wait for the completion notification before answering.",
+			"To continue an agent whose session has ended, spawn again with `resume` set to the session path its notification reported.",
 			"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
 			"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
 		],
@@ -479,6 +490,25 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: "`prompt` is required." }],
 					details: { error: "`prompt` is required." },
+					isError: true,
+				};
+			}
+
+			// Resume: continue an existing session file (the path a previous
+			// completion notification reported). Validated here so the model gets
+			// one clear error instead of a child that dies on startup.
+			const resume = params.resume?.trim();
+			if (resume !== undefined && resume === "") {
+				return {
+					content: [{ type: "text", text: "`resume` must be a session file path." }],
+					details: { error: "`resume` must be a session file path" },
+					isError: true,
+				};
+			}
+			if (resume !== undefined && !existsSync(resume)) {
+				return {
+					content: [{ type: "text", text: `session not found: ${resume}` }],
+					details: { error: `session not found: ${resume}` },
 					isError: true,
 				};
 			}
@@ -540,6 +570,7 @@ export default function (pi: ExtensionAPI) {
 				tools: params.tools,
 				label,
 				sessionDir: SUBAGENT_SESSION_DIR,
+				resumeSessionPath: resume,
 				timeoutMs: params.timeoutMs,
 				// Resident after completion (idle, zero token) — explicit opt-in.
 				persistent: params.persistent,

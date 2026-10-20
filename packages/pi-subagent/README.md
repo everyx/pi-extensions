@@ -108,6 +108,7 @@ The directory lives **outside** pi's standard session tree so `pi -r` (resume) s
 | `model` | string | inherited | Override the sub‑agent's model. Specified but not registered → **error, no silent fallback**. |
 | `thinking` | `"off"`…`"max"` | inherited | Override thinking level; omit to run at your current session's level. |
 | `tools` | string[] | all | Whitelist of tool names visible to the sub‑agent — anything else is invisible. |
+| `resume` | string | none | Session file to continue instead of starting fresh — the path a previous completion notification reported. The agent picks up that history and runs `prompt` on top of it. |
 | `timeoutMs` | number | none | Optional deadline (ms). On firing, the extension stops the child, waits for it to settle, and shuts down gracefully. |
 | `persistent` | boolean | `false` | Keep the child resident (idle, zero tokens) after completion instead of shutting down. A later `agent_send` wakes it to continue the same context; `agent_stop` tears it down. |
 

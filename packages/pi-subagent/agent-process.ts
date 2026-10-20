@@ -54,6 +54,10 @@ export interface AgentProcessOptions {
 	agentId: string;
 	/** Custom session storage dir (--session-dir) — keeps sub-agent sessions out of `pi -r`. */
 	sessionDir?: string;
+	/** Existing session file to continue (--session). The child loads that
+	 *  history and runs the new prompt on top of it — the only way to pick up
+	 *  work after the previous host exited. Ignored when omitted. */
+	resumeSessionPath?: string;
 	/** Total wall-clock timeout for the whole task (incl. multi-turn).
 	 *  Omitted = no limit (the default): the child runs until it finishes
 	 *  or is stopped — there is no token limit (SPEC: token 无任何限制). */
@@ -87,6 +91,34 @@ const STOP_GRACE_MS = 5_000;
 // The only task-level limit is the opt-in timeoutMs: the Agent tool passes
 // it when the caller wants a bound — the default is no limit (a Pi extension
 // should not impose hidden deadlines on sub-agents).
+
+/**
+ * argv for the child `pi --mode rpc` (the mode itself is added by RpcClient).
+ *
+ * A resumed session gets `--session <path>` and no `--session-dir`: the file
+ * already knows where it lives, and pointing both at once would be two
+ * sources for one decision.
+ *
+ * Pure and exported so the flag wiring is testable without spawning anything.
+ */
+export function buildChildArgs(options: {
+	model?: string;
+	thinking?: string;
+	tools?: string[];
+	label: string;
+	sessionDir?: string;
+	resumeSessionPath?: string;
+}): string[] {
+	const args: string[] = [];
+	if (options.model) args.push("--model", options.model);
+	if (options.thinking) args.push("--thinking", options.thinking);
+	if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
+	// Label names the session (--name, capped at 80 chars).
+	args.push("--name", options.label.slice(0, 80));
+	if (options.resumeSessionPath) args.push("--session", options.resumeSessionPath);
+	else if (options.sessionDir) args.push("--session-dir", options.sessionDir);
+	return args;
+}
 
 export class AgentProcess {
 	readonly agentId: string;
@@ -138,13 +170,7 @@ export class AgentProcess {
 		this.onTreeEvent = options.onTreeEvent;
 		this.onIdle = options.onIdle;
 
-		const args: string[] = [];
-		if (options.model) args.push("--model", options.model);
-		if (options.thinking) args.push("--thinking", options.thinking);
-		if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
-		// Label names the session (--name, capped at 80 chars).
-		args.push("--name", options.label.slice(0, 80));
-		if (options.sessionDir) args.push("--session-dir", options.sessionDir);
+		const args = buildChildArgs(options);
 
 		const clientOptions: RpcClientOptions = {
 			args,

@@ -108,6 +108,7 @@ Pi 调用 `agent_send` 向运行中的 agent 注入重定向消息（当前 turn
 | `model` | string | 继承 | 覆盖子 agent 的模型。指定但注册表中找不到 → **报错，不静默降级**。 |
 | `thinking` | `"off"`…`"max"` | 继承 | 覆盖推理强度；省略则用当前会话的级别。 |
 | `tools` | string[] | 全部 | 子 agent 可见的工具白名单——白名单之外全部不可见。 |
+| `resume` | string | 无 | 要继续的会话文件（通知卡里报过的路径），在该段历史上执行本次 `prompt`，不另起新会话。 |
 | `timeoutMs` | number | 无 | 可选截止时间（毫秒）。触发时扩展停止子进程、等其 settled 后优雅退出。 |
 | `persistent` | boolean | `false` | 完成后进程驻留 idle（零 token）而非退出；之后 `agent_send` 可唤醒继续同一上下文，`agent_stop` 结束。 |
 
