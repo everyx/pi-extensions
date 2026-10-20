@@ -30,13 +30,12 @@
  * be woken by a message.
  */
 
-import { existsSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { type AgentCompletion, AgentProcess } from "./agent-process.js";
+import { type AgentCompletion, AgentProcess, resumePathError } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { createLiveChannels } from "./live-output.js";
 import { createLiveTree } from "./live-tree.js";
@@ -498,17 +497,16 @@ export default function (pi: ExtensionAPI) {
 			// completion notification reported). Validated here so the model gets
 			// one clear error instead of a child that dies on startup.
 			const resume = params.resume?.trim();
-			if (resume !== undefined && resume === "") {
+			const resumeError =
+				resume === undefined
+					? undefined
+					: resume === ""
+						? "`resume` must be a session file path"
+						: resumePathError(resume);
+			if (resumeError) {
 				return {
-					content: [{ type: "text", text: "`resume` must be a session file path." }],
-					details: { error: "`resume` must be a session file path" },
-					isError: true,
-				};
-			}
-			if (resume !== undefined && !existsSync(resume)) {
-				return {
-					content: [{ type: "text", text: `session not found: ${resume}` }],
-					details: { error: `session not found: ${resume}` },
+					content: [{ type: "text", text: resumeError }],
+					details: { error: resumeError },
 					isError: true,
 				};
 			}

@@ -265,7 +265,15 @@ queued → running ──→ completed（通知）
 
 `agent_spawn(resume: "<session path>", prompt, label)`：子进程用 `--session <path>` 启动（不再是 `--session-dir`），pi 加载那段历史，本次 prompt 在其上继续。恢复后是**新 id**——旧 id 已随进程消失，复用会让「id ↔ 进程」的对应关系带条件。
 
-路径来源：完成通知的 LLM 可见 JSON 里有 `session_path`，卡片 footer 里也给人看。会话文件不存在或传空串时直接报错，不把坏参数丢给子进程。
+路径来源：完成通知的 LLM 可见 JSON 里有 `session_path`，卡片 footer 里也给人看。
+
+边界校验只做三件 pi 做得不好或会静默出错的事（实测：目录 → 裸 `EISDIR`，不说是哪个参数；**空文件 → 不报错，直接当新会话跑**，调用方以为恢复了、实际上下文是空的）：
+
+- 路径不存在 → `session not found: <path>`
+- 不是普通文件 → `not a session file: <path>`
+- 空文件 → `session file is empty (nothing to resume): <path>`
+
+会话格式本身交给 pi：损坏文件它会明确回 `Session file is not a valid pi session`，权限错误也只有拥有者进程能判断——在扩展里重写解析器只会多一份真相。
 
 `--session` 与 `--session-dir` 互斥地表达同一件事（会话落在哪里），所以恢复时不传后者。
 
