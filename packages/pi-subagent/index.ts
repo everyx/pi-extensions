@@ -36,6 +36,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess, resumePathError } from "./agent-process.js";
+import { TOOL_COPY } from "./copy.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { createLiveChannels } from "./live-output.js";
 import { createLiveTree } from "./live-tree.js";
@@ -229,45 +230,20 @@ interface SendParams {
 	message: string;
 }
 
-// agent_spawn parameter fields — one set, every session.
-const SpawnPromptField = Type.String({
-	description: "The task for the sub-agent.",
-});
-const SpawnLabelField = Type.String({
-	description: "Task label.",
-});
-const SpawnModelField = Type.Optional(
-	Type.String({
-		description:
-			'Model for the sub-agent — provider/modelId or fuzzy name (e.g. "haiku", "sonnet"). ' +
-			"Omit to inherit your current model — don't switch the model unless the task " +
-			"explicitly requires it.",
-	}),
-);
+// agent_spawn parameter fields — one set, every session. Descriptions live in
+// copy.ts (one reviewable block); a parameter whose name says it all has none.
+const spawnCopy = TOOL_COPY.agent_spawn;
+const SpawnPromptField = Type.String();
+const SpawnLabelField = Type.String();
+const SpawnModelField = Type.Optional(Type.String({ description: spawnCopy.paramDescriptions.model }));
 const SpawnThinkingField = Type.Optional(
 	StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"], {
-		description:
-			'Reasoning intensity for the sub-agent ("off"…"max"). ' +
-			"Omit to inherit your current thinking level — don't change it unless the task " +
-			"requires a different depth.",
+		description: spawnCopy.paramDescriptions.thinking,
 	}),
 );
-const SpawnToolsField = Type.Optional(
-	Type.Array(Type.String(), {
-		description:
-			"Tool allowlist for the sub-agent. Omit to grant all tools. For read-only " +
-			"exploration, restrict to read/grep/find/ls and consider a cheaper model.",
-	}),
-);
+const SpawnToolsField = Type.Optional(Type.Array(Type.String(), { description: spawnCopy.paramDescriptions.tools }));
 const SpawnTimeoutField = Type.Optional(
-	Type.Integer({
-		minimum: 1,
-		description:
-			"Optional wall-clock deadline for the whole task, in milliseconds. Omit for no " +
-			"time limit (the default — the child runs until it finishes or is stopped). " +
-			"Pass a value when you want to bound a risky/looping task; on expiry the agent is " +
-			"stopped and the call reports stopped.",
-	}),
+	Type.Integer({ minimum: 1, description: spawnCopy.paramDescriptions.timeoutMs }),
 );
 
 /**
@@ -287,37 +263,20 @@ export function buildSpawnParamsSchema(): ReturnType<typeof Type.Object> {
 		thinking: SpawnThinkingField,
 		tools: SpawnToolsField,
 		timeoutMs: SpawnTimeoutField,
-		resume: Type.Optional(
-			Type.String({
-				description:
-					"Session file to continue instead of starting fresh — the path a previous completion " +
-					"notification reported. The agent picks up that history and runs `prompt` on top of it.",
-			}),
-		),
-		persistent: Type.Optional(
-			Type.Boolean({
-				description:
-					"If true, keep the agent resident after it completes (idle, zero token) so you can " +
-					"send it follow-up messages later — the process stays alive until your session ends " +
-					"or until you stop it. Default false (the agent exits when done).",
-			}),
-		),
+		resume: Type.Optional(Type.String({ description: spawnCopy.paramDescriptions.resume })),
+		persistent: Type.Optional(Type.Boolean({ description: spawnCopy.paramDescriptions.persistent })),
 	});
 }
 
 const SpawnParamsSchema = buildSpawnParamsSchema();
 
 const StopParamsSchema = Type.Object({
-	agent_id: Type.String({ description: 'The agent id to stop (e.g. "@max").' }),
+	agent_id: Type.String({ description: TOOL_COPY.agent_stop.paramDescriptions.agent_id }),
 });
 
 const SendParamsSchema = Type.Object({
-	to: Type.String({
-		description:
-			'The agent id from agent_spawn (e.g. "@max" — a spawn result or completion ' +
-			'notification carries it), or "@parent" to message the session that spawned you.',
-	}),
-	message: Type.String({ description: "The message text." }),
+	to: Type.String({ description: TOOL_COPY.agent_send.paramDescriptions.to }),
+	message: Type.String(),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -455,20 +414,9 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "agent_spawn",
 		label: "Agent Spawn",
-		description:
-			"Spawn an isolated sub-agent in its own context window. The call returns an agent id " +
-			"immediately; the completion notification carries the result (status + agent id + final " +
-			"output). You can intervene with agent_stop / agent_send while it runs. persistent: true " +
-			"keeps it resident (idle) after completion — message it later to continue the same context.",
-		promptSnippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
-		promptGuidelines: [
-			"Use agent_spawn when a task would flood your context with verbose intermediate output — the sub-agent keeps it in its own window and returns only its final output.",
-			"For independent parallel work, issue several agent_spawn calls together — they run concurrently.",
-			"A spawned agent works in the background: if your answer depends on its result, wait for the completion notification before answering.",
-			"To continue an agent whose session has ended, spawn again with `resume` set to the session path its notification reported.",
-			"Write agent_spawn prompts self-contained: the sub-agent has zero context — include paths, constraints, and the expected output shape.",
-			"Long outputs are truncated for your context; when that happens the result carries the full-output file path — read it when you need everything.",
-		],
+		description: spawnCopy.description,
+		promptSnippet: spawnCopy.snippet,
+		promptGuidelines: [...spawnCopy.guidelines],
 		parameters: SpawnParamsSchema,
 
 		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
@@ -704,15 +652,9 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "agent_stop",
 		label: "Stop Agent",
-		description:
-			"Terminate a sub-agent: a running agent discards its work; a persistent (idle) " +
-			"agent exits and is removed. The completion notification is " +
-			"suppressed for deliberate stops.",
-		promptSnippet: "Stop a running or idle sub-agent",
-		promptGuidelines: [
-			"Use agent_stop when a background agent is consuming tokens on a wrong path — stop it and respawn with a corrected prompt.",
-			"Stop a persistent agent when you no longer need it — an idle agent still holds a resident process until stopped.",
-		],
+		description: TOOL_COPY.agent_stop.description,
+		promptSnippet: TOOL_COPY.agent_stop.snippet,
+		promptGuidelines: [...TOOL_COPY.agent_stop.guidelines],
 		parameters: StopParamsSchema,
 
 		async execute(_toolCallId, raw, _signal, onUpdate) {
@@ -775,12 +717,9 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "agent_send",
 		label: "Send Message",
-		description: "Send a message to another agent — a sub-agent or your parent.",
-		promptSnippet: "Send a message to a sub-agent or your parent",
-		promptGuidelines: [
-			"Send follow-up instructions to a persistent agent with agent_send — its context is intact and it wakes to handle the message.",
-			"A sub-agent blocked on missing information should agent_send @parent a concise question; the parent replies the same way.",
-		],
+		description: TOOL_COPY.agent_send.description,
+		promptSnippet: TOOL_COPY.agent_send.snippet,
+		promptGuidelines: [...TOOL_COPY.agent_send.guidelines],
 		parameters: SendParamsSchema,
 
 		async execute(_toolCallId, raw, _signal, onUpdate, ctx) {
