@@ -17,6 +17,7 @@ describe("buildSpawnParamsSchema", () => {
 			"thinking",
 			"tools",
 			"timeoutMs",
+			"resume",
 			"persistent",
 		]);
 	});
