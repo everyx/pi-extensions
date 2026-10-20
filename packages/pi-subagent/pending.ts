@@ -2,15 +2,15 @@
  * pi-subagent — pending reports: the completion reports that are queued but
  * not yet in the transcript.
  *
- * A notification reaches pi as a follow-up, and pi hands follow-ups to the
- * model at the parent's next loop boundary — not the moment the child
- * finishes. In that window the report exists but nobody has read it: the
- * widget row is already gone (the agent finished) and the card is not there
- * yet. Left unsaid, the two events look like one thing happening twice.
+ * A notification reaches pi as a steer message, and pi hands it to the model
+ * at the parent's next tool boundary — not the moment the child finishes. In
+ * that window the report exists but nobody has read it: the widget row is
+ * already gone (the agent finished) and the card is not there yet. Left
+ * unsaid, the two events look like one thing happening twice.
  *
  * pi shows its own queued messages in exactly that window (`Steering:` /
  * `Follow-up:` lines above the editor, gone when delivered). Our notification
- * rides pi's agent-level follow-up queue, which that block does not read — so
+ * rides pi's agent-level steering queue, which that block does not read — so
  * we render the same idea ourselves: one dim line per undelivered report,
  * removed the moment its card lands.
  */
@@ -91,7 +91,7 @@ interface PendingEntry {
  *
  * One line per undelivered report, in completion order; a line goes away when
  * its card lands — so its lifetime is exactly the report's trip through pi's
- * follow-up queue, and the two events the user sees (line disappears, card
+ * steering queue, and the two events the user sees (line disappears, card
  * appears) are one event. Nothing else removes a line: a session that dies
  * mid-flight takes the widget with it.
  */

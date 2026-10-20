@@ -42,7 +42,7 @@ export function maybeWriteFullOutput(agentId: string, output: string): string {
  *  this message until its card lands (pending.ts). */
 export const NOTIFICATION_CUSTOM_TYPE = "subagent-notification";
 
-/** Deliver a completion notification: LLM JSON as follow-up + user card. */
+/** Deliver a completion notification: LLM JSON as a steer message + user card. */
 export function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: AgentCompletion): void {
 	const details: NotificationDetails = {
 		status: completion.status,
@@ -85,6 +85,9 @@ export function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, compl
 			display: true,
 			details,
 		},
-		{ deliverAs: "followUp", triggerTurn: true },
+		// Steer, not followUp: followUps are drained only when the model stops
+		// calling tools, and a model waiting on this agent does exactly that
+		// never. Steering arrives at the next tool boundary instead.
+		{ deliverAs: "steer", triggerTurn: true },
 	);
 }
