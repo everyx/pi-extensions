@@ -110,7 +110,7 @@ session: /path/...jsonl
  Agent @zoe — index (failed · queued): <错误首行>
 ```
 
-- 通知是 pi 的 followUp：pi 在**父进程下一个循环边界**（当前这一步工具调用跑完）才把它交给模型，不是子代理结束的那一刻。中间这段时间报告已存在（widget 行随 agent 结束已经移除）但谁都没读到——UI 必须说出来，否则「行消失」与「卡片出现」看起来像同一件事发生了两次
+- 通知是 pi 的 steer：pi 在**父进程下一个循环边界**（当前这一步工具调用跑完）才把它交给模型，不是子代理结束的那一刻。中间这段时间报告已存在（widget 行随 agent 结束已经移除）但谁都没读到——UI 必须说出来，否则「行消失」与「卡片出现」看起来像同一件事发生了两次
 - 形态取 pi 自己的排队消息块（`Steering:` / `Follow-up:`：aboveEditor、dim、单行截断）：一个未送达报告一行，按完成顺序堆叠。**不带** pi 那行 `↳ … to edit all queued messages`——那行暗示可以捞回编辑器改，而子代理报告不可编辑
 - `(queued)` 是这份报告的状态，冒号后是它的头一行（多行只取首行非空行）；异常结局带上结局词，与卡片尾部同一套词汇，`queued` 取 pi 的队列词汇
 - 生命周期：交给 pi 的那一刻出现，**卡片真正落进转录的那一刻消失**（pi 的 `message_end` 事件就是卡片出现）；会话被中途杀掉不专门兜底——widget 随会话一起走
@@ -198,7 +198,7 @@ queued → running ──→ completed（通知）
 父→子：现有 rpc（prompt / steer，见 RPC 协议投递策略）
 子→父：extension_ui_request（rpc 模式 setStatus 携带 JSON，专属 key "pi-subagent-msg"；
         fire-and-forget 尽力投递，无确认——本地 rpc 通行可靠）
-注入/唤醒：pi.sendMessage（deliverAs: "steer"|"followUp" + triggerTurn: true）
+注入/唤醒：pi.sendMessage（deliverAs: "steer" + triggerTurn: true）
 ```
 
 - **零 socket、零文件写入、零轮询**——纯内存事件流
@@ -220,10 +220,11 @@ queued → running ──→ completed（通知）
 
 ### 完成通知
 
-- `pi.sendMessage` → `deliverAs: "followUp"` + `triggerTurn: true`
+- `pi.sendMessage` → `deliverAs: "steer"` + `triggerTurn: true`
+- **必须是 steer，不是 followUp**（2026-10-20）：followUp 只在模型不再调用工具时排空（`agent-loop.js:192`），而等结果的模型恰恰一直在调工具（sleep 轮询）——永远排不空 = 死锁。steer 在每个工具边界排空（`agent-loop.js:180`），等待方式怎么变都不会卡住。三处投递（完成通知、`@parent` 插话、父→子 `agent_send`）现在同一模式
 - content：`{status, agent_id, result, session_path}`（LLM 可见）；persistent 时追加 `idle: true`
 - details：渲染数据，不进 LLM 上下文；persistent 通知卡追加 idle 状态词
-- spawn 失败不投递通知：isError 工具结果已经同时告知 LLM 和用户，followUp 通知会重复
+- spawn 失败不投递通知：isError 工具结果已经同时告知 LLM 和用户，重复的通知只会说两遍
 - **唤醒轮次同样投递**（2026-08-22）：persistent 代理被 agent_send 唤醒并成功完成后，输出经 onIdle → notifyCompletion 回到派发者上下文——与首轮对称（否则 `agent_send` 只回 "delivered"，答案落在父看不见的地方）。主动 stop（stoppedByControl）保持静默；失败唤醒照旧报 failed
 - **投递延迟是 pi 的语义，不是 bug**（2026-10-12 实测）：子代理完成 → widget 行当刻消失，通知卡要到父进程下一个循环边界才出现（实测父进程 `sleep 30` 在跑时差 18.2s；父进程空闲时两者同刻）。pi 0.85.1（1.0 前）行为一致，非版本回归。这段等待由「待送达报告行」显式承担
 

@@ -25,7 +25,7 @@
  * Every sub‑agent is a resident `pi --mode rpc` child with a persisted
  * session. agent_spawn returns an agent_id immediately and the result arrives
  * as a completion notification (`customType: "subagent-notification"`,
- * deliverAs "followUp"). agent_send messages flow along tree edges
+ * deliverAs "steer"). agent_send messages flow along tree edges
  * (parent↔child); persistent agents stay resident (idle, zero token) and can
  * be woken by a message.
  */
@@ -780,7 +780,7 @@ export default function (pi: ExtensionAPI) {
 	// ── Notification card (user side) ───────────────────
 	pi.registerMessageRenderer(NOTIFICATION_CUSTOM_TYPE, renderNotification);
 
-	// The card lands only when pi hands the queued follow-up to the model —
+	// The card lands only when pi hands the queued message to the model —
 	// that message event IS the card appearing, so it settles the queued report
 	// line (pending.ts). Until then the line is the only trace of the result.
 	pi.on("message_end", async (event) => {
