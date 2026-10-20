@@ -38,6 +38,7 @@ import { Type } from "typebox";
 import { type AgentCompletion, AgentProcess } from "./agent-process.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { createLiveChannels } from "./live-output.js";
+import { createLiveTree } from "./live-tree.js";
 import { resolveModel } from "./model.js";
 import { NOTIFICATION_CUSTOM_TYPE, notifyCompletion } from "./notification.js";
 import { PendingReports } from "./pending.js";
@@ -80,8 +81,14 @@ const MY_AGENT_ID = process.env.PI_SUBAGENT_AGENT_ID ?? "";
 /** I am a child agent when an identity was injected (root children get "a1"…). */
 const HAS_PARENT = MY_AGENT_ID !== "";
 
-/** TUI-only background-agent status widget (created lazily, tui mode only). */
+/** TUI-only status widget (created lazily, tui mode only) — a VIEW of the
+ *  live tree below, never a source of lifecycle truth. */
 let widget: AgentWidget | null = null;
+
+/** Who is alive and under whom — the drain rule's only source of truth.
+ *  Extension scope, mode-independent: sub-agents run in rpc mode with no
+ *  widget at all, and they still must know their own subtree is busy. */
+const liveTree = createLiveTree();
 
 /**
  * Queued-report lines above the editor (created lazily, tui mode only) — the
@@ -125,15 +132,31 @@ function captureUi(ctx: { mode: string; ui: unknown }): void {
 	uiRef = ctx.ui as { setStatus(key: string, text: string | undefined): void };
 }
 
-/** Narrow TUI adapter: AgentWidget → WidgetSurface (registry seam). */
-function widgetSurface(): WidgetSurface | null {
+/**
+ * Registry seam. Lifecycle always runs — the live tree is updated whether or
+ * not a TUI exists — and drawing is the only part that needs a widget.
+ *
+ * Keeping these together (rather than skipping the whole adapter in rpc mode)
+ * is what makes the drain rule mode-independent: every sub-agent runs headless
+ * and would otherwise never forget a dead child, waiting on it forever.
+ */
+function widgetSurface(): WidgetSurface {
 	const w = widget;
-	if (!w) return null;
 	return {
-		add: (agent, status) => w.add(agent as AgentProcess, status),
-		remove: (agentId, result) => w.remove(agentId, result),
-		setStatus: (agentId, status) => w.setStatus(agentId, status),
-		dispose: () => w.dispose(),
+		add: (agent, status) => {
+			liveTree.add(agent.agentId, MY_AGENT_ID);
+			w?.add(agent as AgentProcess, status);
+		},
+		// A dead agent's whole subtree is dead: the processes die with it and
+		// never report their own removal, so row cleanup follows the same
+		// cascade the live tree just computed.
+		remove: (agentId, result) => {
+			const ids = liveTree.remove(agentId);
+			if (!w) return;
+			for (const id of ids) w.remove(id, id === agentId ? result : "stopped");
+		},
+		setStatus: (agentId, status) => w?.setStatus(agentId, status),
+		dispose: () => w?.dispose(),
 	};
 }
 
@@ -477,6 +500,7 @@ export default function (pi: ExtensionAPI) {
 			// surface on the root widget. One module owns the decision.
 			const subtree = createSubtreeDisplay({
 				hasParent: HAS_PARENT,
+				live: liveTree,
 				getWidget: () => {
 					ensureWidget(ctx);
 					return widget ?? undefined;
@@ -582,14 +606,11 @@ export default function (pi: ExtensionAPI) {
 								.then(async (completion) => {
 									// The child's own turn is over; if agents it spawned are
 									// still running, hold it until they are (they die with it).
-									const w = widget;
-									if (w) {
-										await holdUntilDrained({
-											hasLiveDescendants: () => w.hasLiveDescendants(a.agentId),
-											waitForDrain: () => w.whenSubtreeDrained(a.agentId),
-											onHeld: () => registry.markIdle(a.agentId),
-										});
-									}
+									await holdUntilDrained({
+										hasLiveDescendants: () => liveTree.hasLiveDescendants(a.agentId),
+										waitForDrain: () => liveTree.whenDrained(a.agentId),
+										onHeld: () => registry.markIdle(a.agentId),
+									});
 									tree.remove(
 										a.agentId,
 										completion.status === "completed" ? "done" : completion.status === "failed" ? "failed" : "stopped",

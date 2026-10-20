@@ -55,7 +55,8 @@ export interface WidgetSurface {
 interface AgentRegistryDeps {
 	/** Deliver a completion notification (index.ts wraps pi.sendMessage). */
 	notify: (agent: RegisteredAgent, completion: AgentCompletion) => Promise<void> | void;
-	/** Lazy widget access — null in non-TUI modes. */
+	/** Lazy surface access. Always present: lifecycle bookkeeping must not
+	 *  depend on a TUI existing (the surface decides what it can draw). */
 	getWidget?: () => WidgetSurface | null;
 	/** This process is itself a child agent ("@parent" is deliverable upward). */
 	hasParent?: boolean;

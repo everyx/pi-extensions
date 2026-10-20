@@ -21,14 +21,6 @@ import { agentTitle } from "./views.js";
 
 export class AgentWidget {
 	private readonly widget: StatusWidget;
-	/** Nested-row parent links (childId → parentId). A dead parent can never
-	 *  report its children's removal, so the surface that owns the rows drops
-	 *  the subtree with it — otherwise a stopped agent leaves spinners behind. */
-	private readonly parentOf = new Map<string, string>();
-	/** Rows still present, by id — the live set the drain rule asks about. */
-	private readonly live = new Set<string>();
-	/** Fired once an agent's subtree is empty (it may now be torn down). */
-	private readonly drainWaiters = new Map<string, () => void>();
 
 	constructor(ui: ExtensionUIContext) {
 		// Widget title marks the strip as the Agent plugin's background tasks
@@ -43,7 +35,6 @@ export class AgentWidget {
 	 * status is removed by the widget's terminal cleanup on the spot.
 	 * No-op when the row is already present. */
 	add(agent: AgentProcess, status: "running" | "idle" = "running"): void {
-		this.live.add(agent.agentId);
 		this.widget.add({
 			id: agent.agentId,
 			title: agentTitle(agent.agentId, agent.label),
@@ -66,7 +57,6 @@ export class AgentWidget {
 		/** Direct parent's agent id — absent when the reporter predates the field. */
 		parentId?: string;
 	}): void {
-		this.live.add(agent.agentId);
 		this.widget.upsert({
 			id: agent.agentId,
 			title: agentTitle(agent.agentId, agent.label),
@@ -74,48 +64,13 @@ export class AgentWidget {
 			status: agent.status === "idle" ? "idle" : "running",
 			indent: agent.indent,
 		});
-		if (agent.parentId) this.parentOf.set(agent.agentId, agent.parentId);
 	}
 
-	/** Stop tracking; the end result feeds the lifetime progress meta. Removing
-	 *  a row also removes every row nested under it, at any depth: nothing will
-	 *  ever report their removal (their reporter is the process that died), and
-	 *  by construction each of them was still live when its ancestor went away
-	 *  — so they were stopped, never done. */
+	/** Drop one row. Cascading is NOT this surface's job: which agents die
+	 *  together is lifecycle truth (live-tree.ts), and a view only draws what
+	 *  it is told to draw. */
 	remove(agentId: string, result?: WidgetResult): void {
 		this.widget.remove(agentId, result);
-		this.parentOf.delete(agentId);
-		this.live.delete(agentId);
-		for (const [id, parent] of [...this.parentOf]) {
-			if (parent === agentId) this.remove(id, "stopped");
-		}
-		// Anything waiting for this subtree might now be drained: either the
-		// waiter itself is gone (nothing left to wait for) or its last
-		// descendant just went away.
-		for (const [id, drained] of [...this.drainWaiters]) {
-			if (this.live.has(id) && this.hasLiveDescendants(id)) continue;
-			this.drainWaiters.delete(id);
-			drained();
-		}
-	}
-
-	/** Does `agentId` still have live rows nested under it? The drain rule's
-	 *  question: an agent whose turn ended but whose descendants are still
-	 *  running must not be torn down (they die with it). */
-	hasLiveDescendants(agentId: string): boolean {
-		for (const [id, parent] of this.parentOf) {
-			if (parent !== agentId) continue;
-			if (this.live.has(id)) return true;
-			if (this.hasLiveDescendants(id)) return true;
-		}
-		return false;
-	}
-
-	/** Resolve once `agentId` has no live descendants — immediately when it
-	 *  already has none. Never resolves for an id that is itself gone. */
-	whenSubtreeDrained(agentId: string): Promise<void> {
-		if (!this.hasLiveDescendants(agentId)) return Promise.resolve();
-		return new Promise((resolve) => this.drainWaiters.set(agentId, resolve));
 	}
 
 	/** Update one row's status in place (idle ⇄ running for persistent agents). */
@@ -130,7 +85,6 @@ export class AgentWidget {
 
 	/** Clear everything (session shutdown). */
 	dispose(): void {
-		this.parentOf.clear();
 		this.widget.dispose();
 	}
 }

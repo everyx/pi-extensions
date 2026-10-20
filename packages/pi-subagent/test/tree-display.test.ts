@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentTreeEvent } from "../event-interpret.js";
+import { createLiveTree } from "../live-tree.js";
 import { createSubtreeDisplay } from "../tree-display.js";
 
 /** Fake widget surface — records what the display applies to it. */
@@ -32,6 +33,7 @@ function harness(opts: { hasParent?: boolean } = {}) {
 	const forward: AgentTreeEvent[] = [];
 	const display = createSubtreeDisplay({
 		hasParent: opts.hasParent ?? false,
+		live: createLiveTree(),
 		getWidget: () => (exists ? (w as never) : undefined),
 		forward: (e) => forward.push(e),
 	});
@@ -77,12 +79,40 @@ describe("createSubtreeDisplay", () => {
 		assert.equal(h.w.nested[0]?.parentId, "a");
 	});
 
-	it("activity and remove land on the same row", () => {
+	it("activity lands on the row; remove drops the row the live tree reports", () => {
 		const h = harness();
 		h.openWidget();
+		h.display.onTreeEvent(addAt(1));
 		h.display.onTreeEvent({ op: "activity", id: "k1", activity: { kind: "tool", name: "bash", args: "ls" } });
 		h.display.onTreeEvent({ op: "remove", id: "k1", status: "done" });
-		assert.deepEqual(h.w.calls, ["activity:k1:tool", "remove:k1:done"]);
+		assert.deepEqual(h.w.calls, ["add:k1@1", "activity:k1:tool", "remove:k1:done"]);
+	});
+
+	it("a removal cascades: rows for dead descendants go too", () => {
+		const h = harness();
+		h.openWidget();
+		h.display.onTreeEvent({ ...addAt(1), id: "parent" });
+		h.display.onTreeEvent({ ...addAt(2), id: "child", parent: "parent" });
+		h.w.calls.length = 0;
+
+		h.display.onTreeEvent({ op: "remove", id: "parent", status: "done" });
+		assert.deepEqual(h.w.calls.sort(), ["remove:child:stopped", "remove:parent:done"]);
+	});
+
+	it("lifecycle is tracked even when the display is only forwarding (rpc sub-agent)", () => {
+		// This is the review's blocker: a sub-agent has no widget, so a display-
+		// driven drain rule answered "nothing is alive under me" and tore the
+		// child down. The live tree must be updated whatever the anchor is.
+		const live = createLiveTree();
+		live.add("self", "");
+		const display = createSubtreeDisplay({
+			hasParent: true,
+			live,
+			getWidget: () => undefined, // rpc: no TUI at all
+			forward: () => {},
+		});
+		display.onTreeEvent({ ...addAt(1), id: "child", parent: "self" });
+		assert.equal(live.hasLiveDescendants("self"), true);
 	});
 
 	it("no widget (non-TUI root) → events are dropped, not thrown", () => {
