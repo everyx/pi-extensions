@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.1](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.5.0...pi-subagent-v1.5.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **pi-subagent:** deliver completion reports as steering, not follow-ups ([fb06f47](https://github.com/everyx/pi-extensions/commit/fb06f4746185e1e39bc40c2b47ed7d88a05c2fd6))
+* **pi-subagent:** state that the report arrives, not that the model must wait ([7e65fd3](https://github.com/everyx/pi-extensions/commit/7e65fd3161cf98ab130676ba360af711f100243d))
+
 ## [1.5.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.4.0...pi-subagent-v1.5.0) (2026-10-20)
 
 
