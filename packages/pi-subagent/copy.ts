@@ -48,7 +48,7 @@ export const TOOL_COPY = {
 		guidelines: [
 			"Write agent_spawn prompts self-contained — the sub-agent has zero context: include paths, constraints, and the expected output shape.",
 			"For independent work, issue several agent_spawn calls together; they run concurrently.",
-			"Wait for the completion notification when your answer depends on the result. To continue an agent whose session ended, spawn again with `resume` set to the path that notification reported.",
+			"The completion notification arrives on its own.",
 			"Long outputs are truncated for your context; the result then carries the full-output file path.",
 		],
 		paramDescriptions: {
