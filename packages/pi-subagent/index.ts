@@ -45,7 +45,7 @@ import { PendingReports } from "./pending.js";
 import { type AgentMessage, formatFrom } from "./protocol.js";
 import { AgentRegistry, type RegisteredAgent, type WidgetSurface } from "./registry.js";
 import { renderNotification } from "./render.js";
-import { holdUntilDrained, runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
+import { finishWhenDrained, runSpawnSession, type SpawnOutcome } from "./spawn-session.js";
 import { createSubtreeDisplay } from "./tree-display.js";
 import type { SubagentDetails } from "./types.js";
 import { atId, sendView, spawnView, stopView } from "./views.js";
@@ -603,20 +603,24 @@ export default function (pi: ExtensionAPI) {
 							tree.add(a, "running"); // up-report: my child exists
 							void a
 								.waitForCompletion()
-								.then(async (completion) => {
-									// The child's own turn is over; if agents it spawned are
-									// still running, hold it until they are (they die with it).
-									await holdUntilDrained({
-										hasLiveDescendants: () => liveTree.hasLiveDescendants(a.agentId),
-										waitForDrain: () => liveTree.whenDrained(a.agentId),
+								.then((completion) =>
+									finishWhenDrained({
+										agentId: a.agentId,
+										live: liveTree,
 										onHeld: () => registry.markIdle(a.agentId),
-									});
-									tree.remove(
-										a.agentId,
-										completion.status === "completed" ? "done" : completion.status === "failed" ? "failed" : "stopped",
-									);
-									registry.complete(a as AgentProcess, completion);
-								})
+										finish: () => {
+											tree.remove(
+												a.agentId,
+												completion.status === "completed"
+													? "done"
+													: completion.status === "failed"
+														? "failed"
+														: "stopped",
+											);
+											registry.complete(a as AgentProcess, completion);
+										},
+									}),
+								)
 								// Defensive: waitForCompletion is deadline-bounded and never
 								// rejects today — if it ever does, clean up without notifying.
 								.catch(() => {
