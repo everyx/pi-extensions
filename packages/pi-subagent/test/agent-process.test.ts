@@ -237,6 +237,10 @@ describe("AgentProcess — waitForCompletion", () => {
 		);
 		assert.equal(fake.endInputCalls, 1, "child was hard-stopped via stdin EOF");
 		assert.equal(agent.stoppedByControl, false, "timeout escalation is not a user-controlled stop");
+		// Issue #51: a bare "stopped" left the parent guessing why, and it
+		// re-spawned the task from scratch instead of resuming this session.
+		assert.match(completion.output, /^final answer\n\nStopped: the 30ms timeout expired\./);
+		assert.match(completion.output, /`resume`/);
 	});
 
 	it("does not hard-stop when the child settles within the abort grace window", async () => {
@@ -250,6 +254,8 @@ describe("AgentProcess — waitForCompletion", () => {
 		const completion = await completionPromise;
 		assert.equal(completion.status, "stopped");
 		assert.equal(fake.endInputCalls, 0, "grace settle avoids the hard stop");
+		// Partial work survives the note — it is appended, never replaced.
+		assert.match(completion.output, /^final answer\n\nStopped: the 30ms timeout expired\./);
 	});
 
 	it("waits forever when no timeoutMs is given (no hidden deadline)", async () => {
@@ -294,7 +300,8 @@ describe("AgentProcess — waitForCompletion", () => {
 
 		const completion = await completionPromise;
 		assert.equal(completion.status, "failed");
-		assert.equal(completion.output, "FATAL: bad API key");
+		assert.match(completion.output, /^Failed: FATAL: bad API key\./);
+		assert.match(completion.output, /`resume`/);
 	});
 });
 
@@ -342,7 +349,8 @@ describe("AgentProcess — agent API errors", () => {
 
 		const completion = await completionPromise;
 		assert.equal(completion.status, "failed");
-		assert.equal(completion.output, "429 Rate limited");
+		assert.match(completion.output, /^Failed: 429 Rate limited\./);
+		assert.match(completion.output, /`resume`/);
 	});
 
 	it("stays completed when agent_end has no error stop reason", async () => {

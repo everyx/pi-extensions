@@ -232,6 +232,7 @@ queued → running ──→ completed（通知）
 
 - **默认不限**——对齐 Codex/CC 的克制姿态。唯一限制是可选 `timeoutMs`（毫秒），未传 = 无限制
 - token 无任何限制；`get_session_stats` 仅用于通知卡统计
+- **非自然结束必须说明原因**（issue #51）：`completed` 自带答案，其余结束都是子进程被从外面切断了——它自己什么都没说。所以 `endingNote()` 给 stopped（到点）和 failed（报错/非零退出）追加一段：说清是什么让它结束，并指明 `resume` 可续；`withEnding()` 把它接在子代理已产出的部分后面（只追加，不替换）。没有这句，父代理只能猜（现场原话「被中断了」），然后从头重跑——实测重烧 30 分钟，而能续的 session 就在手边
 
 ### 会话存储
 
