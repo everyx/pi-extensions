@@ -23,6 +23,84 @@ import type { AgentMessage, RpcCommand, RpcEvent } from "./protocol.js";
 import { RpcClient, type RpcClientOptions } from "./rpc-client.js";
 import type { RenderEvent } from "./types.js";
 
+/**
+ * What ended the run, for the endings that cannot say so themselves.
+ *
+ * A completion carries its answer; a deadline stop and a failure carry
+ * nothing — the child was killed or cut off before it could speak. Left as a
+ * bare `"status":"stopped"` the parent reads an unexplained death, guesses,
+ * and spawns the task over from scratch; the session it already paid for is
+ * one `resume` away (issue #51: 30 minutes re-run by hand). So every ending
+ * other than "it finished" names its cause and says the run is resumable.
+ */
+export interface Ending {
+	status: AgentStatus;
+	/** The deadline fired and we killed it (as opposed to a user stop). */
+	hardAborted: boolean;
+	timeoutMs?: number;
+	agentError?: string;
+	exitCode: number | null;
+	stderr?: string;
+}
+
+const RESUMABLE = "Continue the same session with `resume`.";
+
+export function endingNote(e: Ending): string | undefined {
+	if (e.hardAborted && e.timeoutMs !== undefined) {
+		return `Stopped: the ${e.timeoutMs}ms timeout expired. ${RESUMABLE}`;
+	}
+	if (e.status === "failed") {
+		const cause = sentence(
+			e.agentError?.trim()
+				? oneLine(e.agentError)
+				: e.stderr?.trim()
+					? oneLine(e.stderr)
+					: e.exitCode !== null
+						? `pi exited (code ${e.exitCode})`
+						: "the run ended with an error",
+		);
+		return `Failed: ${cause} ${RESUMABLE}`;
+	}
+	if (e.status === "stopped") return `Stopped before it finished. ${RESUMABLE}`;
+	return undefined;
+}
+
+/** The child's own words, then why it stopped — one paragraph each. */
+export function withEnding(said: string, note: string | undefined): string {
+	if (!note) return said;
+	return said.trim() ? `${said}\n\n${note}` : note;
+}
+
+/** One sentence, one period: causes arrive with their own punctuation. */
+function sentence(cause: string): string {
+	return `${cause.replace(/[.\s]+$/, "")}.`;
+}
+
+/** The one line worth carrying: the last one that says something — errors
+ *  end with their cause, not with the stack that led to it — capped so a
+ *  trace cannot flood the parent's context. */
+function oneLine(text: string): string {
+	const lines = text.split(/\r?\n/).filter((line) => line.trim());
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const line = lines[i].trim();
+		if (!isFrame(line)) return cap(line);
+	}
+	// Nothing but frames: the last one beats saying nothing.
+	return cap(lines.at(-1)?.trim() ?? "");
+}
+
+/** A location, not a cause: `at f (x.js:1:1)`, `File "x.py", line 3`,
+ *  `... 5 more`. A trailing run of these is the part worth skipping. */
+const FRAME = /^(at\s|File "|\.{3}(\s*\d|\s*$))/;
+
+function isFrame(line: string): boolean {
+	return FRAME.test(line);
+}
+
+function cap(line: string): string {
+	return line.length > 200 ? `${line.slice(0, 200)}\u2026` : line;
+}
+
 type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
 
 type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
@@ -336,16 +414,19 @@ export class AgentProcess {
 			this.status = "completed";
 		}
 
-		// A failed child usually leaves empty terminal text; the real root cause
-		// lives in the model error (agentError) or the stderr the RpcClient
-		// captured before exit — surface it instead of a blank "Sub-agent failed."
-		const output = await this.lastOutput();
-		const finalOutput =
-			this.agentError && !output.trim()
-				? this.agentError
-				: this.status === "failed" && !output.trim()
-					? this.client.stderrText
-					: output;
+		// The failed/stopped endings have no words of their own — the reason
+		// rides in a note, after whatever the child did manage to say.
+		const finalOutput = withEnding(
+			await this.lastOutput(),
+			endingNote({
+				status: this.status,
+				hardAborted: this.hardAborted,
+				timeoutMs: this.timeoutMs,
+				agentError: this.agentError ?? undefined,
+				exitCode: this.client.exitCode,
+				stderr: this.client.stderrText,
+			}),
+		);
 		const stats = await this.getStats();
 		return {
 			status: this.status,
