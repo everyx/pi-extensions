@@ -47,8 +47,8 @@ export const TOOL_COPY = {
 		snippet: "Spawn an isolated sub-agent for heavy, parallel, or context-heavy work",
 		guidelines: [
 			"Write agent_spawn prompts self-contained — the sub-agent has zero context: include paths, constraints, and the expected output shape.",
-			"For independent work, issue several agent_spawn calls together; they run concurrently.",
-			"The completion notification arrives on its own.",
+			"For independent work, issue several agent_spawn calls together and keep working while they run.",
+			"When the agents are the only thing left to wait for, end your turn instead of sleeping or polling — the next result starts a new turn.",
 			"Long outputs are truncated for your context; the result then carries the full-output file path.",
 		],
 		paramDescriptions: {
