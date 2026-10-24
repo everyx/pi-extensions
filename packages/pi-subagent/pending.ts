@@ -18,7 +18,7 @@
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { capPlain, structRow } from "@everyx/pi-ui/width.js";
 import type { AgentCompletion } from "./agent-process.js";
-import { NOTIFICATION_CUSTOM_TYPE } from "./notification.js";
+import { NOTIFICATION_CUSTOM_TYPE, type NotificationAgent } from "./notification.js";
 import { agentTitle } from "./views.js";
 
 /** Own widget key — the agent rows live under pi-ui's, so both can coexist. */
@@ -84,6 +84,26 @@ export function reportOf(message: unknown): string | undefined {
 interface PendingEntry {
 	agentId: string;
 	line: string;
+	/** The report itself, kept so it can be handed to pi again: the line is
+	 *  what the user sees, this is what the model must eventually receive. */
+	report: PendingReport;
+	/** When it was queued — a delivery started after a settle is still in
+	 *  flight, and re-sending it would report the same result twice. */
+	queuedAt: number;
+	/** When it was last handed back for delivery, so a burst of settles inside
+	 *  the retry delay cannot send the same report twice. */
+	retriedAt?: number;
+}
+
+/** A retry is given this long to reach the transcript before the next settle is
+ *  allowed to send it again: long enough that a landed card has settled its
+ *  line, short enough that a lost retry is not waited on forever. */
+const RETRY_COOLDOWN_MS = 5_000;
+
+/** A report awaiting delivery, in the only shape driving it again needs. */
+export interface PendingReport {
+	agent: NotificationAgent;
+	completion: AgentCompletion;
 }
 
 /**
@@ -103,15 +123,58 @@ export class PendingReports {
 	private registered = false;
 	private tui: { requestRender(): void } | undefined;
 
-	constructor(ui: ExtensionUIContext) {
+	private readonly retryCooldownMs: number;
+
+	constructor(ui: ExtensionUIContext, opts: { retryCooldownMs?: number } = {}) {
 		this.ui = ui;
+		this.retryCooldownMs = opts.retryCooldownMs ?? RETRY_COOLDOWN_MS;
 	}
 
 	/** Show a report as queued — called the moment the notification is handed
 	 *  to pi, i.e. before pi can have rendered its card. */
-	add(agent: { agentId: string; label: string }, completion: { status: CompletionStatus; output: string }): void {
-		this.entries.set(this.nextId++, { agentId: agent.agentId, line: pendingLine(agent, completion) });
+	add(agent: NotificationAgent, completion: AgentCompletion): void {
+		this.entries.set(this.nextId++, {
+			agentId: agent.agentId,
+			line: pendingLine(agent, completion),
+			report: { agent, completion },
+			queuedAt: Date.now(),
+		});
 		this.refresh();
+	}
+
+	/**
+	 * Hand every report that never landed back to the caller for delivery.
+	 *
+	 * A line lives exactly as long as its card is missing, and pi settles a run
+	 * only when nothing queued will run — so a report still waiting once the run
+	 * is over was lost, not delayed. Esc wipes the queue it was riding
+	 * (`restoreQueuedMessagesToEditor` → `agent.clearAllQueues`), and a run that
+	 * fails to start drops it before it is ever queued. Neither is visible from
+	 * here, but the evidence is the same: the card never came.
+	 *
+	 * Two things keep one report from being sent twice. A report queued after
+	 * the settle is on a delivery that has not had its turn yet, and a report
+	 * retried moments ago may be on one right now — settles can arrive in bursts,
+	 * and each arms its own timer.
+	 *
+	 * A retry cannot collide with a first attempt that is merely slow: a settle
+	 * means the queue is empty (`_handlePostAgentRun` continues while
+	 * `hasQueuedMessages()`), so a message still waiting in it never gets this
+	 * far. The one exception is an aborted run outside the TUI, where abort
+	 * leaves the queue alone — there the same result can be reported twice, which
+	 * is the cheaper failure than a parent that never hears back.
+	 */
+	undelivered(queuedBefore: number, deliver: (report: PendingReport) => void): number {
+		const now = Date.now();
+		let handed = 0;
+		for (const entry of this.entries.values()) {
+			if (entry.queuedAt > queuedBefore) continue;
+			if (entry.retriedAt !== undefined && now - entry.retriedAt < this.retryCooldownMs) continue;
+			entry.retriedAt = now;
+			deliver(entry.report);
+			handed++;
+		}
+		return handed;
 	}
 
 	/** One of our notification cards landed in the transcript: that report is

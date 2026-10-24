@@ -227,6 +227,7 @@ queued → running ──→ completed（通知）
 - spawn 失败不投递通知：isError 工具结果已经同时告知 LLM 和用户，重复的通知只会说两遍
 - **唤醒轮次同样投递**（2026-08-22）：persistent 代理被 agent_send 唤醒并成功完成后，输出经 onIdle → notifyCompletion 回到派发者上下文——与首轮对称（否则 `agent_send` 只回 "delivered"，答案落在父看不见的地方）。主动 stop（stoppedByControl）保持静默；失败唤醒照旧报 failed
 - **投递延迟是 pi 的语义，不是 bug**（2026-10-12 实测）：子代理完成 → widget 行当刻消失，通知卡要到父进程下一个循环边界才出现（实测父进程 `sleep 30` 在跑时差 18.2s；父进程空闲时两者同刻）。pi 0.85.1（1.0 前）行为一致，非版本回归。这段等待由「待送达报告行」显式承担
+- **丢了的报告要重投**（2026-10-24）：pending 行活着 = 卡片没落。pi 只在「这一轮跑完且队列已空」时 settle（`_handlePostAgentRun` → `hasQueuedMessages()`），所以 settle 之后还在等的报告是**丢了**，不是延迟。两条已证实的丢失路径：① Esc / `ctx.abort()` 走 `restoreQueuedMessagesToEditor` → `agent.clearAllQueues()`，而我们的 custom message 不在它恢复给编辑器的 session 级名单里（那名单只装用户手打，`agent-session.js:1796`）—— 直接蒸发；② run 启动失败（`_prepareRun` 抛；`pi.sendMessage` 把拒绝只报给 UI，扩展不可见）。两者我们都看不见，唯一证据是卡片没来。所以 `agent_settled` 后 500ms 仍 pending、且创建时间早于该次 settle 的条目原样重投一次（同一条目 5s 冷却）。普通 settle 不会与「还在队列里的原件」撞车（settle 的前提就是队列空），但 aborted 且非 TUI 的 abort 不清队列 —— 那种情况下宁可重复一次，也不赌丢失。A/B 实测（同一个「子代理在长工具里到点、父进程按 Esc」场景）：无重投 0 条，有重投 1 条（Esc 后 1 秒落地）
 
 ### Graceful turn limits
 

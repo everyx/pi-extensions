@@ -12,7 +12,6 @@
 import { type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { stashOverflow, truncationMarker } from "@everyx/pi-ui/context.js";
 import type { AgentCompletion } from "./agent-process.js";
-import type { RegisteredAgent } from "./registry.js";
 import type { NotificationDetails } from "./types.js";
 import { agentTitle } from "./views.js";
 
@@ -42,8 +41,19 @@ export function maybeWriteFullOutput(agentId: string, output: string): string {
  *  this message until its card lands (pending.ts). */
 export const NOTIFICATION_CUSTOM_TYPE = "subagent-notification";
 
+/** What a notification needs to know about the agent it reports on. The live
+ *  process is not on the list — which is what lets an undelivered report be
+ *  handed to pi again after the agent itself is long gone. */
+export interface NotificationAgent {
+	agentId: string;
+	label: string;
+	model?: string;
+	thinking?: string;
+	persistent?: boolean;
+}
+
 /** Deliver a completion notification: LLM JSON as a steer message + user card. */
-export function notifyCompletion(pi: ExtensionAPI, agent: RegisteredAgent, completion: AgentCompletion): void {
+export function notifyCompletion(pi: ExtensionAPI, agent: NotificationAgent, completion: AgentCompletion): void {
 	const details: NotificationDetails = {
 		status: completion.status,
 		agent_id: agent.agentId,

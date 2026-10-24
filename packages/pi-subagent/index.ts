@@ -82,6 +82,11 @@ const MY_AGENT_ID = process.env.PI_SUBAGENT_AGENT_ID ?? "";
 /** I am a child agent when an identity was injected (root children get "a1"…). */
 const HAS_PARENT = MY_AGENT_ID !== "";
 
+/** How long to let pi hand settle-time messages to the model before deciding a
+ *  report was lost — long enough for a queued delivery to land and settle its
+ *  line, short enough that a lost report arrives in the same breath. */
+const REDELIVERY_DELAY_MS = 500;
+
 /** TUI-only status widget (created lazily, tui mode only) — a VIEW of the
  *  live tree below, never a source of lifecycle truth. */
 let widget: AgentWidget | null = null;
@@ -785,6 +790,23 @@ export default function (pi: ExtensionAPI) {
 	// line (pending.ts). Until then the line is the only trace of the result.
 	pi.on("message_end", async (event) => {
 		pending?.settle(event.message);
+	});
+
+	// A report that never landed gets another chance. pi settles a run only
+	// when nothing queued will run, so a line still waiting here was lost, not
+	// delayed: Esc wipes the queue it was riding (restoreQueuedMessagesToEditor
+	// → agent.clearAllQueues, and our message is not in the session-level list
+	// it restores to the editor), and a run that fails to start drops it before
+	// it is ever queued. Both are invisible from an extension — the missing card
+	// is the only evidence, and it is enough to retry.
+	pi.on("agent_settled", async () => {
+		const settledAt = Date.now();
+		// Deferred: pi hands settle-time messages to the model immediately after
+		// this event, and re-sending ahead of that would report the same result
+		// twice. One turn of the event loop is too early; this is not.
+		setTimeout(() => {
+			pending?.undelivered(settledAt, (report) => notifyCompletion(pi, report.agent, report.completion));
+		}, REDELIVERY_DELAY_MS);
 	});
 
 	// ── Cleanup on exit ─────────────────────────────────
