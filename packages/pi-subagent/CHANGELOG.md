@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.5.1...pi-subagent-v1.6.0) (2026-10-24)
+
+
+### Features
+
+* **pi-subagent:** say why a sub-agent ended, and that it can be resumed ([b306ca0](https://github.com/everyx/pi-extensions/commit/b306ca0b8d7d1ac1fea63d7590cc8de0456ba60b))
+
+
+### Bug Fixes
+
+* **pi-subagent:** deliver a report again when pi lost it ([fc17770](https://github.com/everyx/pi-extensions/commit/fc177708b71307a146977c3a66607d7777495d9e))
+* **pi-subagent:** tell the model what to do instead of waiting ([73dcf65](https://github.com/everyx/pi-extensions/commit/73dcf6529a892a9c7349de3db3b28e965d048075))
+
 ## [1.5.1](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.5.0...pi-subagent-v1.5.1) (2026-10-20)
 
 
