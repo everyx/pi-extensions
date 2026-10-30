@@ -103,6 +103,38 @@ function cap(line: string): string {
 
 type AgentStatus = "queued" | "running" | "completed" | "failed" | "stopped";
 
+/** A depth from the environment: the fallback when unset, blank, or
+ *  malformed — never NaN (a NaN cap would silently grant or deny delegation
+ *  for a whole session), and never 0 for an empty string (`Number("")` is 0,
+ *  which would quietly lock delegation out).
+ *
+ *  Decimal only: `Number` would also read `0x10` as 16 and `1e2` as 100, and a
+ *  configuration value that means something other than what it looks like is
+ *  worse than one that is rejected. */
+export function readDepth(raw: string | undefined, fallback = 0): number {
+	const text = raw?.trim();
+	if (!text || !/^\d+$/.test(text)) return fallback;
+	const n = Number(text);
+	return Number.isSafeInteger(n) ? n : fallback;
+}
+
+/** Whether a session at `depth` may delegate at all. A child at the cap gets
+ *  no delegation tool — the capability is absent, not refused. */
+export function canDelegate(depth: number, maxDepth: number): boolean {
+	return depth < maxDepth;
+}
+
+/**
+ * The environment that tells a child where it sits: its id, and its depth.
+ *
+ * Depth is what makes "the parent delegates, the child executes" structural
+ * rather than advisory — a child at the cap has no delegation tool at all, so
+ * the division of labour never depends on the model choosing to respect it.
+ */
+export function childEnv(agentId: string, parentDepth: number): Record<string, string> {
+	return { PI_SUBAGENT_AGENT_ID: agentId, PI_SUBAGENT_DEPTH: String(parentDepth + 1) };
+}
+
 type TerminalStatus = Exclude<AgentStatus, "queued" | "running">;
 
 interface AgentStats {

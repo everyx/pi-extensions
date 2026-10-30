@@ -35,7 +35,14 @@ import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { type AgentCompletion, AgentProcess, resumePathError } from "./agent-process.js";
+import {
+	type AgentCompletion,
+	AgentProcess,
+	canDelegate,
+	childEnv,
+	readDepth,
+	resumePathError,
+} from "./agent-process.js";
 import { TOOL_COPY } from "./copy.js";
 import { type AgentActivity, type AgentTreeEvent, MSG_STATUS_KEY, TREE_STATUS_KEY } from "./event-interpret.js";
 import { createLiveChannels } from "./live-output.js";
@@ -81,6 +88,13 @@ const SUBAGENT_SESSION_DIR = resolveSubagentSessionDir();
 const MY_AGENT_ID = process.env.PI_SUBAGENT_AGENT_ID ?? "";
 /** I am a child agent when an identity was injected (root children get "a1"…). */
 const HAS_PARENT = MY_AGENT_ID !== "";
+
+/** How deep this session sits in a delegation tree (root = 0). */
+const MY_DEPTH = readDepth(process.env.PI_SUBAGENT_DEPTH);
+/** How deep delegation may go. Default 1: the parent delegates, the child
+ *  executes — a child that re-delegates turns one task into an unbounded tree
+ *  nobody is watching. Raise it deliberately with PI_SUBAGENT_MAX_DEPTH. */
+const MAX_DEPTH = readDepth(process.env.PI_SUBAGENT_MAX_DEPTH, 1);
 
 /** How long to let pi hand settle-time messages to the model before deciding a
  *  report was lost — long enough for a queued delivery to land and settle its
@@ -416,242 +430,243 @@ export default function (pi: ExtensionAPI) {
 	const tree = createTreeTelemetry(HAS_PARENT);
 
 	// ── agent_spawn ────────────────────────────────────
-	pi.registerTool({
-		name: "agent_spawn",
-		label: "Agent Spawn",
-		description: spawnCopy.description,
-		promptSnippet: spawnCopy.snippet,
-		promptGuidelines: [...spawnCopy.guidelines],
-		parameters: SpawnParamsSchema,
+	// No delegation tool at the depth cap: the capability is absent, not merely
+	// discouraged, so the model cannot burn a turn discovering the refusal.
+	if (canDelegate(MY_DEPTH, MAX_DEPTH))
+		pi.registerTool({
+			name: "agent_spawn",
+			label: "Agent Spawn",
+			description: spawnCopy.description,
+			promptSnippet: spawnCopy.snippet,
+			promptGuidelines: [...spawnCopy.guidelines],
+			parameters: SpawnParamsSchema,
 
-		async execute(_toolCallId, raw, signal, onUpdate, ctx) {
-			captureUi(ctx);
-			const params = raw as unknown as SpawnParams;
-			// Label is cosmetic — it names the session, card, and notifications,
-			// and never changes what the agent does.
-			const label = params.label?.trim();
-			if (!label) {
-				return {
-					content: [{ type: "text", text: "`label` is required." }],
-					details: { error: "`label` is required." },
-					isError: true,
-				};
-			}
-			const task = params.prompt?.trim();
-			if (!task) {
-				return {
-					content: [{ type: "text", text: "`prompt` is required." }],
-					details: { error: "`prompt` is required." },
-					isError: true,
-				};
-			}
-
-			// Resume: continue an existing session file (the path a previous
-			// completion notification reported). Validated here so the model gets
-			// one clear error instead of a child that dies on startup.
-			const resume = params.resume?.trim();
-			const resumeError =
-				resume === undefined
-					? undefined
-					: resume === ""
-						? "`resume` must be a session file path"
-						: resumePathError(resume);
-			if (resumeError) {
-				return {
-					content: [{ type: "text", text: resumeError }],
-					details: { error: resumeError },
-					isError: true,
-				};
-			}
-
-			const resolved = resolveModel(ctx.modelRegistry, ctx.model, params.model);
-			if (resolved.error) {
-				// Background: render as the status line `Agent <label> start failed:
-				// <reason>` (the id never exists yet — spawn didn't happen).
-				return {
-					content: [{ type: "text", text: resolved.error }],
-					details: { error: resolved.error },
-					isError: true,
-				};
-			}
-
-			const startedAt = Date.now();
-
-			// Where my child's subtree telemetry lands: forward to my parent, or
-			// surface on the root widget. One module owns the decision.
-			const subtree = createSubtreeDisplay({
-				hasParent: HAS_PARENT,
-				live: liveTree,
-				getWidget: () => {
-					ensureWidget(ctx);
-					return widget ?? undefined;
-				},
-				forward: (event) => tree.report(event),
-			});
-			// Short human-name id (max, zoe…) — the LLM-facing reference. No tree
-			// structure: agents address only ids they were given, hop by hop.
-			const agentId = registry.nextAgentId();
-			// Wake-turn ending → completion notification. The assembly is
-			// identical for both endings except status/output-default.
-			const notifyWake = async (status: "completed" | "failed"): Promise<void> => {
-				const [output, stats] = await Promise.all([agent.lastOutput(), agent.getStats()]);
-				deliverNotification(agent, {
-					status,
-					output: output || (status === "failed" ? "Follow-up turn failed (model API error)." : output),
-					stats: {
-						tokens: stats?.tokens ?? 0,
-						toolUses: stats?.toolUses ?? 0,
-						durationMs: Date.now() - agent.startedAt,
-					},
-					sessionPath: agent.sessionPath,
-					sessionId: agent.sessionId,
-				});
-			};
-			const live = createLiveChannels({
-				// getWidget, not widget: the widget is created on first use, so a
-				// captured reference would be null for every update before that.
-				surfaces: { getWidget: () => widget ?? undefined, tree },
-			});
-
-			const agent = new AgentProcess({
-				agentId,
-				cwd: ctx.cwd,
-				model: resolved.model,
-				thinking: params.thinking ?? pi.getThinkingLevel(),
-				tools: params.tools,
-				label,
-				sessionDir: SUBAGENT_SESSION_DIR,
-				resumeSessionPath: resume,
-				timeoutMs: params.timeoutMs,
-				// Resident after completion (idle, zero token) — explicit opt-in.
-				persistent: params.persistent,
-				// Identity for in-tree messaging: PI_SUBAGENT_AGENT_ID marks this
-				// process as a child (agent_send is registered on every instance).
-				env: {
-					PI_SUBAGENT_AGENT_ID: agentId,
-				},
-				// Child→parent messages re-enter the router on this hop. Tree telemetry
-				// from deeper spawns forwards up (depth + 1) or lands on the root widget.
-				onMessage: onChildMessage,
-				onTreeEvent: (event) => subtree.onTreeEvent(event),
-				// A wake finished. Completed: its output must reach this spawner's
-				// context — symmetric with the first-completion notification, an
-				// agent_send "delivered" alone would leave the answer unread.
-				// Deliberate stops stay silent (stoppedByControl). A failed
-				// follow-up is reported (abnormal end) then cleaned up.
-				onIdle: (outcome) => {
-					if (outcome === "completed") {
-						if (!agent.stoppedByControl) {
-							void notifyWake("completed").catch(() => {}); // best-effort: must not crash the host
-						}
-						registry.markIdle(agentId);
-						return;
-					}
-					void notifyWake("failed")
-						.then(() => tree.remove(agentId, "failed"))
-						.then(() => registry.stopAndRemove(agentId))
-						.catch(() => {}); // best-effort: a cleanup failure must not crash the host
-				},
-				// Where live output goes lives in live-output.ts: the widget row and
-				// the tree telemetry hear about every update.
-				onDelta: (delta) => live.onDelta(agent, delta),
-				onActivityChange: (activity) => live.onActivity(agent, activity),
-			});
-
-			// Lifecycle lives in spawn-session.ts — this switch only formats
-			// outcomes into tool results; classification rules are table-tested
-			// in test/spawn-session.test.ts.
-			let outcome: SpawnOutcome;
-			try {
-				outcome = await runSpawnSession(agent, {
-					task,
-					signal,
-					hooks: {
-						onStarting: () =>
-							onUpdate?.({
-								content: [{ type: "text", text: `Starting ${agent.label}\u2026` }],
-								details: {
-									label: agent.label,
-									model: agent.model,
-									thinking: agent.thinking,
-								} satisfies SubagentDetails,
-							}),
-						// The child accepted the task: wire widget + registry + the
-						// completion chain here (mechanisms stay on this side of the seam).
-						onStarted: (a) => {
-							ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
-							ensurePending(ctx);
-							registry.register(a as AgentProcess);
-							tree.add(a, "running"); // up-report: my child exists
-							void a
-								.waitForCompletion()
-								.then((completion) =>
-									finishWhenDrained({
-										agentId: a.agentId,
-										live: liveTree,
-										onHeld: () => registry.markIdle(a.agentId),
-										finish: () => {
-											tree.remove(
-												a.agentId,
-												completion.status === "completed"
-													? "done"
-													: completion.status === "failed"
-														? "failed"
-														: "stopped",
-											);
-											registry.complete(a as AgentProcess, completion);
-										},
-									}),
-								)
-								// Defensive: waitForCompletion is deadline-bounded and never
-								// rejects today — if it ever does, clean up without notifying.
-								.catch(() => {
-									tree.remove(a.agentId, "stopped");
-									registry.stopAndRemove(a.agentId);
-								});
-						},
-					},
-				});
-			} catch (err) {
-				return toErrorResult(err);
-			}
-
-			switch (outcome.kind) {
-				case "spawn-failed":
-					// The isError return carries the failure to the LLM and the status
-					// line shows it to the user — no follow-up notification on top.
-					return spawnErrorResult(outcome, { label: agent.label });
-
-				case "started": {
-					onUpdate?.({
-						content: [{ type: "text", text: `Started ${agent.label}` }],
-						details: {
-							label: agent.label,
-							model: agent.model,
-							thinking: agent.thinking,
-							startedAt,
-						} satisfies SubagentDetails,
-					});
+			async execute(_toolCallId, raw, signal, onUpdate, ctx) {
+				captureUi(ctx);
+				const params = raw as unknown as SpawnParams;
+				// Label is cosmetic — it names the session, card, and notifications,
+				// and never changes what the agent does.
+				const label = params.label?.trim();
+				if (!label) {
 					return {
-						content: [
-							{
-								type: "text",
-								text: `Started agent @${agent.agentId}. Its result arrives as a notification.`,
-							},
-						],
-						details: {
-							label: agent.label,
-							model: agent.model,
-							thinking: agent.thinking,
-							startedAt,
-						} satisfies SubagentDetails,
+						content: [{ type: "text", text: "`label` is required." }],
+						details: { error: "`label` is required." },
+						isError: true,
 					};
 				}
-			}
-		},
+				const task = params.prompt?.trim();
+				if (!task) {
+					return {
+						content: [{ type: "text", text: "`prompt` is required." }],
+						details: { error: "`prompt` is required." },
+						isError: true,
+					};
+				}
 
-		...spawnView,
-	});
+				// Resume: continue an existing session file (the path a previous
+				// completion notification reported). Validated here so the model gets
+				// one clear error instead of a child that dies on startup.
+				const resume = params.resume?.trim();
+				const resumeError =
+					resume === undefined
+						? undefined
+						: resume === ""
+							? "`resume` must be a session file path"
+							: resumePathError(resume);
+				if (resumeError) {
+					return {
+						content: [{ type: "text", text: resumeError }],
+						details: { error: resumeError },
+						isError: true,
+					};
+				}
+
+				const resolved = resolveModel(ctx.modelRegistry, ctx.model, params.model);
+				if (resolved.error) {
+					// Background: render as the status line `Agent <label> start failed:
+					// <reason>` (the id never exists yet — spawn didn't happen).
+					return {
+						content: [{ type: "text", text: resolved.error }],
+						details: { error: resolved.error },
+						isError: true,
+					};
+				}
+
+				const startedAt = Date.now();
+
+				// Where my child's subtree telemetry lands: forward to my parent, or
+				// surface on the root widget. One module owns the decision.
+				const subtree = createSubtreeDisplay({
+					hasParent: HAS_PARENT,
+					live: liveTree,
+					getWidget: () => {
+						ensureWidget(ctx);
+						return widget ?? undefined;
+					},
+					forward: (event) => tree.report(event),
+				});
+				// Short human-name id (max, zoe…) — the LLM-facing reference. No tree
+				// structure: agents address only ids they were given, hop by hop.
+				const agentId = registry.nextAgentId();
+				// Wake-turn ending → completion notification. The assembly is
+				// identical for both endings except status/output-default.
+				const notifyWake = async (status: "completed" | "failed"): Promise<void> => {
+					const [output, stats] = await Promise.all([agent.lastOutput(), agent.getStats()]);
+					deliverNotification(agent, {
+						status,
+						output: output || (status === "failed" ? "Follow-up turn failed (model API error)." : output),
+						stats: {
+							tokens: stats?.tokens ?? 0,
+							toolUses: stats?.toolUses ?? 0,
+							durationMs: Date.now() - agent.startedAt,
+						},
+						sessionPath: agent.sessionPath,
+						sessionId: agent.sessionId,
+					});
+				};
+				const live = createLiveChannels({
+					// getWidget, not widget: the widget is created on first use, so a
+					// captured reference would be null for every update before that.
+					surfaces: { getWidget: () => widget ?? undefined, tree },
+				});
+
+				const agent = new AgentProcess({
+					agentId,
+					cwd: ctx.cwd,
+					model: resolved.model,
+					thinking: params.thinking ?? pi.getThinkingLevel(),
+					tools: params.tools,
+					label,
+					sessionDir: SUBAGENT_SESSION_DIR,
+					resumeSessionPath: resume,
+					timeoutMs: params.timeoutMs,
+					// Resident after completion (idle, zero token) — explicit opt-in.
+					persistent: params.persistent,
+					// Identity for in-tree messaging: PI_SUBAGENT_AGENT_ID marks this
+					// process as a child (agent_send is registered on every instance).
+					env: childEnv(agentId, MY_DEPTH),
+					// Child→parent messages re-enter the router on this hop. Tree telemetry
+					// from deeper spawns forwards up (depth + 1) or lands on the root widget.
+					onMessage: onChildMessage,
+					onTreeEvent: (event) => subtree.onTreeEvent(event),
+					// A wake finished. Completed: its output must reach this spawner's
+					// context — symmetric with the first-completion notification, an
+					// agent_send "delivered" alone would leave the answer unread.
+					// Deliberate stops stay silent (stoppedByControl). A failed
+					// follow-up is reported (abnormal end) then cleaned up.
+					onIdle: (outcome) => {
+						if (outcome === "completed") {
+							if (!agent.stoppedByControl) {
+								void notifyWake("completed").catch(() => {}); // best-effort: must not crash the host
+							}
+							registry.markIdle(agentId);
+							return;
+						}
+						void notifyWake("failed")
+							.then(() => tree.remove(agentId, "failed"))
+							.then(() => registry.stopAndRemove(agentId))
+							.catch(() => {}); // best-effort: a cleanup failure must not crash the host
+					},
+					// Where live output goes lives in live-output.ts: the widget row and
+					// the tree telemetry hear about every update.
+					onDelta: (delta) => live.onDelta(agent, delta),
+					onActivityChange: (activity) => live.onActivity(agent, activity),
+				});
+
+				// Lifecycle lives in spawn-session.ts — this switch only formats
+				// outcomes into tool results; classification rules are table-tested
+				// in test/spawn-session.test.ts.
+				let outcome: SpawnOutcome;
+				try {
+					outcome = await runSpawnSession(agent, {
+						task,
+						signal,
+						hooks: {
+							onStarting: () =>
+								onUpdate?.({
+									content: [{ type: "text", text: `Starting ${agent.label}\u2026` }],
+									details: {
+										label: agent.label,
+										model: agent.model,
+										thinking: agent.thinking,
+									} satisfies SubagentDetails,
+								}),
+							// The child accepted the task: wire widget + registry + the
+							// completion chain here (mechanisms stay on this side of the seam).
+							onStarted: (a) => {
+								ensureWidget(ctx); // widget row added via the registry (non-TUI: no-op)
+								ensurePending(ctx);
+								registry.register(a as AgentProcess);
+								tree.add(a, "running"); // up-report: my child exists
+								void a
+									.waitForCompletion()
+									.then((completion) =>
+										finishWhenDrained({
+											agentId: a.agentId,
+											live: liveTree,
+											onHeld: () => registry.markIdle(a.agentId),
+											finish: () => {
+												tree.remove(
+													a.agentId,
+													completion.status === "completed"
+														? "done"
+														: completion.status === "failed"
+															? "failed"
+															: "stopped",
+												);
+												registry.complete(a as AgentProcess, completion);
+											},
+										}),
+									)
+									// Defensive: waitForCompletion is deadline-bounded and never
+									// rejects today — if it ever does, clean up without notifying.
+									.catch(() => {
+										tree.remove(a.agentId, "stopped");
+										registry.stopAndRemove(a.agentId);
+									});
+							},
+						},
+					});
+				} catch (err) {
+					return toErrorResult(err);
+				}
+
+				switch (outcome.kind) {
+					case "spawn-failed":
+						// The isError return carries the failure to the LLM and the status
+						// line shows it to the user — no follow-up notification on top.
+						return spawnErrorResult(outcome, { label: agent.label });
+
+					case "started": {
+						onUpdate?.({
+							content: [{ type: "text", text: `Started ${agent.label}` }],
+							details: {
+								label: agent.label,
+								model: agent.model,
+								thinking: agent.thinking,
+								startedAt,
+							} satisfies SubagentDetails,
+						});
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Started agent @${agent.agentId}. Its result arrives as a notification.`,
+								},
+							],
+							details: {
+								label: agent.label,
+								model: agent.model,
+								thinking: agent.thinking,
+								startedAt,
+							} satisfies SubagentDetails,
+						};
+					}
+				}
+			},
+
+			...spawnView,
+		});
 
 	// ── agent_stop ───────────────────────────────────────
 	pi.registerTool({

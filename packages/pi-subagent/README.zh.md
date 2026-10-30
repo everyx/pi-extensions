@@ -25,7 +25,7 @@ Pi 没有内置 sub-agent。于是重活、并行的活、吃上下文的活，�
 - **继承或覆盖** — 子 agent 默认继承你的模型与推理强度，也可逐个覆盖。便宜模型做侦察，强模型做实现。
 - **无隐藏限制** — 默认无 token 上限、无超时、无并发上限。需要时用可选 `timeoutMs` 加一道护栏。
 - **可复盘** — 每个会话持久化、永不删除；任何结果都能 `pi --session <path>` 回看。
-- **可嵌套** — 子 agent 是完整 pi 实例，天然能再 spawn 孙 agent。
+- **可嵌套、有上限** — 子 agent 是完整 pi 实例，但默认不再往下派；要开更深用 `PI_SUBAGENT_MAX_DEPTH`。默认就一层：根派活，子执行；更深的树是刻意的选择。
 - **Token 经济** — 系统侧保持克制：
   - **系统提示** — 三个工具 + 简短指南，注入约 2–3KB 系统提示（token 数随 tokenizer 略有出入）。
   - **通知** — LLM 只看到最小结构化数据；装饰（label、用量）留在渲染层，永不进入 LLM 上下文。
@@ -43,7 +43,7 @@ pi-subagent 与 [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-suba
 | 并行 | 无并发上限（一 agent 一进程） | 队列，默认并发 4 | 有 spawn / turn / usage budget |
 | 默认限制 | 无（可选 `timeoutMs`） | graceful turn limits | turn / usage budget |
 | 可观测性 | pi 原生卡片 + widget + `pi --session` | FleetView + conversation viewer | FleetView inspector + fleet |
-| 嵌套 | 天然、无深度上限 | opt‑in、有深度上限 | recursion guard |
+| 嵌套 | opt‑in，有深度上限（默认 1） | opt‑in、有深度上限 | recursion guard |
 | 附加能力 | token 经济、零运行时依赖、reload/崩溃零孤儿 | memory、worktree 隔离、定时任务、跨扩展 RPC、事件总线 | missions/定时、watchdog、worktree、intercom、chain 编排 |
 | 适合 | 自己掌控组合 | 开箱即用的完整子 agent 系统 | 内置角色 + 工作流编排 |
 
@@ -94,6 +94,9 @@ Pi 调用 `agent_send` 向运行中的 agent 注入重定向消息（当前 turn
 | 变量 | 默认值 | 含义 |
 |---|---|---|
 | `PI_SUBAGENT_SESSION_DIR` | `<agentDir>/subagent-sessions/` | 子 agent 会话存放目录；设置可迁移位置。`<agentDir>` 为 pi 的 agent 目录（默认 `~/.pi/agent`，遵循 pi 的 `PI_CODING_AGENT_DIR`）。 |
+| `PI_SUBAGENT_MAX_DEPTH` | `1` | 委派最多能到几层。`1` = 根派活、子执行；设 `2` 或更大才允许子 agent 再派。到了上限的会话根本没有 `agent_spawn` 工具。 |
+
+父进程还会给每个子进程注入 `PI_SUBAGENT_AGENT_ID` 和 `PI_SUBAGENT_DEPTH` —— 子进程靠它们知道自己的 id 和所处位置。这两个不是设置项；自己设只会让会话对自己的位置产生错误认知。
 
 目录遵循 pi 的 agent-dir 约定，刻意放在 pi 标准会话树之外，让 `pi -r`（resume）保持干净。会话文件永不删除。
 
@@ -162,7 +165,9 @@ LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使
 
 ## 嵌套 sub-agent
 
-子 agent 是完整 pi 实例——全局安装本扩展后，它天然能再 spawn 子 agent。每一层都是独立进程、独立上下文；深度倍增启动时间与 token 成本。是否值得，由你（或模型）判断。
+子 agent 是完整 pi 实例，所以它*能*再 spawn —— 但默认不：`PI_SUBAGENT_MAX_DEPTH` 为 `1`，只有根会话能派活。到上限的子进程根本不注册 `agent_spawn`，所以这是一项缺失的能力，而不是要它先试错才知道的拒绝。
+
+每一层都是独立进程、独立上下文；深度倍增启动时间与 token 成本。确实需要一棵树时，刻意提高上限（在启动 pi 的环境里设 `PI_SUBAGENT_MAX_DEPTH=2`）。
 
 机制是纯点对点投递器：`agent_send` 按 id（短人名，如 `max`）投给直接子，或投给 `"@parent"`——其他目标显式报错。路由由 LLM 自行完成：每个 agent 只寻址自己被给到的 id，逐跳转发（孙联系祖 = 每层父 LLM 决定用 `@parent` 上转）。信息披露是唯一限制——父持有它 spawn 的 agent 的 id；没被告知的 id 谁也发不到。
 
