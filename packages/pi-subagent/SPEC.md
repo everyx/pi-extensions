@@ -243,7 +243,11 @@ queued → running ──→ completed（通知）
 
 ### 嵌套
 
-子实例是完整 pi（加载全局扩展），天然可再 spawn；不注入 depth、不设 max_depth。子进程扩展经 `PI_SUBAGENT_AGENT_ID` 获得自身身份——孙 agent 由子进程自身 registry 分配人名 id。
+子实例是完整 pi（加载全局扩展），天然可再 spawn。子进程扩展经 `PI_SUBAGENT_AGENT_ID` 获得自身身份——孙 agent 由子进程自身 registry 分配人名 id。
+
+**深度上限（2026-10-24，默认 1）**：分工靠结构，不靠模型自律。根会话 `PI_SUBAGENT_DEPTH` 未设 = 0；每次 spawn 用 `childEnv()` 给子进程传 `depth + 1`。`CAN_SPAWN = MY_DEPTH < MAX_DEPTH`，`MAX_DEPTH` 默认 1、可用 `PI_SUBAGENT_MAX_DEPTH` 提高。到顶的子进程**根本不注册 `agent_spawn`**——不是拒绝调用，而是能力不存在：拒绝式设计要模型先花一轮试错，缺工具则是它一开始就只能在手头的工具里做。这与「主 agent 派活、子代理执行」的分工一致（DeepSeek Harness 同默认值，但它保留工具并在运行时上下文里说「到顶了，自己做」；我们进程固定、深度启动即定，所以直接不注册更省）。
+
+`readDepth()` 对空串/负数/小数/非数字一律回退——`Number("")` 是 0，若不特判会让一个空的 `PI_SUBAGENT_MAX_DEPTH` 静默锁死整个会话的委派能力。
 
 ### 显示面统一规则（2026-10-19 重写：单一非阻塞 spawn）
 

@@ -25,7 +25,7 @@ Pi has no built‑in sub‑agents. So heavy, parallel, or context‑heavy work c
 - **Inherit or override** — a child inherits your model and thinking level by default; override it per child. A cheap model for recon, a strong one for the build.
 - **No hidden limits** — no token ceiling, no deadline, no concurrency cap by default. An optional `timeoutMs` adds a guardrail when you want one.
 - **Reviewable** — every session persists and is never deleted; attach any result with `pi --session <path>`.
-- **Nestable** — a child is a full pi instance, so it can spawn another child.
+- **Nestable, bounded** — a child is a full pi instance, but it does not delegate further unless you raise `PI_SUBAGENT_MAX_DEPTH`. One level of delegation is the default; deeper trees are a deliberate choice.
 - **Token economy** — the system side stays lean:
   - **System prompt** — three tools and terse guidance inject roughly 2–3KB of system prompt (token count drifts with the tokenizer).
   - **Notification** — the LLM sees only minimal structured data; decoration (label, usage) stays in the render layer.
@@ -43,7 +43,7 @@ pi-subagent, [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagen
 | Parallelism | Uncap (one process per agent) | Queued, default 4 concurrent | spawn / turn / usage budgets |
 | Default limits | None (optional `timeoutMs`) | Graceful turn limits | turn / usage budgets |
 | Observability | pi‑native cards + widget + `pi --session` | FleetView + conversation viewer | FleetView inspector + fleet |
-| Nesting | Built‑in, no depth cap | Opt‑in, depth cap | Recursion guard |
+| Nesting | Opt‑in, depth cap (default 1) | Opt‑in, depth cap | Recursion guard |
 | Extras | Token economy, minimal runtime deps, no orphans on reload/crash | Memory, worktree isolation, schedule, cross‑extension RPC, event bus | Missions/scheduling, watchdog, worktree, intercom, chain orchestration |
 | Best for | Owning your own composition | A turnkey sub‑agent system | Built‑in roles + workflow orchestration |
 
@@ -94,6 +94,9 @@ Pi calls `agent_send` to inject a redirecting message into the running agent (de
 | Variable | Default | Meaning |
 |---|---|---|
 | `PI_SUBAGENT_SESSION_DIR` | `<agentDir>/subagent-sessions/` | Where sub‑agent session files live; set to relocate. `<agentDir>` follows pi's agent dir (`~/.pi/agent`, or pi's own `PI_CODING_AGENT_DIR`). |
+| `PI_SUBAGENT_MAX_DEPTH` | `1` | How deep delegation may go. `1` means the root delegates and its children execute; set `2` or more to let a sub‑agent spawn its own. A session at the cap has no `agent_spawn` tool at all. |
+
+The parent also injects `PI_SUBAGENT_AGENT_ID` and `PI_SUBAGENT_DEPTH` into every child — that is how a child knows its id and where it sits. They are not settings; setting them yourself only confuses a session about its own position.
 
 The directory lives **outside** pi's standard session tree so `pi -r` (resume) stays clean. Sessions are never deleted.
 
@@ -162,7 +165,9 @@ Every sub‑agent is a resident `pi --mode rpc` child with a persisted session:
 
 ## Nested sub‑agents
 
-A child is a full pi instance — so if you installed this extension globally, it spawns children of its own. Each level is its own process with its own context; depth multiplies startup time and token cost. You — or the model — judge when it's worth it.
+A child is a full pi instance, so it *can* spawn children of its own — but by default it does not: `PI_SUBAGENT_MAX_DEPTH` is `1`, which leaves the root as the only delegator. A child at the cap has no `agent_spawn` tool registered at all, so the cap is a missing capability rather than a refusal it has to discover.
+
+Each level is its own process with its own context; depth multiplies startup time and token cost. When you want a tree, raise the cap deliberately (`PI_SUBAGENT_MAX_DEPTH=2` in the environment that launches pi).
 
 The mechanism is a pure point-to-point deliverer: `agent_send` delivers to a direct child by its id (a short human name like `max`), or to `"@parent"` — and errors on anything else. Routing is the LLM's job: each agent addresses only the ids it was given, hop by hop (a grandchild reaching the root goes through its parent's LLM deciding to forward with `@parent`). Information disclosure is the only limit — a parent holds the ids of the agents it spawned; nobody knows ids they were never told.
 
