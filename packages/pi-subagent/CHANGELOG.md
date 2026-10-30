@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.6.0...pi-subagent-v1.7.0) (2026-10-30)
+
+
+### Features
+
+* **pi-subagent:** stop a sub-agent from delegating further ([aac3bdb](https://github.com/everyx/pi-extensions/commit/aac3bdb2d1d1ab649102de552315b8818a94c528))
+
 ## [1.6.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.5.1...pi-subagent-v1.6.0) (2026-10-24)
 
 

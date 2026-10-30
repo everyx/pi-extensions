@@ -1,6 +1,6 @@
 {
 	"name": "@everyx/pi-subagent",
-	"version": "1.6.0",
+	"version": "1.7.0",
 	"description": "Pi agents that work together – three primitives (spawn/stop/send) build a tree of named, message-passing agents",
 	"keywords": [
 		"pi-package"
