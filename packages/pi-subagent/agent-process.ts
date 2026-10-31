@@ -241,6 +241,34 @@ export function resumePathError(path: string): string | undefined {
  *
  * Pure and exported so the flag wiring is testable without spawning anything.
  */
+/**
+ * The control surface this extension owns. A plain `--tools` list replaces the
+ * whole selection, and that selection includes these — so a whitelist meant to
+ * narrow a child's work would silently take them away too. We tell a stuck
+ * sub-agent to ask its parent (`agent_send @parent`); removing the asking tool
+ * leaves it holding a rule it cannot follow, and the rule disappears with the
+ * tool, so it never learns it had a way to ask.
+ *
+ * Restoring all three keeps one rule — the whitelist narrows what a child may
+ * do, never which of these it keeps — and lets the depth cap stay the only
+ * thing deciding whether a child may delegate: at the cap `agent_spawn` is not
+ * registered, and a name in `--tools` that matches nothing is simply skipped
+ * (verified against pi).
+ *
+ * This is a guardrail, not a sandbox. A whitelist shapes what a task needs; a
+ * child that escapes it would reach the same machine through bash anyway.
+ */
+const PLUMBING_TOOLS = ["agent_send", "agent_stop", "agent_spawn"];
+
+/** Restore the child's transport to an explicit tool whitelist. */
+export function withPlumbing(tools: string[]): string[] {
+	// pi's additive syntax starts from the default set and applies the caller's
+	// own additions and removals. Rewriting that list would override choices
+	// made on purpose, and pi rejects mixing the two forms anyway.
+	if (tools.some((t) => t.startsWith("+") || t.startsWith("-"))) return tools;
+	return [...tools, ...PLUMBING_TOOLS.filter((t) => !tools.includes(t))];
+}
+
 export function buildChildArgs(options: {
 	model?: string;
 	thinking?: string;
@@ -252,7 +280,7 @@ export function buildChildArgs(options: {
 	const args: string[] = [];
 	if (options.model) args.push("--model", options.model);
 	if (options.thinking) args.push("--thinking", options.thinking);
-	if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
+	if (options.tools && options.tools.length > 0) args.push("--tools", withPlumbing(options.tools).join(","));
 	// Label names the session (--name, capped at 80 chars).
 	args.push("--name", options.label.slice(0, 80));
 	if (options.resumeSessionPath) args.push("--session", options.resumeSessionPath);

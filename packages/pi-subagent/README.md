@@ -150,7 +150,9 @@ Model **specified but not found** in the registry → error, no silent fallback.
 Ask a sub‑agent to research the project structure, but only let it use read and grep
 ```
 
-Sub‑agent won't see any other tools. Read‑only exploration with a cheaper model is a good pattern for research tasks.
+Sub‑agent won't see any other tools — except this extension's own control tools (`agent_send`, `agent_stop`, and `agent_spawn`), which a plain whitelist never removes: without `agent_send` a blocked child could not ask its parent anything. Whether it can actually delegate is decided by `PI_SUBAGENT_MAX_DEPTH` — at the cap `agent_spawn` is not registered, and pi skips a listed name that matches nothing.
+
+**This is a guardrail, not a sandbox.** It shapes what a task needs; it is not a permission boundary. Two consequences worth knowing: a `--tools` restriction on the spawning session does not travel to its children (an unrestricted child gets its own defaults), and a child that wanted to escape a read‑only list could reach the same machine through `bash` anyway. Read‑only exploration with a cheaper model is still a good pattern for research tasks.
 
 ## How it works
 

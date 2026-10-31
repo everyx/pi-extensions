@@ -183,7 +183,7 @@ describe("AgentProcess — spawnAndSend", () => {
 			"--model",
 			"google/gemini-x",
 			"--tools",
-			"read,grep",
+			"read,grep,agent_send,agent_stop,agent_spawn",
 			"--name",
 			"explore",
 			"--session-dir",
