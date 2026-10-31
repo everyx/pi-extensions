@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.7.0...pi-subagent-v1.8.0) (2026-10-31)
+
+
+### Features
+
+* **pi-subagent:** say why to delegate, not just when ([d33d918](https://github.com/everyx/pi-extensions/commit/d33d9188f15366a61161388ad37520e19fdf72c3))
+
+
+### Bug Fixes
+
+* **pi-subagent:** a tool whitelist must not cut the child's lifeline ([01ddee8](https://github.com/everyx/pi-extensions/commit/01ddee822b641ddac2b8c60d4f00093b841cdaac))
+
 ## [1.7.0](https://github.com/everyx/pi-extensions/compare/pi-subagent-v1.6.0...pi-subagent-v1.7.0) (2026-10-30)
 
 
