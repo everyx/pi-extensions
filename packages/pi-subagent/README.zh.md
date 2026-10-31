@@ -150,7 +150,9 @@ LLM 通过 `promptSnippet` + `promptGuidelines`（系统提示注入）获得使
 让子 agent 调研项目结构，但只允许用 read 和 grep
 ```
 
-子 agent 看不到其他任何工具。只读探索 + 便宜模型是调研任务的推荐模式。
+子 agent 看不到其他任何工具——本扩展自己的控制工具除外（`agent_send`、`agent_stop`、`agent_spawn`），纯名字白名单不会把它们拿掉：没有 `agent_send`，卡住的子 agent 就无法向父代理提问。至于它究竟能不能再派活，由 `PI_SUBAGENT_MAX_DEPTH` 决定 —— 到上限时 `agent_spawn` 根本不注册，pi 会跳过名单里匹配不到的名字。
+
+**这是护栏，不是沙箱。** 它用来收敛任务范围，不构成权限边界。两个后果值得知道：父会话用 `--tools` 做的限制**不会**传给它派出的子 agent（不受限的子 agent 拿到自己的默认工具集）；而真想突破只读名单的子 agent，本来也能通过 `bash` 碰到同一台机器。只读探索 + 便宜模型仍然是调研任务的推荐模式。
 
 ## 工作原理
 

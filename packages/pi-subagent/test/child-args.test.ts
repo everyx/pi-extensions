@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { buildChildArgs, canDelegate, childEnv, readDepth, resumePathError } from "../agent-process.js";
+import { buildChildArgs, canDelegate, childEnv, readDepth, resumePathError, withPlumbing } from "../agent-process.js";
 
 writeFileSync("/tmp/pi-resume-ok.jsonl", '{"type":"header"}\n');
 writeFileSync("/tmp/pi-resume-empty.jsonl", "");
@@ -30,7 +30,16 @@ describe("buildChildArgs — how the child pi is launched", () => {
 			thinking: "high",
 			tools: ["read", "grep"],
 		});
-		assert.deepEqual(args, ["--model", "p/m", "--thinking", "high", "--tools", "read,grep", "--name", "probe"]);
+		assert.deepEqual(args, [
+			"--model",
+			"p/m",
+			"--thinking",
+			"high",
+			"--tools",
+			"read,grep,agent_send,agent_stop,agent_spawn",
+			"--name",
+			"probe",
+		]);
 	});
 
 	it("caps the label so a long title cannot overflow --name", () => {
@@ -104,5 +113,47 @@ describe("delegation depth — who may delegate", () => {
 	it("each spawn hands the child a depth one deeper, with its identity", () => {
 		assert.deepEqual(childEnv("max", 0), { PI_SUBAGENT_AGENT_ID: "max", PI_SUBAGENT_DEPTH: "1" });
 		assert.deepEqual(childEnv("abe", 1), { PI_SUBAGENT_AGENT_ID: "abe", PI_SUBAGENT_DEPTH: "2" });
+	});
+});
+
+describe("withPlumbing — a tool whitelist must not cut the child's lifeline", () => {
+	it("keeps the control tools on a plain whitelist", () => {
+		// The list our own copy recommends lost agent_send, while another
+		// guideline tells a stuck child to ask its parent with it.
+		assert.deepEqual(withPlumbing(["read", "grep", "find", "ls"]), [
+			"read",
+			"grep",
+			"find",
+			"ls",
+			"agent_send",
+			"agent_stop",
+			"agent_spawn",
+		]);
+	});
+
+	it("does not list a tool twice when the caller named it", () => {
+		assert.deepEqual(withPlumbing(["read", "agent_send"]), ["read", "agent_send", "agent_stop", "agent_spawn"]);
+	});
+
+	it("leaves an additive list alone — those are the caller's own choices", () => {
+		// pi starts an additive list from the default set and applies the
+		// additions and removals given; rewriting it would override them.
+		assert.deepEqual(withPlumbing(["+codemode", "-write"]), ["+codemode", "-write"]);
+	});
+
+	it("does not fight an explicit removal of a control tool", () => {
+		// Pinned as a decision: an additive `-agent_send` passes through
+		// untouched rather than being "repaired" back in.
+		assert.deepEqual(withPlumbing(["-agent_send"]), ["-agent_send"]);
+	});
+
+	it("adds nothing when the caller grants everything", () => {
+		const args = buildChildArgs({ label: "probe", sessionDir: "/tmp/sessions" });
+		assert.ok(!args.includes("--tools"), "no whitelist means no --tools flag");
+	});
+
+	it("carries the restored list into the child argv", () => {
+		const args = buildChildArgs({ label: "probe", tools: ["read", "grep"], sessionDir: "/tmp/sessions" });
+		assert.equal(args[args.indexOf("--tools") + 1], "read,grep,agent_send,agent_stop,agent_spawn");
 	});
 });
