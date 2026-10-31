@@ -49,7 +49,7 @@ export const TOOL_COPY = {
 			"Write agent_spawn prompts self-contained — the sub-agent has zero context: include paths, constraints, and the expected output shape.",
 			"For independent work, issue several agent_spawn calls together and keep working while they run.",
 			"When the agents are the only thing left to wait for, end your turn instead of sleeping or polling — the next result starts a new turn.",
-			"Long outputs are truncated for your context; the result then carries the full-output file path.",
+			"You receive only a sub-agent's conclusion, not what it read — delegate when the raw material dwarfs the answer.",
 		],
 		paramDescriptions: {
 			model:
