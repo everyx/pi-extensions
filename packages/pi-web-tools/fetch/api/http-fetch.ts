@@ -18,13 +18,60 @@
  * was too large rather than silently receiving a truncated page.
  */
 
+import { readFileSync } from "node:fs";
 import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
+
+/** Who we are, in the one place a site operator can look it up.
+ *
+ *  The `Mozilla/5.0 (compatible; …)` form is the convention for a client that
+ *  wants browser-shaped handling without claiming to be a browser — gemini-cli,
+ *  opencode and cline all use it, and dsh spells the intent out ("an explicit
+ *  product agent, never a browser disguise"). It buys nothing measurable
+ *  against an anti-bot wall; it is here so a site that reads its logs can tell
+ *  what hit it and where to complain. */
+function packageVersion(): string {
+	try {
+		const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+			version?: unknown;
+		};
+		return typeof pkg.version === "string" && pkg.version.trim() ? `/${pkg.version.trim()}` : "";
+	} catch {
+		return "";
+	}
+}
+
+let userAgent: string | undefined;
+export function defaultUserAgent(): string {
+	userAgent ??= `Mozilla/5.0 (compatible; pi-web-tools${packageVersion()}; +https://github.com/everyx/pi-extensions)`;
+	return userAgent;
+}
+
+/** Format the caller asks for; it decides the `Accept` order. */
+export type AcceptFormat = "markdown" | "html";
+
+/**
+ * The `Accept` header.
+ *
+ * Asking for markdown first is the one header change that pays for itself:
+ * Cloudflare's Markdown for Agents converts at the edge when the client asks
+ * (measured 16 KB of markdown against 176 KB of HTML for the same page), and
+ * any static doc server can serve it. It does not change whether an anti-bot
+ * gate opens — that was measured too, on zones without the feature, which
+ * still answered a challenge — so it is a token win, not an access win.
+ */
+function acceptHeader(format: AcceptFormat): string {
+	return format === "markdown"
+		? "text/markdown, text/html;q=0.9, */*;q=0.5"
+		: "text/html, application/xhtml+xml;q=0.9, */*;q=0.5";
+}
 
 export interface DirectFetchOptions {
 	signal?: AbortSignal;
 	timeoutMs?: number;
 	/** Body cap; past it the stream is cancelled and nothing more is read. */
 	maxBytes?: number;
+	/** What the caller wants back — decides `Accept`. Defaults to markdown. */
+	format?: AcceptFormat;
 }
 
 export interface DirectFetchResult {
@@ -126,6 +173,14 @@ export async function directFetch(url: string, options: DirectFetchOptions = {})
 			signal,
 			redirect: "follow",
 			dispatcher: getDispatcher(),
+			headers: {
+				"User-Agent": defaultUserAgent(),
+				Accept: acceptHeader(options.format ?? "markdown"),
+				// curl sent none of this by default. A locale header is content
+				// negotiation, not impersonation, and it is what flipped a 403 to
+				// 200 in the one measured header-level win.
+				"Accept-Language": "en-US,en;q=0.9",
+			},
 		});
 		const contentType = response.headers.get("content-type") ?? "";
 		const { bytes, tooLarge } = await readBodyCapped(response, maxBytes);

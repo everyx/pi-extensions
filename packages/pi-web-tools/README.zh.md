@@ -3,7 +3,7 @@
 Pi 的 Web 原语——`web_search` + `web_fetch`。
 
 - **`web_search`** — 搜索互联网。请求按保险丝顺序路由过多个 HTTP 搜索通道——TinyFish（需 key，30 req/min）→ Exa → Tavily → Firecrawl（Google 后端；keyless 优先，key 只作升档）——失败自动降级。五个参数：`query`、`recency?`、`allowed_domains?`、`blocked_domains?`、`locale?`。结果语言跟随 query 语言；`locale` 是显式的市场/语言加权。没有 engine 参数——路由对 LLM 完全不可见。
-- **`web_fetch`** — 抓取 URL：HTML 页面默认转为 Markdown（LLM / token friendly）；传 `raw: true` 获取原始 HTML（不做任何包装）。非 HTML（SVG/JSON/文本等一切文本）一律原样返回；超大内容截断并给出 /tmp 全文路径（非网页内容不内联预览）；响应 Content-Type 随结果元数据返回；图片（`image/*`，SVG 除外）以多模态 image block 返回——TUI 内联渲染、模型直接消费。直取层在进程内走 Node fetch（尊重 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`）；反爬/JS 渲染页自动走渲染保险丝——`firecrawl scrape`（目前无需 key）→ `tinyfish fetch`（需 key）——共享 45s 预算，且只在渲染真能改变答案时才进（404/410、付费墙、额度耗尽、法务封锁都不进）。
+- **`web_fetch`** — 抓取 URL：HTML 页面默认转为 Markdown（LLM / token friendly）；传 `raw: true` 获取原始 HTML（不做任何包装）。非 HTML（SVG/JSON/文本等一切文本）一律原样返回；超大内容截断并给出 /tmp 全文路径（非网页内容不内联预览）；响应 Content-Type 随结果元数据返回；图片（`image/*`，SVG 除外）以多模态 image block 返回——TUI 内联渲染、模型直接消费。直取层在进程内走 Node fetch（尊重 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`），并优先索取 `text/markdown` —— 支持 Markdown for Agents 的站会直接返回转换好的正文（实测同一页 16 KB vs HTML 176 KB）；反爬/JS 渲染页自动走渲染保险丝——`firecrawl scrape`（目前无需 key）→ `tinyfish fetch`（需 key）——共享 45s 预算，且只在渲染真能改变答案时才进（404/410、付费墙、额度耗尽、法务封锁都不进）。
 
 两个原语，别无冗余——无内容存储、无 curator、无 PDF/视频提取。
 

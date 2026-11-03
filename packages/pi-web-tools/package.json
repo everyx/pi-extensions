@@ -46,5 +46,6 @@
 	},
 	"devDependencies": {
 		"@types/turndown": "^5.0.6"
-	}
+	},
+	"homepage": "https://github.com/everyx/pi-extensions/tree/master/packages/pi-web-tools"
 }

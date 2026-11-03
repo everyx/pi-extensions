@@ -37,5 +37,6 @@
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "catalog:",
 		"typebox": "catalog:"
-	}
+	},
+	"homepage": "https://github.com/everyx/pi-extensions/tree/master/packages/pi-read-doc"
 }

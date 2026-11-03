@@ -30,5 +30,6 @@
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "catalog:",
 		"@earendil-works/pi-tui": "catalog:"
-	}
+	},
+	"homepage": "https://github.com/everyx/pi-extensions/tree/master/packages/pi-status-line"
 }

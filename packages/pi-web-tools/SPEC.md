@@ -154,6 +154,18 @@ searchFuse(params, channels, { signal, onAttempt }): Outcome   // walk：failove
 
 **为什么不装 Chrome / 不上 TLS 指纹**：2026-11 的实测（26 URL × 4 种客户端配置）里，curl_cffi 伪装 Chrome 指纹在 8 个硬墙站上**全数 403**，只在「仅校验 TLS」的站上赢过一次；而 curl-impersonate 上游 2024-07 停更、维护分支每几周换 profile。这是持续付费的军备竞赛，换不到我们需要的成功率。
 
+### 请求头（2026-11 加入）
+
+```
+User-Agent: Mozilla/5.0 (compatible; pi-web-tools/<version>; +https://github.com/everyx/pi-extensions)
+Accept:     text/markdown, text/html;q=0.9, */*;q=0.5   （raw: text/html 优先）
+Accept-Language: en-US,en;q=0.9
+```
+
+- **UA 用 `compatible` 形式**：这是「浏览器形态但如实自报」的通行写法（gemini-cli / opencode / cline 同款；dsh 的注释叫它 "an explicit product agent, never a browser disguise"）。版本号从 `package.json` 读，不写死——UA 里的假版本号没有意义。
+- **`Accept` 把 markdown 排前面**：Cloudflare 的 Markdown for Agents 在边缘就转好（**实测同一页 16 KB vs 176 KB**），任何静态文档站也能直接给。**它不改变反爬结果**——实测未启用该特性的 zone 照样回挑战页——所以这是省 token，不是过墙。
+- **`Accept-Language` 是 curl 从不发、而我们补上的**：它是内容协商，不是伪装。实测里它正是那唯一一次「403 → 200」的决定性头部。
+
 ### 请求行为
 
 - **输出统一格式**（对齐 Markdown for Agents 布局）：frontmatter（

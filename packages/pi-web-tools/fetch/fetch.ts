@@ -194,8 +194,19 @@ function isHtmlContent(contentType: string): boolean {
  *  caller. Text passes through readable; true binaries lossy-decode into
  *  recognizable noise (the contentType field says what it is); budget stays
  *  bounded by the stash cap downstream. */
-async function fetchPage(url: string, signal?: AbortSignal): Promise<FetchPageResult> {
-	const raw = await directFetch(url, { signal, timeoutMs: DEFAULT_TIMEOUT_MS, maxBytes: MAX_DOWNLOAD_BYTES });
+async function fetchPage(
+	url: string,
+	signal?: AbortSignal,
+	format: "markdown" | "html" = "markdown",
+): Promise<FetchPageResult> {
+	const raw = await directFetch(url, {
+		signal,
+		timeoutMs: DEFAULT_TIMEOUT_MS,
+		maxBytes: MAX_DOWNLOAD_BYTES,
+		// raw asks for the source, so negotiation must prefer HTML; the default
+		// path asks for markdown and gets it from servers that speak it.
+		format,
+	});
 	if (raw.ok) {
 		return finishPage(raw.status, raw.contentType, raw.bytes ?? null, raw.tooLarge);
 	}
@@ -224,9 +235,10 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	// original URL when the rewrite target is unavailable.
 	const targetUrl = githubRawUrl(url) ?? url;
 	// raw asks for the source, so prefer an HTML (not negotiated-markdown) body.
-	let page = await fetchPage(targetUrl, signal);
+	const format = raw ? "html" : "markdown";
+	let page = await fetchPage(targetUrl, signal, format);
 	if (targetUrl !== url && (!page.ok || !page.text)) {
-		page = await fetchPage(url, signal);
+		page = await fetchPage(url, signal, format);
 	}
 
 	// Direct HTTP failure → normalized error. The classifier decides whether a

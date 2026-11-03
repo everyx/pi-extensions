@@ -29,5 +29,6 @@
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "catalog:"
-	}
+	},
+	"homepage": "https://github.com/everyx/pi-extensions/tree/master/packages/pi-sleep-guard"
 }

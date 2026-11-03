@@ -35,5 +35,6 @@
 	},
 	"dependencies": {
 		"@everyx/pi-ui": "workspace:*"
-	}
+	},
+	"homepage": "https://github.com/everyx/pi-extensions/tree/master/packages/pi-subagent"
 }
