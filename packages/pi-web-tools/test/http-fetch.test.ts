@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { directFetch, redirectRefusal } from "../fetch/api/http-fetch.js";
+import { directFetch, redirectRefusal, upgradeToHttps } from "../fetch/api/http-fetch.js";
 
 interface Captured {
 	userAgent?: string;
@@ -94,6 +94,13 @@ const listener = createServer((req, res) => {
 	if (req.url === "/loop") {
 		res.writeHead(302, { Location: "/loop" });
 		res.end();
+		return;
+	}
+	if (req.url === "/body-reset") {
+		// Headers look fine, then the connection dies mid-body.
+		res.writeHead(200, { "Content-Type": "text/plain", "Content-Length": "1024" });
+		res.write("partial");
+		setTimeout(() => res.socket?.destroy(), 10);
 		return;
 	}
 	if (req.url === "/slow") {
@@ -258,5 +265,35 @@ describe("directFetch — the redirect chain is walked and reported", () => {
 		const result = await directFetch("http://localhost:3000/");
 		assert.equal(result.ok, false);
 		assert.match(String(result.error), /without a dot/);
+	});
+});
+
+describe("directFetch — the contract holds on the way out too", () => {
+	it("turns a mid-body connection reset into a result, not a throw", async () => {
+		// The failure the rendering fuse exists for: it must reach the caller as
+		// a result, or the fuse never gets a chance to run.
+		const result = await directFetch(`${base}/body-reset`, { timeoutMs: 5_000 });
+		assert.equal(result.ok, false);
+		assert.ok(result.error, "an error string, not an exception");
+		assert.ok((result.attempts ?? 0) >= 1);
+	});
+
+	it("refuses a malformed URL instead of throwing on it", async () => {
+		const result = await directFetch("http://[");
+		assert.equal(result.ok, false);
+		assert.match(String(result.error), /invalid URL/);
+	});
+
+	it("only follows an upgrade decision for public http hosts", () => {
+		assert.equal(upgradeToHttps("http://example.com/a"), "https://example.com/a");
+		assert.equal(upgradeToHttps("https://example.com/a"), undefined);
+		assert.equal(upgradeToHttps("http://127.0.0.1:8080/a"), undefined, "a dev server is not upgraded");
+		assert.equal(upgradeToHttps("http://intranet/a"), undefined, "a bare hostname is not upgraded");
+		assert.equal(upgradeToHttps("not a url"), undefined);
+	});
+
+	it("treats IPv6 link-local as private on redirect", () => {
+		assert.match(String(redirectRefusal(false, new URL("http://[fe80::1]/"))), /private address refused/);
+		assert.match(String(redirectRefusal(false, new URL("http://[fe80::abcd]/"))), /private address refused/);
 	});
 });

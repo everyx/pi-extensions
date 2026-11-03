@@ -136,6 +136,7 @@ async function fuseRender(
 	url: string,
 	signal?: AbortSignal,
 	reason: "http-failed" | "csr-shell" = "http-failed",
+	trace?: { finalUrl?: string; redirects?: RedirectHop[] },
 ): Promise<{ result: WebFetchResult | null; failures: string[] }> {
 	const deadline = Date.now() + RENDER_BUDGET_MS;
 	const failures: string[] = [];
@@ -167,6 +168,9 @@ async function fuseRender(
 		const { text: content, stashPath } = stashOverflow(rendered.text, url);
 		return {
 			result: {
+				// The direct phase's chain still happened and is still true; the
+				// renderer's own hops are unknown to us, so they are not claimed.
+				...trace,
 				title: firstLineAsTitle(rendered.text),
 				content: previewWithPointer(content, stashPath),
 				// The renderer self-reports its output type — no fabrication.
@@ -280,8 +284,11 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 		if (signal?.aborted) {
 			return { title: "", content: "", error: page.error || "fetch aborted" };
 		}
-		const fuse = renderMayHelp(page.status) ? await fuseRender(url, signal, "http-failed") : undefined;
-		if (fuse?.result) return fuse.result;
+		const landed = page.finalUrl ?? url;
+		const fuse = renderMayHelp(page.status)
+			? await fuseRender(landed, signal, "http-failed", { finalUrl: page.finalUrl, redirects: page.redirects })
+			: undefined;
+		if (fuse?.result) return finish(fuse.result);
 		return finish({
 			title: "",
 			content: "",
@@ -353,8 +360,11 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	// diagnosis reach only one of the fuse's two entry points.
 	let rendererFailures: string[] | undefined;
 	if (isLikelyJSRendered(page.text ?? "")) {
-		const fuse = await fuseRender(url, signal, "csr-shell");
-		if (fuse.result) return fuse.result;
+		const fuse = await fuseRender(url, signal, "csr-shell", {
+			finalUrl: page.finalUrl,
+			redirects: page.redirects,
+		});
+		if (fuse.result) return finish(fuse.result);
 		rendererFailures = fuse.failures;
 	}
 

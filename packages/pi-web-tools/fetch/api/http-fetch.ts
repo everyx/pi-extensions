@@ -86,7 +86,8 @@ export interface DirectFetchResult {
 	 *  this tells the fuse *why* it is being invoked and tells the model the
 	 *  difference between "blocked" and "missing". */
 	challenge?: string;
-	/** How many requests were spent (1 unless a transient failure was retried). */
+	/** Dispatch attempts: retries and the http fallback count, redirect hops do
+	 *  not (those are one logical fetch). */
 	attempts?: number;
 	/** Where the chain ended, when it went anywhere (equal to the request otherwise). */
 	finalUrl?: string;
@@ -233,7 +234,7 @@ const MAX_REDIRECTS = 10;
  *  before the request goes out. This is a name check, not a resolver check —
  *  a hostname that resolves to 10.x still gets through (see SPEC). */
 const PRIVATE_LITERAL =
-	/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.0\.0\.0$|\[?::1\]?$|\[?f[cd][0-9a-f]{2}:)/i;
+	/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.0\.0\.0$|\[?::1\]?$|\[?f[cd][0-9a-f]{2}:|\[?fe[89ab][0-9a-f]:)/i;
 const PRIVATE_NAME = /^(localhost|\.local|.*\.internal|.*\.localdomain)$/i;
 
 function isPrivateHost(hostname: string): boolean {
@@ -389,7 +390,15 @@ async function attemptOnce(url: string, options: DirectFetchOptions, timeoutMs: 
 			continue;
 		}
 
-		return { ...(await finishResponse(response, options, current, redirects)), finalUrl: current, redirects };
+		// Reading the body is part of the request: a reset mid-stream, a body
+		// timeout, or the caller cancelling all surface here. Letting them escape
+		// would break the "never throws" contract and, worse, skip the rendering
+		// fuse that exists for exactly this kind of failure.
+		try {
+			return { ...(await finishResponse(response, options, current, redirects)), finalUrl: current, redirects };
+		} catch (err) {
+			return { ...networkFailure(err, options), finalUrl: current, redirects };
+		}
 	}
 }
 
@@ -492,18 +501,34 @@ export async function directFetch(url: string, options: DirectFetchOptions = {})
 	const totalBudgetMs = options.timeoutMs ?? 15_000;
 	const deadline = Date.now() + totalBudgetMs;
 
+	// Parse once, here: `attemptOnce` builds a URL on entry, and a malformed one
+	// (`http://[`) would otherwise escape as a throw — the one thing this
+	// function promises never to do.
+	try {
+		new URL(url);
+	} catch {
+		return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: `invalid URL: ${url}` };
+	}
+
 	// Prefer TLS when the caller wrote http:// and the host is on the public
 	// internet: a plaintext fetch is a downgrade we can simply avoid. If the
 	// host genuinely does not speak TLS, the original URL is tried once — the
 	// caller did ask for http, and plenty of small sites still only answer it.
 	const upgraded = upgradeToHttps(url);
-	const attemptUrl = upgraded ?? url;
+	let target = upgraded ?? url;
+	let attempts = 0;
+	const dispatch = (to: string) => {
+		attempts++;
+		return attemptOnce(to, options, deadline - Date.now());
+	};
 
-	let result = await attemptOnce(attemptUrl, options, deadline - Date.now());
+	let result = await dispatch(target);
 	if (upgraded && !result.ok && result.status === 0 && !options.signal?.aborted) {
-		result = await attemptOnce(url, options, deadline - Date.now());
+		// Transport-level failure only: an HTTP answer means the host speaks TLS
+		// and its status is the answer.
+		target = url;
+		result = await dispatch(url);
 	}
-	let attempts = 1;
 
 	while (attempts < MAX_ATTEMPTS && shouldRetry(result, options)) {
 		const remaining = deadline - Date.now();
@@ -511,14 +536,13 @@ export async function directFetch(url: string, options: DirectFetchOptions = {})
 		// Exponential backoff with jitter: a burst of clients must not resynchronise.
 		const wait = Math.min(BASE_DELAY_MS * 3 ** (attempts - 1) * (0.8 + Math.random() * 0.4), remaining - 1);
 		await sleep(wait);
-		result = await attemptOnce(upgraded && result.status === 0 ? url : attemptUrl, options, deadline - Date.now());
-		attempts++;
+		result = await dispatch(target);
 	}
 	return { ...result, attempts };
 }
 
 /** http:// → https:// for public hosts; undefined when there is nothing to do. */
-function upgradeToHttps(url: string): string | undefined {
+export function upgradeToHttps(url: string): string | undefined {
 	let parsed: URL;
 	try {
 		parsed = new URL(url);

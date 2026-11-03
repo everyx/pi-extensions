@@ -34,6 +34,13 @@ const listener = createServer((req, res) => {
 		res.end('<html><body><div id="root"></div><script src="/app.js"></script></body></html>');
 		return;
 	}
+	if (req.url === "/hop") {
+		// Redirect first, then hit the wall: the chain belongs to the result even
+		// when a renderer ends up delivering the content.
+		res.writeHead(302, { Location: "/wall" });
+		res.end();
+		return;
+	}
 	if (req.url === "/gone") {
 		// A page that genuinely does not exist — the fuse must stay out of it.
 		res.writeHead(404, { "Content-Type": "text/html" });
@@ -218,5 +225,19 @@ describe("web_fetch fuse — a renderer can be walled too", () => {
 			(result.rendererFailures ?? []).some((f) => f.includes("network block page")),
 			`the wall is on the record (got ${JSON.stringify(result.rendererFailures)})`,
 		);
+	});
+});
+
+describe("web_fetch fuse — the direct phase's chain survives the fallback", () => {
+	it("keeps the redirects that happened before the wall", async () => {
+		stubRenderers({ firecrawl: { status: 200, markdown: "# Rescued\n\nbody" } });
+
+		const result = await webFetch(`${base}/hop`);
+
+		assert.equal(result.renderer, "firecrawl");
+		assert.equal(result.redirects?.length, 1, "the 302 is still reported");
+		assert.equal(result.finalUrl, `${base}/wall`, "and where it landed");
+		assert.match(result.content, /followed 1 redirect/, "the model is told, not just the card");
+		assert.match(result.content, /Rescued/, "and it gets the rendered content");
 	});
 });
