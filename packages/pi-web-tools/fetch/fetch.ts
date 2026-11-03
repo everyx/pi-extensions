@@ -11,7 +11,7 @@ import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi
 import { stashOverflow } from "@everyx/pi-ui/context.js";
 import type { RenderOutcome, WebFetchResult } from "../types.js";
 import { fetchWithFirecrawl } from "./api/firecrawl-fetch.js";
-import { describeWall, directFetch } from "./api/http-fetch.js";
+import { describeWall, directFetch, type RedirectHop } from "./api/http-fetch.js";
 import { fetchWithTinyfish, tinyfishFetchKey } from "./api/tinyfish-fetch.js";
 import { githubRawUrl } from "./github.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
@@ -35,6 +35,10 @@ interface FetchPageResult {
 	/** Body exceeded MAX_DOWNLOAD_BYTES and was abandoned unread. */
 	tooLarge?: boolean;
 	error?: string;
+	/** Where the fetch ended, if the chain went anywhere. */
+	finalUrl?: string;
+	/** Hops taken, in order — disclosed to the caller, never hidden. */
+	redirects?: RedirectHop[];
 }
 
 /** Images are their own deliverable — except SVG, which IS text (XML). */
@@ -182,6 +186,15 @@ async function fuseRender(
 	return { result: null, failures };
 }
 
+/** One line the model can act on: it asked for a URL and got another.
+ *  Appended, never prepended — the payload stays where the caller expects. */
+function withRedirectNote(content: string, requested: string, page: FetchPageResult): string {
+	const hops = page.redirects?.length ?? 0;
+	if (hops === 0 || !page.finalUrl || page.finalUrl === requested) return content;
+	const plural = hops === 1 ? "" : "s";
+	return `${content}\n\n(followed ${hops} redirect${plural} — final URL: ${page.finalUrl})`;
+}
+
 function previewWithPointer(content: string, stashPath?: string): string {
 	return stashPath ? `${content}\n\n(output truncated — full output: ${stashPath})` : content;
 }
@@ -215,14 +228,16 @@ async function fetchPage(
 		// path asks for markdown and gets it from servers that speak it.
 		format,
 	});
+	const trace = { finalUrl: raw.finalUrl, redirects: raw.redirects };
 	if (raw.ok) {
-		return finishPage(raw.status, raw.contentType, raw.bytes ?? null, raw.tooLarge);
+		return { ...(await finishPage(raw.status, raw.contentType, raw.bytes ?? null, raw.tooLarge)), ...trace };
 	}
 	return {
 		ok: false,
 		status: raw.status,
 		contentType: raw.contentType,
 		error: raw.error ?? `Failed to fetch ${url}`,
+		...trace,
 	};
 }
 
@@ -244,6 +259,13 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	const targetUrl = githubRawUrl(url) ?? url;
 	// raw asks for the source, so prefer an HTML (not negotiated-markdown) body.
 	const format = raw ? "html" : "markdown";
+	/** Every exit reports the chain it actually walked: a caller that asked for
+	 *  one URL and got another must be able to see that, in the text it reads. */
+	const finish = (result: WebFetchResult): WebFetchResult => {
+		const trace = { finalUrl: page?.finalUrl, redirects: page?.redirects };
+		if (result.error || !page?.redirects?.length) return { ...result, ...trace };
+		return { ...result, ...trace, content: withRedirectNote(result.content, targetUrl, page) };
+	};
 	let page = await fetchPage(targetUrl, signal, format);
 	if (targetUrl !== url && (!page.ok || !page.text)) {
 		page = await fetchPage(url, signal, format);
@@ -260,23 +282,23 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 		}
 		const fuse = renderMayHelp(page.status) ? await fuseRender(url, signal, "http-failed") : undefined;
 		if (fuse?.result) return fuse.result;
-		return {
+		return finish({
 			title: "",
 			content: "",
 			error: page.error || `Failed to fetch ${url}`,
 			rendererFailures: fuse?.failures,
-		};
+		});
 	}
 
 	// Over the download cap: the body was abandoned mid-stream, so there is
 	// nothing to convert, stash, or decode — report the fact with metadata.
 	if (page.tooLarge) {
 		const mime = page.contentType?.split(";")[0].trim();
-		return {
+		return finish({
 			title: "",
 			content: `(content not buffered — exceeds ${formatSize(MAX_DOWNLOAD_BYTES)} download cap${mime ? `, ${mime}` : ""})`,
 			contentType: page.contentType || undefined,
-		};
+		});
 	}
 
 	// The source IS the deliverable — raw mode, or any non-HTML body (SVG,
@@ -297,29 +319,29 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 			};
 		}
 		const text = (page.text ?? "").trim();
-		if (!text) return { title: "", content: "", error: "Empty response" };
+		if (!text) return finish({ title: "", content: "", error: "Empty response" });
 		const contentType = page.contentType || undefined;
 		const isMd = Boolean(!raw && page.contentType?.includes("text/markdown"));
 		const { text: capped, stashPath } = stashOverflow(text, url);
-		return {
+		return finish({
 			title: isMd ? titleFromMarkdown(text) : "",
 			content: stashPath ? notInlined(Buffer.byteLength(text, "utf8"), contentType, stashPath) : capped,
 			contentType,
 			outputPath: stashPath,
 			fullContent: text,
-		};
+		});
 	}
 
 	const extracted = htmlToMarkdown(page.text ?? "");
 	if (extracted.markdown && !extracted.error) {
 		const { text: content, stashPath } = stashOverflow(extracted.markdown, url);
-		return {
+		return finish({
 			title: extracted.title,
 			content: previewWithPointer(content, stashPath),
 			contentType: page.contentType || undefined,
 			outputPath: stashPath,
 			fullContent: extracted.markdown,
-		};
+		});
 	}
 
 	// Extraction failed or was incomplete + JS framework markers → CSR page.
@@ -340,23 +362,23 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	// the fuse said about why it could not do better.
 	if (extracted.markdown) {
 		const { text: content, stashPath } = stashOverflow(extracted.markdown, url);
-		return {
+		return finish({
 			title: extracted.title,
 			content: previewWithPointer(content, stashPath),
 			contentType: page.contentType || undefined,
 			outputPath: stashPath,
 			fullContent: extracted.markdown,
 			rendererFailures,
-		};
+		});
 	}
 
 	const jsRendered = isLikelyJSRendered(page.text ?? "");
-	return {
+	return finish({
 		title: "",
 		content: "",
 		error: jsRendered ? "(no readable content) — page appears to be JavaScript-rendered" : "(no readable content)",
 		rendererFailures,
-	};
+	});
 }
 
 function firstLineAsTitle(text: string): string {

@@ -88,6 +88,17 @@ export interface DirectFetchResult {
 	challenge?: string;
 	/** How many requests were spent (1 unless a transient failure was retried). */
 	attempts?: number;
+	/** Where the chain ended, when it went anywhere (equal to the request otherwise). */
+	finalUrl?: string;
+	/** Every hop taken, in order. */
+	redirects?: RedirectHop[];
+}
+
+/** One redirect the chain followed. */
+export interface RedirectHop {
+	from: string;
+	to: string;
+	status: number;
 }
 
 /** One proxy-aware agent for the process: undici clients are pools, so building
@@ -212,93 +223,254 @@ export function describeWall(text: string): string | undefined {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** One attempt. Separated so the retry loop stays readable. */
+/** Statuses that carry a `Location` we are expected to act on. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+/** A chain longer than this is a loop, not a chain. */
+const MAX_REDIRECTS = 10;
+
+/** Hosts that are not on the public internet. Following a *page's* redirect
+ *  into one of these is the classic injected-navigation move, so it is refused
+ *  before the request goes out. This is a name check, not a resolver check —
+ *  a hostname that resolves to 10.x still gets through (see SPEC). */
+const PRIVATE_LITERAL =
+	/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.0\.0\.0$|\[?::1\]?$|\[?f[cd][0-9a-f]{2}:)/i;
+const PRIVATE_NAME = /^(localhost|\.local|.*\.internal|.*\.localdomain)$/i;
+
+function isPrivateHost(hostname: string): boolean {
+	const host = hostname.toLowerCase();
+	return PRIVATE_LITERAL.test(host) || PRIVATE_NAME.test(host) || host === "::1" || host === "[::1]";
+}
+
+/**
+ * Should this hop be refused before it is made?
+ *
+ * The risk is one-directional: a page the caller fetched on the public internet
+ * pointing at a private address. A caller already talking to a private host is
+ * inside that trust domain, and blocking its own redirects would break every
+ * local development server for no security gain.
+ *
+ * Returns the refusal reason, or undefined to proceed.
+ */
+export function redirectRefusal(startedPrivate: boolean, next: URL): string | undefined {
+	if (startedPrivate) return undefined;
+	if (!isPrivateHost(next.hostname)) return undefined;
+	return `redirect into a private address refused: ${next.host}`;
+}
+
+/** Claude Code's rule, and a good one: a bare hostname means the local machine
+ *  or an intranet, which is what `bash curl` is for. */
+function hasNoDot(hostname: string): boolean {
+	return !hostname.includes(".") && !hostname.includes(":");
+}
+
+/** One attempt, including the redirect chain it walks. */
 async function attemptOnce(url: string, options: DirectFetchOptions, timeoutMs: number): Promise<DirectFetchResult> {
-	const signal = options.signal
-		? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
-		: AbortSignal.timeout(timeoutMs);
+	const deadline = Date.now() + timeoutMs;
+	const redirects: RedirectHop[] = [];
+	let current = url;
 
-	try {
-		const response = await undiciFetch(url, {
-			signal,
-			redirect: "follow",
-			dispatcher: getDispatcher(),
-			headers: {
-				"User-Agent": defaultUserAgent(),
-				Accept: acceptHeader(options.format ?? "markdown"),
-				// curl sent none of this by default. A locale header is content
-				// negotiation, not impersonation, and it is what flipped a 403 to
-				// 200 in the one measured header-level win.
-				"Accept-Language": "en-US,en;q=0.9",
-			},
-		});
-		const contentType = response.headers.get("content-type") ?? "";
-
-		// Classify a wall before reading the body: a challenge is not a failure
-		// to retry, and the model deserves to know it was blocked rather than
-		// told the page is broken.
-		const headerChallenge = challengeFromHeaders(response.status, response.headers);
-		if (headerChallenge) {
-			await response.body?.cancel().catch(() => {});
-			return {
-				ok: false,
-				status: response.status,
-				contentType,
-				bytes: null,
-				tooLarge: false,
-				challenge: headerChallenge,
-				error: `blocked by a ${headerChallenge} challenge`,
-			};
-		}
-
-		const { bytes, tooLarge } = await readBodyCapped(response, maxBytesOf(options));
-		if (tooLarge) return { ok: true, status: response.status, contentType, bytes: null, tooLarge: true };
-
-		// Challenge pages answer 403, 503, and sometimes 200; the text is the only
-		// tell left. Only small bodies qualify — a real article is not one, and a
-		// long page that merely mentions captchas must not be mistaken for a wall.
-		const looksLikeWall = !response.ok || (bytes?.length ?? 0) <= 4 * 1024;
-		const bodyChallenge = looksLikeWall && bytes ? challengeFromBody(new TextDecoder().decode(bytes)) : undefined;
-		if (bodyChallenge) {
-			return {
-				ok: false,
-				status: response.status,
-				contentType,
-				bytes: null,
-				tooLarge: false,
-				challenge: bodyChallenge,
-				error: `blocked by a ${bodyChallenge} challenge`,
-			};
-		}
-
-		if (!response.ok) {
-			const reason = response.statusText ? `: ${response.statusText}` : "";
-			return {
-				ok: false,
-				status: response.status,
-				contentType,
-				bytes: null,
-				tooLarge: false,
-				error: `HTTP ${response.status}${reason}`,
-			};
-		}
-		return { ok: true, status: response.status, contentType, bytes, tooLarge: false };
-	} catch (err) {
-		if (options.signal?.aborted) {
-			return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "fetch aborted" };
-		}
-		if (err instanceof Error && err.name === "TimeoutError") {
-			return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "request timed out" };
-		}
+	// Reject the shapes that mean "this machine", before any request is made.
+	const entry = new URL(url);
+	// The guard below is about a *public* page navigating the caller somewhere
+	// private. A caller already talking to a private host (a local dev server)
+	// is inside that trust domain, and following its redirects is the whole
+	// point of talking to it.
+	const startedPrivate = isPrivateHost(entry.hostname);
+	if (hasNoDot(entry.hostname)) {
 		return {
 			ok: false,
 			status: 0,
 			contentType: "",
 			bytes: null,
 			tooLarge: false,
-			error: describeNetworkError(err),
+			error: "hostnames without a dot are not supported (use bash curl for a local server)",
 		};
 	}
+
+	for (let hops = 0; ; hops++) {
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) {
+			return {
+				ok: false,
+				status: 0,
+				contentType: "",
+				bytes: null,
+				tooLarge: false,
+				error: "request timed out",
+				finalUrl: current,
+				redirects,
+			};
+		}
+		const signal = options.signal
+			? AbortSignal.any([options.signal, AbortSignal.timeout(remaining)])
+			: AbortSignal.timeout(remaining);
+
+		let response: Response;
+		try {
+			response = await undiciFetch(current, {
+				signal,
+				// Walked by hand: the chain is what tells the caller it landed
+				// somewhere other than the URL it asked for.
+				redirect: "manual",
+				dispatcher: getDispatcher(),
+				headers: {
+					"User-Agent": defaultUserAgent(),
+					Accept: acceptHeader(options.format ?? "markdown"),
+					// curl sent none of this by default. A locale header is content
+					// negotiation, not impersonation, and it is what flipped a 403 to
+					// 200 in the one measured header-level win.
+					"Accept-Language": "en-US,en;q=0.9",
+				},
+			});
+		} catch (err) {
+			return { ...networkFailure(err, options), finalUrl: current, redirects };
+		}
+
+		const location = response.headers.get("location");
+		if (REDIRECT_STATUSES.has(response.status) && location) {
+			await response.body?.cancel().catch(() => {});
+			let next: URL;
+			try {
+				next = new URL(location, current);
+			} catch {
+				return {
+					ok: false,
+					status: response.status,
+					contentType: "",
+					bytes: null,
+					tooLarge: false,
+					error: `redirect to an unusable location: ${location}`,
+					finalUrl: current,
+					redirects,
+				};
+			}
+			if (next.protocol !== "http:" && next.protocol !== "https:") {
+				return {
+					ok: false,
+					status: response.status,
+					contentType: "",
+					bytes: null,
+					tooLarge: false,
+					error: `redirect to a non-http location: ${next.protocol}`,
+					finalUrl: current,
+					redirects,
+				};
+			}
+			// A page navigating the caller into a private network is the case this
+			// guard exists for. The model asking for one directly is a different
+			// matter — that is visible in the transcript, this is not.
+			const refusal = redirectRefusal(startedPrivate, next);
+			if (refusal) {
+				return {
+					ok: false,
+					status: response.status,
+					contentType: "",
+					bytes: null,
+					tooLarge: false,
+					error: refusal,
+					finalUrl: current,
+					redirects,
+				};
+			}
+			if (hops + 1 > MAX_REDIRECTS) {
+				return {
+					ok: false,
+					status: response.status,
+					contentType: "",
+					bytes: null,
+					tooLarge: false,
+					error: `too many redirects (more than ${MAX_REDIRECTS})`,
+					finalUrl: current,
+					redirects,
+				};
+			}
+			redirects.push({ from: current, to: next.href, status: response.status });
+			current = next.href;
+			continue;
+		}
+
+		return { ...(await finishResponse(response, options, current, redirects)), finalUrl: current, redirects };
+	}
+}
+
+/** Turn the final response into a normalized result. */
+async function finishResponse(
+	response: Response,
+	options: DirectFetchOptions,
+	current: string,
+	redirects: RedirectHop[],
+): Promise<DirectFetchResult> {
+	const contentType = response.headers.get("content-type") ?? "";
+
+	// Classify a wall before reading the body: a challenge is not a failure to
+	// retry, and the model deserves to know it was blocked rather than told the
+	// page is broken.
+	const headerChallenge = challengeFromHeaders(response.status, response.headers);
+	if (headerChallenge) {
+		await response.body?.cancel().catch(() => {});
+		return {
+			ok: false,
+			status: response.status,
+			contentType,
+			bytes: null,
+			tooLarge: false,
+			challenge: headerChallenge,
+			error: `blocked by a ${headerChallenge} challenge`,
+			finalUrl: current,
+			redirects,
+		};
+	}
+
+	const { bytes, tooLarge } = await readBodyCapped(response, maxBytesOf(options));
+	if (tooLarge) return { ok: true, status: response.status, contentType, bytes: null, tooLarge: true };
+
+	// Challenge pages answer 403, 503, and sometimes 200; the text is the only
+	// tell left. Only small bodies qualify — a real article is not one, and a
+	// long page that merely mentions captchas must not be mistaken for a wall.
+	const looksLikeWall = !response.ok || (bytes?.length ?? 0) <= 4 * 1024;
+	const bodyChallenge = looksLikeWall && bytes ? challengeFromBody(new TextDecoder().decode(bytes)) : undefined;
+	if (bodyChallenge) {
+		return {
+			ok: false,
+			status: response.status,
+			contentType,
+			bytes: null,
+			tooLarge: false,
+			challenge: bodyChallenge,
+			error: `blocked by a ${bodyChallenge} challenge`,
+		};
+	}
+
+	if (!response.ok) {
+		const reason = response.statusText ? `: ${response.statusText}` : "";
+		return {
+			ok: false,
+			status: response.status,
+			contentType,
+			bytes: null,
+			tooLarge: false,
+			error: `HTTP ${response.status}${reason}`,
+		};
+	}
+	return { ok: true, status: response.status, contentType, bytes, tooLarge: false };
+}
+
+/** Transport failure in words the caller can act on. */
+function networkFailure(err: unknown, options: DirectFetchOptions): DirectFetchResult {
+	if (options.signal?.aborted) {
+		return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "fetch aborted" };
+	}
+	if (err instanceof Error && err.name === "TimeoutError") {
+		return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "request timed out" };
+	}
+	return {
+		ok: false,
+		status: 0,
+		contentType: "",
+		bytes: null,
+		tooLarge: false,
+		error: describeNetworkError(err),
+	};
 }
 
 const maxBytesOf = (options: DirectFetchOptions) => options.maxBytes ?? 64 * 1024 * 1024;
@@ -320,18 +492,43 @@ export async function directFetch(url: string, options: DirectFetchOptions = {})
 	const totalBudgetMs = options.timeoutMs ?? 15_000;
 	const deadline = Date.now() + totalBudgetMs;
 
-	let result = await attemptOnce(url, options, totalBudgetMs);
+	// Prefer TLS when the caller wrote http:// and the host is on the public
+	// internet: a plaintext fetch is a downgrade we can simply avoid. If the
+	// host genuinely does not speak TLS, the original URL is tried once — the
+	// caller did ask for http, and plenty of small sites still only answer it.
+	const upgraded = upgradeToHttps(url);
+	const attemptUrl = upgraded ?? url;
+
+	let result = await attemptOnce(attemptUrl, options, deadline - Date.now());
+	if (upgraded && !result.ok && result.status === 0 && !options.signal?.aborted) {
+		result = await attemptOnce(url, options, deadline - Date.now());
+	}
 	let attempts = 1;
+
 	while (attempts < MAX_ATTEMPTS && shouldRetry(result, options)) {
 		const remaining = deadline - Date.now();
 		if (remaining <= BASE_DELAY_MS) break;
 		// Exponential backoff with jitter: a burst of clients must not resynchronise.
 		const wait = Math.min(BASE_DELAY_MS * 3 ** (attempts - 1) * (0.8 + Math.random() * 0.4), remaining - 1);
 		await sleep(wait);
-		result = await attemptOnce(url, options, deadline - Date.now());
+		result = await attemptOnce(upgraded && result.status === 0 ? url : attemptUrl, options, deadline - Date.now());
 		attempts++;
 	}
 	return { ...result, attempts };
+}
+
+/** http:// → https:// for public hosts; undefined when there is nothing to do. */
+function upgradeToHttps(url: string): string | undefined {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return undefined;
+	}
+	if (parsed.protocol !== "http:") return undefined;
+	if (hasNoDot(parsed.hostname) || isPrivateHost(parsed.hostname)) return undefined;
+	parsed.protocol = "https:";
+	return parsed.href;
 }
 
 /** Whether another attempt could plausibly answer differently. */

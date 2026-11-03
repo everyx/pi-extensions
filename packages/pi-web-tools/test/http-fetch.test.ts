@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { directFetch } from "../fetch/api/http-fetch.js";
+import { directFetch, redirectRefusal } from "../fetch/api/http-fetch.js";
 
 interface Captured {
 	userAgent?: string;
@@ -79,6 +79,21 @@ const listener = createServer((req, res) => {
 		// A wall that only the body gives away.
 		res.writeHead(200, { "Content-Type": "text/html" });
 		res.end("<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>");
+		return;
+	}
+	if (req.url === "/r1") {
+		res.writeHead(302, { Location: "/r2" });
+		res.end();
+		return;
+	}
+	if (req.url === "/r2") {
+		res.writeHead(200, { "Content-Type": "text/plain" });
+		res.end("after two hops");
+		return;
+	}
+	if (req.url === "/loop") {
+		res.writeHead(302, { Location: "/loop" });
+		res.end();
 		return;
 	}
 	if (req.url === "/slow") {
@@ -203,5 +218,45 @@ describe("directFetch — retry only what a retry can fix", () => {
 	it("spends one attempt when the first one works", async () => {
 		const result = await directFetch(`${base}/page`, { timeoutMs: 5_000 });
 		assert.equal(result.attempts, 1);
+	});
+});
+
+describe("directFetch — the redirect chain is walked and reported", () => {
+	it("follows a chain and records every hop", async () => {
+		const result = await directFetch(`${base}/r1`);
+		assert.equal(result.ok, true);
+		assert.equal(new TextDecoder().decode(result.bytes ?? new Uint8Array()), "after two hops");
+		assert.equal(result.finalUrl, `${base}/r2`);
+		assert.deepEqual(
+			result.redirects?.map((h) => [h.status, new URL(h.to).pathname]),
+			[[302, "/r2"]],
+		);
+	});
+
+	it("refuses a public page's redirect into a private address", () => {
+		// The decision is unit-tested rather than driven through the server: the
+		// test server itself lives on 127.0.0.1, which is inside the trust domain
+		// the rule deliberately allows.
+		assert.match(String(redirectRefusal(false, new URL("http://127.0.0.1:8080/admin"))), /private address refused/);
+		assert.match(String(redirectRefusal(false, new URL("http://169.254.169.254/latest"))), /private address refused/);
+		assert.match(String(redirectRefusal(false, new URL("http://[::1]:8080/"))), /private address refused/);
+	});
+
+	it("lets a local caller follow its own local redirects", () => {
+		// Talking to a dev server means its redirects stay in that same domain.
+		assert.equal(redirectRefusal(true, new URL("http://127.0.0.1:8080/next")), undefined);
+		assert.equal(redirectRefusal(false, new URL("https://example.com/next")), undefined);
+	});
+
+	it("gives up on a loop instead of spinning", async () => {
+		const result = await directFetch(`${base}/loop`, { timeoutMs: 5_000 });
+		assert.equal(result.ok, false);
+		assert.match(String(result.error), /too many redirects/);
+	});
+
+	it("rejects a bare hostname — that is what bash curl is for", async () => {
+		const result = await directFetch("http://localhost:3000/");
+		assert.equal(result.ok, false);
+		assert.match(String(result.error), /without a dot/);
 	});
 });

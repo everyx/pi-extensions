@@ -168,6 +168,10 @@ export function fetchToolResult(
 				renderer: result.renderer,
 				renderReason: result.renderReason,
 				rendererFailures: result.rendererFailures,
+				// A redirect the caller did not ask for is worth seeing without
+				// reading the body: the chain lives on the card, the final URL is
+				// also stated in the content.
+				redirects: result.redirects,
 				startedAt,
 				endedAt: Date.now(),
 			} satisfies FetchToolData,
