@@ -42,7 +42,7 @@ describe("tinyfish fetch adapter", () => {
 			const capture: { url?: string; headers?: Record<string, string>; body?: string } = {};
 			stubFetch({ results: [{ url: "https://a.dev", title: "T", text: "# Hello" }] }, capture);
 
-			const rendered = await fetchWithTinyfish("https://a.dev");
+			const rendered = await fetchWithTinyfish("https://a.dev", Date.now() + 5_000);
 			assert.ok(capture.url, "fetch was called");
 			assert.equal(capture.url, "https://api.fetch.tinyfish.ai");
 			assert.match(capture.headers?.["Content-Type"] ?? "", /application\/json/);
@@ -50,14 +50,14 @@ describe("tinyfish fetch adapter", () => {
 			const body = JSON.parse(capture.body ?? "{}");
 			assert.deepEqual(body, { urls: ["https://a.dev"], format: "markdown" });
 			// The request asks for markdown — the adapter self-reports it.
-			assert.deepEqual(rendered, { text: "# Hello", contentType: "text/markdown" });
+			assert.deepEqual(rendered.content, { text: "# Hello", contentType: "text/markdown" });
 		}));
 
 	it("sends X-API-Key when set (shared with the search channel)", async () => {
 		await withKey(async () => {
 			const capture: { headers?: Record<string, string> } = {};
 			stubFetch({ results: [{ url: "https://a.dev", text: "ok" }] }, capture);
-			await fetchWithTinyfish("https://a.dev");
+			await fetchWithTinyfish("https://a.dev", Date.now() + 5_000);
 			assert.equal(capture.headers?.["X-API-Key"], "test-key");
 		});
 	});
@@ -69,20 +69,20 @@ describe("tinyfish fetch adapter", () => {
 				{ url: "https://a.dev", text: "right" },
 			],
 		});
-		assert.equal((await fetchWithTinyfish("https://a.dev"))?.text, "right");
+		assert.equal((await fetchWithTinyfish("https://a.dev", Date.now() + 5_000)).content?.text, "right");
 	});
 
 	it("returns null when the URL is missing from results (per-URL error)", async () => {
 		stubFetch({ results: [], errors: [{ url: "https://a.dev", error: "blocked" }] });
-		assert.equal(await fetchWithTinyfish("https://a.dev"), null);
+		assert.equal((await fetchWithTinyfish("https://a.dev", Date.now() + 5_000)).content, null);
 	});
 
 	it("returns null on HTTP error and on network failure (fuse advance)", async () => {
 		globalThis.fetch = (async () => new Response("nope", { status: 500 })) as typeof fetch;
-		assert.equal(await fetchWithTinyfish("https://a.dev"), null);
+		assert.equal((await fetchWithTinyfish("https://a.dev", Date.now() + 5_000)).content, null);
 		globalThis.fetch = (async () => {
 			throw new Error("ECONNRESET");
 		}) as typeof fetch;
-		assert.equal(await fetchWithTinyfish("https://a.dev"), null);
+		assert.equal((await fetchWithTinyfish("https://a.dev", Date.now() + 5_000)).content, null);
 	});
 });

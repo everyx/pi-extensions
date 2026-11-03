@@ -141,3 +141,86 @@ describe("createSerialQueue", () => {
 		assert.equal(await second, 2);
 	});
 });
+
+describe("createRateLimiter.runBefore — the queue wait is part of the budget", () => {
+	// 1 qps: every queued call waits at least a second for its turn.
+	const slow = () => createRateLimiter(1);
+
+	it("runs normally while the budget holds", async () => {
+		const limiter = slow();
+		const out = await limiter.runBefore(async () => "done", { deadline: Date.now() + 5_000 });
+		assert.equal(out, "done");
+	});
+
+	it("refuses before queueing when the deadline has already passed", async () => {
+		let ran = false;
+		const out = await slow().runBefore(
+			async () => {
+				ran = true;
+				return "x";
+			},
+			{ deadline: Date.now() - 1 },
+		);
+		assert.equal(out, null);
+		assert.equal(ran, false);
+	});
+
+	it("leaves the queue at its deadline — not when its turn finally comes", async () => {
+		const limiter = slow();
+		// The first call holds the slot until we release it, so the second one's
+		// turn is far away. Without a deadline timer it would sit there.
+		let releaseFirst: (v: string) => void = () => {};
+		const held = new Promise<string>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const first = limiter.runBefore(() => held, { deadline: Date.now() + 10_000 });
+
+		let ranSecond = false;
+		const started = Date.now();
+		const second = limiter.runBefore(
+			async () => {
+				ranSecond = true;
+				return "second";
+			},
+			{ deadline: Date.now() + 60 },
+		);
+
+		// The decisive assertion: it returns while the first call is still running.
+		assert.equal(await second, null);
+		assert.ok(Date.now() - started < 900, "did not wait for the queue to drain");
+		assert.equal(ranSecond, false, "a call past its deadline never starts");
+
+		releaseFirst("first");
+		assert.equal(await first, "first");
+		await new Promise((r) => setTimeout(r, 50));
+		assert.equal(ranSecond, false, "and it never runs later either");
+	});
+
+	it("returns as soon as the caller cancels, without waiting for a slot", async () => {
+		const limiter = slow();
+		const first = limiter.runBefore(async () => "first", { deadline: Date.now() + 5_000 });
+
+		const controller = new AbortController();
+		const queued = limiter.runBefore(async () => "never", {
+			deadline: Date.now() + 30_000,
+			signal: controller.signal,
+		});
+		const started = Date.now();
+		controller.abort();
+
+		assert.equal(await queued, null);
+		assert.ok(Date.now() - started < 500, "cancellation does not wait out the queue");
+		assert.equal(await first, "first");
+	});
+
+	it("keeps the unbudgeted run() contract: values resolve, errors reject", async () => {
+		const limiter = slow();
+		assert.equal(await limiter.run(async () => 7), 7);
+		await assert.rejects(
+			limiter.run(async () => {
+				throw new Error("boom");
+			}),
+			/boom/,
+		);
+	});
+});
