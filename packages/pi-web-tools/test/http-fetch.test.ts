@@ -81,6 +81,12 @@ const listener = createServer((req, res) => {
 		res.end("<html><body>blocked</body></html>");
 		return;
 	}
+	if (req.url === "/challenge-huge") {
+		// A wall that announces a big body: the prefix is what matters.
+		res.writeHead(403, { "Content-Length": String(1024 * 1024), "Content-Type": "text/html" });
+		res.end("<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>");
+		return;
+	}
 	if (req.url === "/challenge-body") {
 		// A wall that only the body gives away.
 		res.writeHead(200, { "Content-Type": "text/html" });
@@ -332,5 +338,16 @@ describe("redirectRefusal — IPv6 in disguise", () => {
 			undefined,
 			"a public v4 stays public",
 		);
+	});
+});
+
+describe("directFetch — a wall is recognised even when it claims to be big", () => {
+	it("sniffs the prefix of an oversized error response", async () => {
+		// The declared length is 1 MB; skipping the read would leave this as a
+		// plain HTTP 403 and send the caller to a renderer it may not need.
+		const result = await directFetch(`${base}/challenge-huge`, { timeoutMs: 5_000 });
+		assert.equal(result.ok, false);
+		assert.equal(result.challenge, "Cloudflare");
+		assert.equal(result.attempts, 1, "and it is not retried");
 	});
 });

@@ -140,6 +140,42 @@ export function isTransientError(message: string): boolean {
 	);
 }
 
+/** Read at most `maxBytes` from the body, whatever the headers claim.
+ *
+ *  Used for sniffing a wall notice on an error response: there the declared
+ *  length is irrelevant — a challenge page can announce 1 MB and still say
+ *  "Just a moment" in its first line, and skipping the read would lose the
+ *  classification (and with it the reason the caller is told).
+ */
+async function readPrefix(response: Response, maxBytes: number): Promise<Uint8Array> {
+	if (!response.body) return new Uint8Array(0);
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	try {
+		while (size < maxBytes) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+			size += value.length;
+		}
+	} catch {
+		// A connection that dies mid-sniff still leaves us the bytes we got.
+	}
+	await reader.cancel().catch(() => {});
+	reader.releaseLock?.();
+
+	const out = new Uint8Array(Math.min(size, maxBytes));
+	let offset = 0;
+	for (const chunk of chunks) {
+		const room = out.length - offset;
+		if (room <= 0) break;
+		out.set(chunk.subarray(0, room), offset);
+		offset += Math.min(chunk.length, room);
+	}
+	return out;
+}
+
 /** Read the body under a byte cap; `tooLarge` instead of a truncated array. */
 async function readBodyCapped(
 	response: Response,
@@ -449,9 +485,10 @@ async function finishResponse(
 	// still a 404 — deciding "too large, therefore fine" before looking at the
 	// status would report a missing page as a successful oversized one.
 	if (!response.ok) {
-		// Read only enough for the wall check; a big error page is not content.
-		const { bytes } = await readBodyCapped(response, Math.min(maxBytesOf(options), 64 * 1024));
-		const bodyChallenge = bytes ? challengeFromBody(new TextDecoder().decode(bytes)) : undefined;
+		// Sniff a prefix for the wall check; a big error page is not content, but
+		// its first line may still say "Just a moment".
+		const prefix = await readPrefix(response, Math.min(maxBytesOf(options), 64 * 1024));
+		const bodyChallenge = prefix.length ? challengeFromBody(new TextDecoder().decode(prefix)) : undefined;
 		if (bodyChallenge) {
 			return {
 				ok: false,

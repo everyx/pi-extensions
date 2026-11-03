@@ -267,14 +267,14 @@ Accept-Language: en-US,en;q=0.9
     必须自带 deadline 或 signal，渲染器正是这么做的（把剩余时间交给 `fetchWithTimeout`）。
 - **浏览器保险丝已从 web_fetch 移除**（2026-10-31）：它依赖 BrowserSkill 的 CLI
   契约，上游一改版整条 fetch 兜底就失效。
-- **请求头 = 系统 curl 原生**（UA/Accept: */*/无 Accept-Language）；fallback
-  用钉死 curl UA。动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）
-  留档——curl 是合法命令行身份，被拦的页面由保险丝链兜底（不丢能力，多一跳）。
+- **请求头见上面的「请求头」一节**（自报身份的 UA + 协商 markdown 的 Accept +
+  `Accept-Language`）。动机史留档：openai/codex#18456 证明 Cloudflare 会按 UA 403，
+  那是「别装作浏览器」的由来——现在仍是自报家门，只是不再自称 curl。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；
   超时与外部取消区分。
 - **GitHub blob 直取文件**：`github.com/…/blob/<ref>/<path>` 重写为 raw 内容
   （LLM 要文件而非界面）；raw 不可用回退原 URL。
-- **主路径零中转**：静态友好页始终直取（无 r.jina.ai 类常驻中转）；仅当直取
+- **主路径零中转**：静态友好页始终由本机直取（无 r.jina.ai 类常驻中转）；仅当直取
   失败（反爬/CSR）才走渲染保险丝——它本身就是转发渲染（诚实地位，非隐蔽）；
   需要登录/交互的页面归 LLM 自行 bash curl。（2026-08 加入 tinyfish fetch 前的
   既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订；2026-10 撤掉
