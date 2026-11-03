@@ -30,7 +30,7 @@ describe("recency", () => {
 		assert.equal(recencyToTavily("month"), "month");
 	});
 
-	it("tbs uses first letter (Firecrawl + bsk google)", () => {
+	it("tbs uses first letter (Firecrawl Google backend)", () => {
 		assert.equal(recencyToTbs("day"), "qdr:d");
 		assert.equal(recencyToTbs("week"), "qdr:w");
 		assert.equal(recencyToTbs("month"), "qdr:m");

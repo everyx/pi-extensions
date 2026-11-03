@@ -36,7 +36,7 @@ export function recencyToExa(filter: RecencyFilter, now?: Date): string {
 }
 
 /** Google-style `tbs=qdr:` time window — Firecrawl `/search` `tbs` param and
- *  the bsk channel's google navigation share the same format. */
+ *  the Google-backed channel's navigation share the same format. */
 export function recencyToTbs(filter: RecencyFilter): string {
 	return `qdr:${filter[0]}`; // day → qdr:d, week → qdr:w, month → qdr:m, year → qdr:y
 }

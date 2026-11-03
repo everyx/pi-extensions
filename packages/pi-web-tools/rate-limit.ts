@@ -5,7 +5,7 @@
  *   - createRateLimiter(qps) — serializes calls with a 1000/qps minimum
  *     interval (no qps = pass-through, no unnecessary serialization).
  *   - createSerialQueue(open, close) — runs queued tasks strictly one at a
- *     time, reusing a shared context (e.g. one bsk session for a batch of
+ *     time, reusing a shared context (e.g. one browser session for a batch of
  *     searches), opening it lazily and closing it when the queue drains.
  *
  * Researched rate limits — each channel declares its own qps (search/api/):
@@ -49,7 +49,7 @@ export function createRateLimiter(qps?: number): RateLimiter {
 /**
  * Serial task queue sharing one lazily-opened context.
  *
- * Tasks run one at a time; the context (e.g. a bsk session id) is opened on
+ * Tasks run one at a time; the context (e.g. a browser session id) is opened on
  * first use and closed when the queue drains — so a burst of queued searches
  * shares a single browser session (SPEC: 批量搜索一次打开浏览器).
  */

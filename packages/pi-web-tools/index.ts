@@ -3,8 +3,7 @@
  *
  * web_search routes across HTTP search providers in fuse order
  * (tinyfish → exa → tavily → firecrawl) and falls through on failure; the
- * real-browser channel (bsk) is the last-resort fuse, not an equal peer.
- * Availability is environment-driven (key presence / bsk CLI), never
+ * Availability is environment-driven (key presence), never
  * configured. The LLM sees results or a terse error; channel echo,
  * hints and diagnostics live in details (UI-visible). SPEC.md is the doc.
  */
@@ -34,7 +33,6 @@ function formatResults(result: SearchResultItem[]): string {
 function finalizeResult(
 	result: SearchResultItem[],
 	channel: ChannelId,
-	engine: SearchToolData["engine"],
 	params: WebSearchParams,
 	startedAt: number,
 ): { content: { type: "text"; text: string }[]; details: Record<string, unknown>; isError: boolean } {
@@ -44,7 +42,6 @@ function finalizeResult(
 			data: {
 				results: result,
 				channel,
-				...(engine ? { engine } : {}),
 				...(params.locale ? { locale: params.locale } : {}),
 				count: result.length,
 				startedAt,
@@ -91,7 +88,7 @@ async function executeSearch(
 	});
 
 	if (out.channel) {
-		return finalizeResult(out.results, out.channel, out.echo?.engine, params, startedAt);
+		return finalizeResult(out.results, out.channel, params, startedAt);
 	}
 	if (out.failures.length === 0) {
 		return {

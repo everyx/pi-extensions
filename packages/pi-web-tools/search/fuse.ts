@@ -8,14 +8,7 @@
  * no network).
  */
 
-import type {
-	ChannelId,
-	ChannelSearchContext,
-	EngineId,
-	SearchChannel,
-	SearchResultItem,
-	WebSearchParams,
-} from "../types.js";
+import type { ChannelId, ChannelSearchContext, SearchChannel, SearchResultItem, WebSearchParams } from "../types.js";
 
 /** One failed channel attempt (in fuse order). */
 export interface SearchFuseFailure {
@@ -26,12 +19,10 @@ export interface SearchFuseFailure {
 	hint?: string;
 }
 
-/** The walk's outcome: a win (channel + results + echo) or the failure list. */
+/** The walk's outcome: a win (channel + results) or the failure list. */
 export interface SearchFuseOutcome {
 	/** The channel that answered (undefined when none did). */
 	channel?: ChannelId;
-	/** Card echo from the answering channel (e.g. the bsk engine). */
-	echo?: { engine: EngineId };
 	results: SearchResultItem[];
 	/** Every failed attempt, in fuse order. */
 	failures: SearchFuseFailure[];
@@ -54,7 +45,7 @@ export function summarizeFailures(failures: SearchFuseFailure[]): { message: str
 }
 
 /** Channels that are available AND can honor this exact request, in fuse
- *  order (async: bsk probes the CLI on first use; the probe result is
+ *  order (async: a channel may probe its own availability on first use)
  *  cached inside its adapter). */
 export async function candidatesFor(params: WebSearchParams, channels: SearchChannel[]): Promise<SearchChannel[]> {
 	const out: SearchChannel[] = [];
@@ -77,7 +68,7 @@ export async function searchFuse(
 		ctx.onAttempt?.(c.id);
 		try {
 			const results = await c.search(params, { signal: ctx.signal });
-			return { channel: c.id, echo: c.echo?.(params), results, failures };
+			return { channel: c.id, results, failures };
 		} catch (err) {
 			const error = err instanceof Error ? err.message : String(err);
 			// Config guidance travels in details (UI), never in LLM text

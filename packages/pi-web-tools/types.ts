@@ -15,13 +15,8 @@ export interface SearchResultItem {
 	author?: string;
 }
 
-/** Search channels in fuse order — api providers first, the real-browser
- *  channel (BrowserSkill CLI) last as the no-key fuse. */
-export type ChannelId = "tinyfish" | "exa" | "tavily" | "firecrawl" | "bsk";
-
-/** Real-browser engines for the bsk fuse — picked from the request's locale
- *  (zh → baidu, else google). No system-locale or config input. */
-export type EngineId = "google" | "baidu";
+/** Search channels in fuse order. */
+export type ChannelId = "tinyfish" | "exa" | "tavily" | "firecrawl";
 
 export interface WebSearchParams {
 	query: string;
@@ -42,9 +37,8 @@ export interface ChannelSearchContext {
 /** A page renderer's output: the text and the real type of that text. */
 export interface RenderedContent {
 	text: string;
-	/** The real type of the text (tinyfish: requested markdown; bsk: the
-	 *  page's innerText — plain). The result card's contentType is this,
-	 *  verbatim (SPEC 诚实规则). */
+	/** The real type of the text (tinyfish: the markdown it was asked for).
+	 *  The result card's contentType is this, verbatim (SPEC 诚实规则). */
 	contentType: string;
 }
 
@@ -59,8 +53,6 @@ export interface SearchChannel {
 	supports: (params: WebSearchParams) => boolean;
 	/** The search call — HTTP/CLI details live in the adapter. */
 	search: (params: WebSearchParams, ctx: ChannelSearchContext) => Promise<SearchResultItem[]>;
-	/** Card echo — channel-specific fields for the result card (bsk: engine). */
-	echo?: (params: WebSearchParams) => { engine: EngineId };
 }
 
 /** web_search tool-result payload (`details.data`) — written by index.ts,
@@ -68,8 +60,6 @@ export interface SearchChannel {
 export type SearchToolData = {
 	results?: SearchResultItem[];
 	channel?: ChannelId;
-	/** Set only when the bsk fuse served the search. */
-	engine?: EngineId;
 	locale?: string;
 	count?: number;
 	startedAt?: number;
