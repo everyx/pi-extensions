@@ -27,6 +27,25 @@ Fetch https://github.com/earendil-works/pi/blob/main/README.md and summarize it
 
 ## Configuration
 
+### Where the keys come from
+
+Two sources, first one wins:
+
+1. **Environment** — `TINYFISH_API_KEY`, `EXA_API_KEY`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`. Best for CI, scripts, and anything that already exports them.
+2. **`<agent dir>/web-tools.json`** — a flat file for people who would rather not edit shell config (`~/.pi/agent/web-tools.json` by default):
+
+```json
+{ "tinyfish": "…", "exa": "…", "tavily": "…", "firecrawl": "…" }
+```
+
+A missing, unreadable, or malformed file contributes nothing — exactly like an unset variable. Nothing is ever written to it.
+
+It holds plaintext keys, so keep it yours: `chmod 600 ~/.pi/agent/web-tools.json`. It belongs in your home directory, not in a shared or synced folder. Keys are per user, so there is no project-level variant (and no risk of committing one).
+
+`pi` has no extension secret store of its own (`auth.json` belongs to LLM providers); this two-source arrangement is the convention the other pi web extensions converged on.
+
+### Environment variables
+
 | Variable | Meaning |
 |---|---|
 | `TINYFISH_API_KEY` | Enable the TinyFish channel (30 req/min). Since 2026-11 their API answers 401 without a key, for search and rendering alike. |

@@ -8,6 +8,7 @@
  * hard filtering stays off so bilingual results survive).
  */
 
+import { apiKey } from "../../config.js";
 import { isoToRelativeAge } from "../../date.js";
 import { fetchWithTimeout } from "../../http.js";
 import { createRateLimiter } from "../../rate-limit.js";
@@ -43,7 +44,7 @@ const COUNTRY_NAMES: Record<string, string> = {
 };
 
 export function isTavilyAvailable(): boolean {
-	const key = process.env.TAVILY_API_KEY?.trim();
+	const key = apiKey("tavily");
 	return !!key;
 }
 
@@ -51,8 +52,8 @@ export async function searchWithTavily(
 	params: WebSearchParams,
 	ctx: ChannelSearchContext,
 ): Promise<SearchResultItem[]> {
-	const key = process.env.TAVILY_API_KEY?.trim();
-	if (!key) throw new Error("Tavily channel requires TAVILY_API_KEY.");
+	const key = apiKey("tavily");
+	if (!key) throw new Error("Tavily channel requires an API key (TAVILY_API_KEY or web-tools.json).");
 
 	const { language, country } = parseLocale(params.locale);
 	const body: Record<string, unknown> = {

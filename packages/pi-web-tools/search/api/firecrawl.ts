@@ -13,6 +13,7 @@
  * (identical upstream semantics, both intents honored).
  */
 
+import { apiKey } from "../../config.js";
 import { fetchWithTimeout } from "../../http.js";
 import { createRateLimiter } from "../../rate-limit.js";
 import type { ChannelSearchContext, SearchResultItem, WebSearchParams } from "../../types.js";
@@ -27,7 +28,7 @@ const LIMIT = 8;
 const limiter = createRateLimiter(1);
 
 function firecrawlApiKey(): string | null {
-	const key = process.env.FIRECRAWL_API_KEY?.trim();
+	const key = apiKey("firecrawl");
 	return key && key.length > 0 ? key : null;
 }
 

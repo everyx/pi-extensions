@@ -25,6 +25,25 @@ pi install npm:@everyx/pi-web-tools
 
 ## 配置
 
+### key 从哪来
+
+两个来源，前者优先：
+
+1. **环境变量** —— `TINYFISH_API_KEY`、`EXA_API_KEY`、`TAVILY_API_KEY`、`FIRECRAWL_API_KEY`。CI、脚本、已经导出过的场景用它。
+2. **`<agent 目录>/web-tools.json`** —— 不想改 shell 配置就写这个文件（默认 `~/.pi/agent/web-tools.json`）：
+
+```json
+{ "tinyfish": "…", "exa": "…", "tavily": "…", "firecrawl": "…" }
+```
+
+文件不存在、读不了、JSON 坏了，都等于「没配」——与变量未设置完全一致，不会报错。本扩展从不写这个文件。
+
+里面是明文 key，请自己收好：`chmod 600 ~/.pi/agent/web-tools.json`，放在自己的家目录，别放进共享或同步目录。key 是用户级的，所以没有项目级版本（也就不会有人把它提交进仓库）。
+
+pi 没有扩展专用的密钥存储（`auth.json` 属于 LLM provider）；「环境变量优先 + 自己的 JSON 文件兜底」是 pi 生态里同类扩展收敛出的做法。
+
+### 环境变量
+
 | 变量 | 含义 |
 |---|---|
 | `TINYFISH_API_KEY` | 启用 TinyFish 通道（30 req/min）。2026-11 起其 API 无 key 返回 401，搜索与渲染皆然。 |

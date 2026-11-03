@@ -6,6 +6,7 @@
  * recency_minutes, include/exclude_domains. GET with query-string params.
  */
 
+import { apiKey } from "../../config.js";
 import { isoToRelativeAge } from "../../date.js";
 import { fetchWithTimeout } from "../../http.js";
 import { createRateLimiter } from "../../rate-limit.js";
@@ -19,7 +20,7 @@ const ENDPOINT = "https://api.search.tinyfish.ai";
 const limiter = createRateLimiter(0.4);
 
 export function tinyfishApiKey(): string | null {
-	const key = process.env.TINYFISH_API_KEY?.trim();
+	const key = apiKey("tinyfish");
 	return key && key.length > 0 ? key : null;
 }
 

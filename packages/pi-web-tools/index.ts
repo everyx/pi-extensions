@@ -3,8 +3,8 @@
  *
  * web_search routes across HTTP search providers in fuse order
  * (tinyfish → exa → tavily → firecrawl) and falls through on failure; the
- * Availability is environment-driven (key presence), never
- * configured. The LLM sees results or a terse error; channel echo,
+ * Availability follows key presence, never a setting: a channel whose key
+ * resolves (environment variable, else `web-tools.json`) is a candidate. The LLM sees results or a terse error; channel echo,
  * hints and diagnostics live in details (UI-visible). SPEC.md is the doc.
  */
 
