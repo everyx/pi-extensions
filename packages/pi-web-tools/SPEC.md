@@ -141,19 +141,18 @@ searchFuse(params, channels, { signal, onAttempt }): Outcome   // walk：failove
 
 ## web_fetch 行为规格
 
-### 传输层（2026-08 三改：伪装层尽弃 → 唤醒系统 curl）
+### 传输层（2026-11 四改：撤销系统 curl，回到进程内 undici）
 
 ```
-主传输：spawn 系统 curl（-sS -L --max-redirs 5 --compressed，-D 捕响应头，
-stdout 流式入 64MB cap）。身份 = 该机器真实的 curl：TLS/UA/Accept: */*/
-HTTP/1.1 全部原生，零伪装零调优——"你就是这台机器上用 curl 抓网页的人"。
-不装 Chrome 的理由：Node 的 TLS 指纹无法对齐 Chrome（ext 乱序/记录尺寸
-OpenSSL 写死），反而"Chrome 声明 + Node 指纹"的不一致本身是 bot 信号
-（curl_cffi 文档同论）。
-fallback（curl 缺失 / PI_WEB_TOOLS_NO_CURL=1）：undici + 钉死 curl UA +
-Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎不走；严格反爬
-有保险丝链兜底）。
+主传输：Node fetch（undici），进程内，流式入 64MB cap。
+代理：EnvHttpProxyAgent —— 读 HTTP_PROXY / HTTPS_PROXY / NO_PROXY。
 ```
+
+**为什么撤销 curl**（2026-11-03 实测）：同一批 URL、同一组请求头，curl 与 undici 的成败**完全一致** —— 被墙的三个站对两者都是 403，通畅的都是 200。curl 没带来成功率，却要求我们维护两套实现（curl 子进程 + undici fallback）、每次抓取 spawn 一个进程、建临时目录写响应头、把用户 URL 拼进 argv。
+
+**curl 原本免费给我们的东西，现在要显式补上**：代理环境变量（Node 的 fetch 默认不认，gemini-cli 同样用 `EnvHttpProxyAgent` 补）。`--compressed` 由 undici 自动协商与解压。
+
+**为什么不装 Chrome / 不上 TLS 指纹**：2026-11 的实测（26 URL × 4 种客户端配置）里，curl_cffi 伪装 Chrome 指纹在 8 个硬墙站上**全数 403**，只在「仅校验 TLS」的站上赢过一次；而 curl-impersonate 上游 2024-07 停更、维护分支每几周换 profile。这是持续付费的军备竞赛，换不到我们需要的成功率。
 
 ### 请求行为
 
@@ -253,7 +252,6 @@ API key 环境变量（有则升级、无则降级，全部可选）：
 | `EXA_API_KEY` | Exa 全参数 keyed 模式（无 key = MCP keyless 裸 query） |
 | `TAVILY_API_KEY` | 启用 Tavily |
 | `FIRECRAWL_API_KEY` | Firecrawl keyed 升档（与 pi-read-doc OCR 共享池，搜索尽量不碰） |
-| `PI_WEB_TOOLS_NO_CURL=1` | 跳过系统 curl 子进程（hermetic 测试 / 无 curl 环境强制 fallback；存在性探测一次并缓存） |
 （没有本机二进制相关配置：真实浏览器通道已移除。）
 
 无 `PI_WEB_TOOLS_ENGINES`、无系统语言探测——可用性跟着 key 走：环境变量每请求实时读取，文件按路径读一次并缓存（`resetKeysCache()` 可清）。

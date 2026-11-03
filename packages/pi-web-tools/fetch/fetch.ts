@@ -1,9 +1,8 @@
 /**
  * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
  *
- *   - Direct fetch: the system curl CLI (identity = real curl, nothing
- *     mimicked), shallow curl-UA fallback on curl-less systems; the tinyfish
- *     fetch renderer covers anti-bot and CSR pages.
+ *   - Direct fetch: Node's fetch in-process (proxy-aware); the rendering fuse
+ *     (firecrawl → tinyfish) covers anti-bot and CSR pages.
  *   - timeout, SPA empty-body detection, error normalization (HTTP status →
  *     error field, not a throw).
  */
@@ -11,8 +10,8 @@
 import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi-coding-agent";
 import { stashOverflow } from "@everyx/pi-ui/context.js";
 import type { RenderOutcome, WebFetchResult } from "../types.js";
-import { curlFetch } from "./api/curl-fetch.js";
 import { fetchWithFirecrawl } from "./api/firecrawl-fetch.js";
+import { directFetch } from "./api/http-fetch.js";
 import { fetchWithTinyfish, tinyfishFetchKey } from "./api/tinyfish-fetch.js";
 import { githubRawUrl } from "./github.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
@@ -189,16 +188,14 @@ function isHtmlContent(contentType: string): boolean {
 	return contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 }
 
-/** Direct HTTP GET, one honest transport: the system curl (native TLS/UA/HTTP
- *  version — zero mimicry; a human-usage pattern doesn't need it), with a
- *  pinned-identity shallow fallback when curl is absent. Anti-bot and CSR
- *  pages advance to the tinyfish renderer. No
+/** Direct HTTP GET, one transport: Node's fetch in-process, proxy-aware.
+ *  Anti-bot and CSR pages advance to the rendering fuse. No
  *  content-type gating — every gate is a policy decision that limits the
  *  caller. Text passes through readable; true binaries lossy-decode into
  *  recognizable noise (the contentType field says what it is); budget stays
  *  bounded by the stash cap downstream. */
 async function fetchPage(url: string, signal?: AbortSignal): Promise<FetchPageResult> {
-	const raw = await curlFetch(url, { signal, timeoutMs: DEFAULT_TIMEOUT_MS, maxBytes: MAX_DOWNLOAD_BYTES });
+	const raw = await directFetch(url, { signal, timeoutMs: DEFAULT_TIMEOUT_MS, maxBytes: MAX_DOWNLOAD_BYTES });
 	if (raw.ok) {
 		return finishPage(raw.status, raw.contentType, raw.bytes ?? null, raw.tooLarge);
 	}
