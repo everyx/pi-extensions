@@ -146,7 +146,12 @@ async function readBodyCapped(
 	maxBytes: number,
 ): Promise<{ bytes: Uint8Array | null; tooLarge: boolean }> {
 	const declared = Number(response.headers.get("content-length") ?? "");
-	if (Number.isFinite(declared) && declared > maxBytes) return { bytes: null, tooLarge: true };
+	if (Number.isFinite(declared) && declared > maxBytes) {
+		// Nothing will be read, so release the stream rather than leaving it
+		// dangling on a connection that could otherwise be reused.
+		await response.body?.cancel().catch(() => {});
+		return { bytes: null, tooLarge: true };
+	}
 	if (!response.body) return { bytes: new Uint8Array(0), tooLarge: false };
 
 	const reader = response.body.getReader();
@@ -239,6 +244,16 @@ const PRIVATE_NAME = /^(localhost|\.local|.*\.internal|.*\.localdomain)$/i;
 
 function isPrivateHost(hostname: string): boolean {
 	const host = hostname.toLowerCase();
+	// `::ffff:127.0.0.1` is 127.0.0.1 wearing an IPv6 coat; judge the IPv4 part.
+	// WHATWG URL normalises it to hex (`[::ffff:7f00:1]`), so both forms are read.
+	const dotted = /^\[?::ffff:(\d+\.\d+\.\d+\.\d+)\]?$/.exec(host);
+	if (dotted) return isPrivateHost(dotted[1]);
+	const hex = /^\[?::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]?$/.exec(host);
+	if (hex) {
+		const hi = Number.parseInt(hex[1], 16);
+		const lo = Number.parseInt(hex[2], 16);
+		return isPrivateHost(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+	}
 	return PRIVATE_LITERAL.test(host) || PRIVATE_NAME.test(host) || host === "::1" || host === "[::1]";
 }
 
@@ -430,27 +445,24 @@ async function finishResponse(
 		};
 	}
 
-	const { bytes, tooLarge } = await readBodyCapped(response, maxBytesOf(options));
-	if (tooLarge) return { ok: true, status: response.status, contentType, bytes: null, tooLarge: true };
-
-	// Challenge pages answer 403, 503, and sometimes 200; the text is the only
-	// tell left. Only small bodies qualify — a real article is not one, and a
-	// long page that merely mentions captchas must not be mistaken for a wall.
-	const looksLikeWall = !response.ok || (bytes?.length ?? 0) <= 4 * 1024;
-	const bodyChallenge = looksLikeWall && bytes ? challengeFromBody(new TextDecoder().decode(bytes)) : undefined;
-	if (bodyChallenge) {
-		return {
-			ok: false,
-			status: response.status,
-			contentType,
-			bytes: null,
-			tooLarge: false,
-			challenge: bodyChallenge,
-			error: `blocked by a ${bodyChallenge} challenge`,
-		};
-	}
-
+	// Status first, size second. A 404 whose error page happens to be enormous is
+	// still a 404 — deciding "too large, therefore fine" before looking at the
+	// status would report a missing page as a successful oversized one.
 	if (!response.ok) {
+		// Read only enough for the wall check; a big error page is not content.
+		const { bytes } = await readBodyCapped(response, Math.min(maxBytesOf(options), 64 * 1024));
+		const bodyChallenge = bytes ? challengeFromBody(new TextDecoder().decode(bytes)) : undefined;
+		if (bodyChallenge) {
+			return {
+				ok: false,
+				status: response.status,
+				contentType,
+				bytes: null,
+				tooLarge: false,
+				challenge: bodyChallenge,
+				error: `blocked by a ${bodyChallenge} challenge`,
+			};
+		}
 		const reason = response.statusText ? `: ${response.statusText}` : "";
 		return {
 			ok: false,
@@ -460,6 +472,27 @@ async function finishResponse(
 			tooLarge: false,
 			error: `HTTP ${response.status}${reason}`,
 		};
+	}
+
+	const { bytes, tooLarge } = await readBodyCapped(response, maxBytesOf(options));
+	if (tooLarge) return { ok: true, status: response.status, contentType, bytes: null, tooLarge: true };
+
+	// A 2xx can still be a wall: challenge pages answer 200 with a short body,
+	// and the text is the only tell left. Only small bodies qualify — a real
+	// article is not one, and a long page mentioning captchas is not a wall.
+	if (bytes && bytes.length <= 4 * 1024) {
+		const bodyChallenge = challengeFromBody(new TextDecoder().decode(bytes));
+		if (bodyChallenge) {
+			return {
+				ok: false,
+				status: response.status,
+				contentType,
+				bytes: null,
+				tooLarge: false,
+				challenge: bodyChallenge,
+				error: `blocked by a ${bodyChallenge} challenge`,
+			};
+		}
 	}
 	return { ok: true, status: response.status, contentType, bytes, tooLarge: false };
 }

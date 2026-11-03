@@ -48,6 +48,12 @@ const listener = createServer((req, res) => {
 		res.end("x");
 		return;
 	}
+	if (req.url === "/missing-huge") {
+		// A 404 that also announces an oversized body: still a 404.
+		res.writeHead(404, { "Content-Length": String(10 * 1024 * 1024), "Content-Type": "text/html" });
+		res.end("not found");
+		return;
+	}
 	if (req.url === "/huge-streamed") {
 		// No content-length: the cap has to be enforced while reading.
 		res.writeHead(200, { "Content-Type": "text/plain" });
@@ -295,5 +301,36 @@ describe("directFetch — the contract holds on the way out too", () => {
 	it("treats IPv6 link-local as private on redirect", () => {
 		assert.match(String(redirectRefusal(false, new URL("http://[fe80::1]/"))), /private address refused/);
 		assert.match(String(redirectRefusal(false, new URL("http://[fe80::abcd]/"))), /private address refused/);
+	});
+});
+
+describe("directFetch — status beats size", () => {
+	it("reports a 404 even when its body is over the cap", async () => {
+		const result = await directFetch(`${base}/missing-huge`, { maxBytes: 1024 });
+		assert.equal(result.ok, false, "a missing page is not a successful oversized one");
+		assert.equal(result.status, 404);
+		assert.match(String(result.error), /^HTTP 404/);
+	});
+
+	it("still reports a successful oversized body as ok + tooLarge", async () => {
+		const result = await directFetch(`${base}/huge-declared`, { maxBytes: 1024 });
+		assert.equal(result.ok, true);
+		assert.equal(result.tooLarge, true);
+		assert.equal(result.bytes, null);
+	});
+});
+
+describe("redirectRefusal — IPv6 in disguise", () => {
+	it("treats an IPv4-mapped IPv6 address as what it maps to", () => {
+		assert.match(String(redirectRefusal(false, new URL("http://[::ffff:127.0.0.1]/"))), /private address refused/);
+		assert.match(
+			String(redirectRefusal(false, new URL("http://[::ffff:169.254.169.254]/"))),
+			/private address refused/,
+		);
+		assert.equal(
+			redirectRefusal(false, new URL("http://[::ffff:93.184.216.34]/")),
+			undefined,
+			"a public v4 stays public",
+		);
 	});
 });
