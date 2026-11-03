@@ -34,7 +34,7 @@ Fetch https://github.com/earendil-works/pi/blob/main/README.md and summarize it
 | `TAVILY_API_KEY` | Enable the Tavily channel (1,000 credits/month free). |
 | `FIRECRAWL_API_KEY` | Firecrawl keyed escalation. Without it the channel runs keyless (free, per-IP daily caps). Never touched while keyless quota lasts — the pool is shared with pi-read-doc's OCR. |
 
-Zero keys still works: keyless Exa + keyless Firecrawl, with the real-browser fuse behind them. The real-browser channel uses [BrowserSkill](https://github.com/Tencent/BrowserSkill) (`bsk` CLI); install it separately.
+Zero keys still works: keyless Exa + keyless Firecrawl, with the real-browser fuse behind them for **search**. That channel uses [BrowserSkill](https://github.com/Tencent/BrowserSkill) (`bsk` CLI); install it separately. `web_fetch` deliberately does not use it — a fetch fallback pinned to a third-party CLI's argument shape breaks whenever that CLI changes, and there it is the only path left.
 
 ## Notes
 

@@ -42,9 +42,8 @@ export interface ChannelSearchContext {
 /** A page renderer's output: the text and the real type of that text. */
 export interface RenderedContent {
 	text: string;
-	/** The real type of the text (tinyfish: requested markdown; bsk: the
-	 *  page's innerText — plain). The result card's contentType is this,
-	 *  verbatim (SPEC 诚实规则). */
+	/** The real type of the text (tinyfish: the markdown it was asked for).
+	 *  The result card's contentType is this, verbatim (SPEC 诚实规则). */
 	contentType: string;
 }
 

@@ -20,7 +20,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { CHROMIUM_BINARIES } from "../browsers.js";
 import { createSerialQueue, type SerialQueue } from "../rate-limit.js";
-import type { ChannelSearchContext, EngineId, RenderedContent, SearchResultItem, WebSearchParams } from "../types.js";
+import type { ChannelSearchContext, EngineId, SearchResultItem, WebSearchParams } from "../types.js";
 import { parseLocale } from "./bcp47.js";
 import { BskBrowser, type BskResult } from "./bsk-browser.js";
 import { EXTRACT_SCRIPT, isCaptchaState, parseExtraction, parsePageState, STATE_PROBE_SCRIPT } from "./extract.js";
@@ -224,50 +224,4 @@ export async function searchWithBsk(params: WebSearchParams, ctx: ChannelSearchC
 	});
 
 	return results;
-}
-
-// ── fetch fuse (web_fetch 链尾: bsk 真实浏览器渲染) ───────────────
-
-/** Real-browser text extraction for fetched pages — the fetch analogue of
- *  EXTRACT_SCRIPT (title + body text, capped): JS runs in the real page,
- *  stdout carries the JSON. */
-const FETCH_CONTENT_SCRIPT = `(() => {
-	const title = document.title || "";
-	const body = document.body ? document.body.innerText : "";
-	return JSON.stringify({ title: title, body: body.slice(0, 200000) });
-})()`;
-
-// One serial queue for fetches (distinct from the per-engine search queues —
-// fetch has no engine; the queue just serializes bsk sessions).
-const fetchQueue = createSerialQueue(
-	() => lifecycle.startSession(),
-	(id) => lifecycle.stopSession(id),
-);
-
-/** Render a URL in the real browser; null when bsk is unavailable or
- *  navigation/extraction failed (caller advances or falls back). The text
- *  is the page's innerText — plain text, self-reported as such. */
-export async function fetchUrlWithBsk(
-	url: string,
-	timeoutMs = 30_000,
-	signal?: AbortSignal,
-): Promise<RenderedContent | null> {
-	if (!(await isBskAvailable())) return null;
-	try {
-		return await fetchQueue.run(async (sessionId) => {
-			const nav = await runBsk(["navigate", "--session", sessionId, url], timeoutMs, signal);
-			if (!nav.ok) return null;
-			const raw = await evaluate(sessionId, FETCH_CONTENT_SCRIPT, timeoutMs, signal);
-			try {
-				const parsed = JSON.parse(raw) as { title?: string; body?: string };
-				const text = (parsed.body ?? raw.trim()).trim();
-				return text ? { text, contentType: "text/plain" } : null;
-			} catch {
-				const text = raw.trim();
-				return text ? { text, contentType: "text/plain" } : null;
-			}
-		});
-	} catch {
-		return null;
-	}
 }

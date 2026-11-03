@@ -2,16 +2,15 @@
  * pi-web-tools — web_fetch core (SPEC: web_fetch 行为规格).
  *
  *   - Direct fetch: the system curl CLI (identity = real curl, nothing
- *     mimicked), shallow curl-UA fallback on curl-less systems; fuse
- *     renderers (tinyfish fetch → bsk) cover anti-bot and CSR pages.
+ *     mimicked), shallow curl-UA fallback on curl-less systems; the tinyfish
+ *     fetch renderer covers anti-bot and CSR pages.
  *   - timeout, SPA empty-body detection, error normalization (HTTP status →
  *     error field, not a throw).
  */
 
 import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi-coding-agent";
 import { stashOverflow } from "@everyx/pi-ui/context.js";
-import { fetchUrlWithBsk } from "../search/browser.js";
-import type { RenderedContent, WebFetchResult } from "../types.js";
+import type { WebFetchResult } from "../types.js";
 import { curlFetch } from "./api/curl-fetch.js";
 import { fetchWithTinyfish } from "./api/tinyfish-fetch.js";
 import { githubRawUrl } from "./github.js";
@@ -81,31 +80,28 @@ async function finishPage(
  *    file, a lossy preview is only duplicate cost. On overflow the full text
  *    is stashed and the result points at it; the read tool's offset/limit
  *    paging takes over from there. Binaries never enter context as noise. */
-/** Fuse renderers for the web_fetch chain (SPEC: GET → tinyfish fetch → bsk).
- *  Both render in a real browser and return clean text — results flow through
- *  the same stash/preview path as locally extracted markdown. Returns null
- *  when every renderer is unavailable or failed (caller shows its own error). */
+/** Fuse renderers for the web_fetch chain (SPEC: GET → tinyfish fetch).
+ *  It renders server-side and returns clean text — results flow through the
+ *  same stash/preview path as locally extracted markdown. Returns null when
+ *  the renderer is unavailable or failed (caller shows its own error).
+ *
+ *  The local-browser tier (bsk) is gone: it shared a tool with web_search but
+ *  pinned web_fetch to whatever BrowserSkill's CLI happened to accept this
+ *  month, and a fetch that only works while a browser daemon agrees is not a
+ *  fallback. Search keeps it — there it is the last keyless resort. */
 async function fuseRender(url: string, signal?: AbortSignal): Promise<WebFetchResult | null> {
-	const candidates: Array<() => Promise<RenderedContent | null>> = [
-		() => fetchWithTinyfish(url, signal),
-		() => fetchUrlWithBsk(url, 30_000, signal),
-	];
-	for (const render of candidates) {
-		const rendered = await render();
-		if (rendered) {
-			const { text: content, stashPath } = stashOverflow(rendered.text, url);
-			return {
-				title: firstLineAsTitle(rendered.text),
-				content: previewWithPointer(content, stashPath),
-				// The renderer self-reports its output type (tinyfish:
-				// requested markdown; bsk: innerText is plain) — no fabrication.
-				contentType: rendered.contentType,
-				outputPath: stashPath,
-				fullContent: rendered.text,
-			};
-		}
-	}
-	return null;
+	const rendered = await fetchWithTinyfish(url, signal);
+	if (!rendered) return null;
+	const { text: content, stashPath } = stashOverflow(rendered.text, url);
+	return {
+		title: firstLineAsTitle(rendered.text),
+		content: previewWithPointer(content, stashPath),
+		// The renderer self-reports its output type (tinyfish: the markdown it
+		// was asked for) — no fabrication.
+		contentType: rendered.contentType,
+		outputPath: stashPath,
+		fullContent: rendered.text,
+	};
 }
 
 function previewWithPointer(content: string, stashPath?: string): string {
@@ -125,7 +121,7 @@ function isHtmlContent(contentType: string): boolean {
 /** Direct HTTP GET, one honest transport: the system curl (native TLS/UA/HTTP
  *  version — zero mimicry; a human-usage pattern doesn't need it), with a
  *  pinned-identity shallow fallback when curl is absent. Anti-bot and CSR
- *  pages advance to the fuse renderers (tinyfish fetch → bsk). No
+ *  pages advance to the tinyfish renderer. No
  *  content-type gating — every gate is a policy decision that limits the
  *  caller. Text passes through readable; true binaries lossy-decode into
  *  recognizable noise (the contentType field says what it is); budget stays
@@ -235,10 +231,9 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	}
 
 	// Extraction failed or was incomplete + JS framework markers → CSR page.
-	// Render it in a real browser so the LLM gets real content instead of a
-	// placeholder — remotely first (tinyfish fetch), then the user's own
-	// browser session (bsk). Local headless rendering was removed: same
-	// capability, one implementation (SPEC).
+	// Render it remotely so the LLM gets real content instead of a placeholder
+	// (tinyfish fetch). Local headless rendering and the bsk browser tier were
+	// both removed: same capability, one implementation (SPEC).
 	if (isLikelyJSRendered(page.text ?? "")) {
 		const rendered = await fuseRender(url, signal);
 		if (rendered) return rendered;

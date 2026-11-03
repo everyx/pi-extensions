@@ -189,12 +189,15 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
   渲染（要源码就不是要渲染结果）；站点 URL 重写（如 GitHub blob→raw）仍
   保留——那是 URL 语义改写，非格式变换。raw 路径不解析 title（一律空——
   raw = 纯原文，不做任何解析；默认路径才会提取 frontmatter title）。
-- **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/429/5xx）：**远程真实渲染保险丝**
-  tinyfish fetch → bsk 真浏览器（LLM 拿真实内容不给占位）。本地 headless 已移除——
-  同能力一份实现，也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝
-  （页面确实不存在，渲染器无法复活）。渲染器自报输出类型（`RenderedContent`：
-  tinyfish 请求 markdown → `text/markdown`；bsk innerText → `text/plain`），
-  `contentType` 原样透传，不伪造（诚实规则）。
+- **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/429/5xx）：**远程渲染保险丝**
+  tinyfish fetch（LLM 拿真实内容不给占位）。本地 headless 已移除——同能力一份实现，
+  也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝（页面确实不存在，
+  渲染器无法复活）。渲染器自报输出类型（`RenderedContent`：tinyfish 请求 markdown
+  → `text/markdown`），`contentType` 原样透传，不伪造（诚实规则）。
+- **bsk 不再是 web_fetch 的保险丝**（2026-10-31 移除）：它依赖 BrowserSkill 的 CLI
+  契约，上游一改版整条 fetch 兜底就失效，而 web_fetch 与 web_search 共用一个工具
+  却承担不同的可靠性要求。搜索侧保留 bsk —— 那里它是额度尽时的最后一把无 key
+  保险丝，失败也只是换个通道；fetch 侧失败则是「拿不到这个页面」。
 - **请求头 = 系统 curl 原生**（UA/Accept: */*/无 Accept-Language）；fallback
   用钉死 curl UA。动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）
   留档——curl 是合法命令行身份，被拦的页面由保险丝链兜底（不丢能力，多一跳）。
@@ -204,8 +207,9 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
   （LLM 要文件而非界面）；raw 不可用回退原 URL。
 - **主路径零中转**：静态友好页始终直取（无 r.jina.ai 类常驻中转）；仅当直取
   失败（反爬/CSR）才走 tinyfish fetch——它本身就是转发渲染（诚实地位，非隐蔽）；
-  认证/交互页归 bsk（用户真实会话）或 LLM 自行 bash curl。（2026-08 加入
-  tinyfish fetch 前的既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订。）
+  需要登录/交互的页面归 LLM 自行 bash curl。（2026-08 加入 tinyfish fetch 前的
+  既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订；2026-10 撤掉 bsk
+  浏览器保险丝后，fetch 链只剩这一跳。）
 
 ## 配置
 
