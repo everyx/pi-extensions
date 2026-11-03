@@ -166,6 +166,45 @@ Accept-Language: en-US,en;q=0.9
 - **`Accept` 把 markdown 排前面**：Cloudflare 的 Markdown for Agents 在边缘就转好（**实测同一页 16 KB vs 176 KB**），任何静态文档站也能直接给。**它不改变反爬结果**——实测未启用该特性的 zone 照样回挑战页——所以这是省 token，不是过墙。
 - **`Accept-Language` 是 curl 从不发、而我们补上的**：它是内容协商，不是伪装。实测里它正是那唯一一次「403 → 200」的决定性头部。
 
+### 失败分类与重试（2026-11 加入）
+
+失败不是一类，重试之前先分类：
+
+| 类型 | 例子 | 处理 |
+|---|---|---|
+| **JS 挑战** | `cf-mitigated: challenge`、`x-amzn-waf-action: challenge`、正文含 "Just a moment"/"Checking your browser" | **不重试** —— 实测跨多次、跨客户端配置完全一致；重试只烧时间与 IP 信誉。直接交给渲染保险丝，并告诉模型「被挑战挡住」而不是「页面坏了」 |
+| **软封锁** | 状态 **200** + 正文 "Blocked by network security" / "Access denied" / "unusual traffic" | 同上，按墙处理 |
+| **瞬时故障** | 429 / 502 / 503 / 504、连接重置、DNS 抖动 | 有界退避重试（最多 3 次，300ms 起 ×3 + ±20% 抖动），总时长受同一个 deadline 约束 |
+| **确定的拒绝** | 404 / 401 / 402 / 429 之外的 4xx | 不重试 |
+
+**渲染器同样会被墙**：Firecrawl 会把 "Blocked by network security" 当作干净的 markdown、配 200 交回来。所以同一套墙特征检测也作用在渲染结果上——否则一个礼貌的拒绝就会顶着成功状态抵达模型。
+
+### 重定向（2026-11 加入）
+
+自己走重定向（`redirect: "manual"`，最多 10 跳），因为**链条本身是要报告的东西**：
+
+- **跟随**：同主机、跨主机都跟 —— 阻断跨主机会让常见跳转（http→https、www→裸域、短链）全部退化，还得让模型多跑一次
+- **告知**：正文末尾追加一行 `(followed N redirects — final URL: …)`；完整链条进 `details.redirects`（卡片可见）。**追加而非前置**，避免污染 JSON/CSV 这类可复制载荷
+- **直取失败转渲染时链条不丢**：渲染链拿的是直取最终落地的 URL，直取阶段走过的跳转仍进结果；**渲染器自己内部的跳转我们不知道，就不声称知道**
+- **HTTP→HTTPS**：公开主机且调用方写了 `http://` 时，先用 https 试；传输层失败（非 HTTP 状态）才回退到原 http
+- **无点主机名拒绝**（`localhost`、`intranet`）：直接提示改用 `bash curl`
+- **跳进私有地址拒绝**：RFC1918 / 127/8 / 169.254/16 / ::1 / `*.local` / `*.internal`。判定在**请求发出之前**。
+  - 边界说清楚：这是**名字级**检查，解析后落在 10.x 仍然会过（DNS rebinding 挡不住）
+  - 覆盖范围：IPv4 环回（127/8）、RFC1918、link-local（169.254/16）、IPv6 环回（::1）、ULA（fc00::/7）、**IPv6 link-local（fe80::/10）**、`*.local` / `*.internal`
+  - 只拦「公网页面把你导进内网」这一个方向；调用方本来就在跟私有地址（本地开发服务器）时，它的重定向照常跟随 —— 那本来就在同一信任域内
+
+**这条买的是透明，不是边界**：跳转已经发生，模型看到的是「我要的 URL 和拿到的 URL 不一致」。真要限制能力，得在进程/网络层做。况且同一个 agent 手上就有 `bash`。
+
+### 状态码优先于体积（2026-11）
+
+处理顺序固定：**先判 HTTP 状态，再看 body 大小**。
+
+一个 404 的错误页恰好很大，它仍然是 404 —— 若先判「超限 → ok」，一个不存在的页面就会被报成「成功的大文件」。所以：
+
+- 非 2xx：只读最多 64 KB 用于墙特征检测，然后如实报状态错误
+- 2xx：按 cap 读；超限返回 `ok: true` + `tooLarge`（上层给「未缓冲」标记 + 元数据）
+- 声明长度超限时**取消流**，不让未消费的 body 占着连接
+
 ### 请求行为
 
 - **输出统一格式**（对齐 Markdown for Agents 布局）：frontmatter（
@@ -228,20 +267,20 @@ Accept-Language: en-US,en;q=0.9
     必须自带 deadline 或 signal，渲染器正是这么做的（把剩余时间交给 `fetchWithTimeout`）。
 - **浏览器保险丝已从 web_fetch 移除**（2026-10-31）：它依赖 BrowserSkill 的 CLI
   契约，上游一改版整条 fetch 兜底就失效。
-- **请求头 = 系统 curl 原生**（UA/Accept: */*/无 Accept-Language）；fallback
-  用钉死 curl UA。动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）
-  留档——curl 是合法命令行身份，被拦的页面由保险丝链兜底（不丢能力，多一跳）。
+- **请求头见上面的「请求头」一节**（自报身份的 UA + 协商 markdown 的 Accept +
+  `Accept-Language`）。动机史留档：openai/codex#18456 证明 Cloudflare 会按 UA 403，
+  那是「别装作浏览器」的由来——现在仍是自报家门，只是不再自称 curl。
 - **错误规范化**：HTTP 状态/网络/超时 → `error` 字段（非抛异常）；
   超时与外部取消区分。
 - **GitHub blob 直取文件**：`github.com/…/blob/<ref>/<path>` 重写为 raw 内容
   （LLM 要文件而非界面）；raw 不可用回退原 URL。
-- **主路径零中转**：静态友好页始终直取（无 r.jina.ai 类常驻中转）；仅当直取
+- **主路径零中转**：静态友好页始终由本机直取（无 r.jina.ai 类常驻中转）；仅当直取
   失败（反爬/CSR）才走渲染保险丝——它本身就是转发渲染（诚实地位，非隐蔽）；
   需要登录/交互的页面归 LLM 自行 bash curl。（2026-08 加入 tinyfish fetch 前的
   既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订；2026-10 撤掉
   浏览器保险丝，2026-11 起渲染链为 firecrawl → tinyfish。）
 - **隐私：兜底默认会把目标 URL 发给渲染供应商**（2026-11-03 定为显式选择 A）。
-  主路径（curl 直取）零中转，但一旦进保险丝，URL 就离开本机——这比搜索发 query
+  主路径（本机直取）零中转，但一旦进保险丝，URL 就离开本机——这比搜索发 query
   更敏感，所以必须在 README 明说，而不是只写「主路径零中转」就完事。
 
 ## 配置

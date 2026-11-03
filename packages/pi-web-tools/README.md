@@ -55,6 +55,8 @@ It holds plaintext keys, so keep it yours: `chmod 600 ~/.pi/agent/web-tools.json
 
 Zero keys still works: keyless Exa + keyless Firecrawl (both answer without a key today; neither vendor guarantees it — when one changes, the channel fails over and the card says so). No binary to install — every channel is an HTTP API. A real-browser channel (BrowserSkill/`bsk`) used to sit at the end of both chains; it is gone, because a fallback pinned to a third-party CLI's argument shape breaks whenever that CLI changes, and the tail of a fuse is the one place with nothing behind it.
 
+**Redirects are followed and reported.** The fetch walks the chain itself, so a page that lands somewhere other than the URL you asked for says so: the content ends with `(followed N redirects — final URL: …)` and the card shows every hop. Two guards come with it — bare hostnames (`localhost`) and redirects from a public page into a private address are refused before the request goes out.
+
 **Privacy:** the direct path never proxies — your machine fetches the page. The rendering fuse does: when a page is behind an anti-bot wall or renders only in a browser, the **target URL is sent to Firecrawl** (or TinyFish, when keyed) to get the content back. That is the price of rendering a page plain HTTP cannot deliver, and it is on by default so that "install and it works" stays true. If you would rather not, restrict yourself to pages that answer plain HTTP.
 
 ## Notes

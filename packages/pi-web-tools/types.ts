@@ -90,6 +90,10 @@ export type FetchToolData = {
 	/** Why the fuse ran, and what the renderers that did not answer said. */
 	renderReason?: string;
 	rendererFailures?: string[];
+	/** Where the redirect chain ended (equal to the request when it did not move). */
+	finalUrl?: string;
+	/** Every hop, in order — the card shows the chain, the model gets one line. */
+	redirects?: { from: string; to: string; status: number }[];
 	startedAt?: number;
 	endedAt?: number;
 };
@@ -118,5 +122,9 @@ export interface WebFetchResult {
 	/** What each renderer said, in fuse order — diagnostics for the card.
 	 *  A renderer that dies silently is how the last one went unnoticed. */
 	rendererFailures?: string[];
+	/** Where the redirect chain ended; equal to the request when nothing moved. */
+	finalUrl?: string;
+	/** Every hop, in order. The content states the last one; the card shows all. */
+	redirects?: { from: string; to: string; status: number }[];
 	error?: string;
 }

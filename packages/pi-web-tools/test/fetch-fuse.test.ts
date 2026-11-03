@@ -34,6 +34,13 @@ const listener = createServer((req, res) => {
 		res.end('<html><body><div id="root"></div><script src="/app.js"></script></body></html>');
 		return;
 	}
+	if (req.url === "/hop") {
+		// Redirect first, then hit the wall: the chain belongs to the result even
+		// when a renderer ends up delivering the content.
+		res.writeHead(302, { Location: "/wall" });
+		res.end();
+		return;
+	}
 	if (req.url === "/gone") {
 		// A page that genuinely does not exist — the fuse must stay out of it.
 		res.writeHead(404, { "Content-Type": "text/html" });
@@ -200,5 +207,37 @@ describe("fetchToolResult — the diagnostics reach the card, not just the calle
 		const data = (shaped.details as { data?: Record<string, unknown> }).data ?? {};
 		assert.equal(data.renderer, undefined);
 		assert.equal(data.rendererFailures, undefined);
+	});
+});
+
+describe("web_fetch fuse — a renderer can be walled too", () => {
+	it("refuses a renderer's block page instead of passing it off as content", async () => {
+		// Firecrawl answering 200 with "Blocked by network security" as clean
+		// markdown is still a refusal; reporting it as the page is how a wall
+		// reaches the model wearing a success status.
+		stubRenderers({ firecrawl: { status: 200, markdown: "# Blocked by network security\n\nContact us." } });
+
+		const result = await webFetch(`${base}/wall`);
+
+		assert.ok(result.error, "the caller is told it failed");
+		assert.equal(result.content, "");
+		assert.ok(
+			(result.rendererFailures ?? []).some((f) => f.includes("network block page")),
+			`the wall is on the record (got ${JSON.stringify(result.rendererFailures)})`,
+		);
+	});
+});
+
+describe("web_fetch fuse — the direct phase's chain survives the fallback", () => {
+	it("keeps the redirects that happened before the wall", async () => {
+		stubRenderers({ firecrawl: { status: 200, markdown: "# Rescued\n\nbody" } });
+
+		const result = await webFetch(`${base}/hop`);
+
+		assert.equal(result.renderer, "firecrawl");
+		assert.equal(result.redirects?.length, 1, "the 302 is still reported");
+		assert.equal(result.finalUrl, `${base}/wall`, "and where it landed");
+		assert.match(result.content, /followed 1 redirect/, "the model is told, not just the card");
+		assert.match(result.content, /Rescued/, "and it gets the rendered content");
 	});
 });
