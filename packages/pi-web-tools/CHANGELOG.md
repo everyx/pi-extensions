@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.0](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.5...pi-web-tools-v1.3.0) (2026-11-03)
+
+
+### Features
+
+* **pi-web-tools:** fetch in-process, and ask for what we want ([c514309](https://github.com/everyx/pi-extensions/commit/c514309b91c298095ffc5a93cd65d167a50976b6))
+* **pi-web-tools:** give web_fetch a renderer that works without a key ([61093a9](https://github.com/everyx/pi-extensions/commit/61093a96ff4b147f7b877ab66bd5ab9e695c1c3d))
+* **pi-web-tools:** read keys from a user file as well as the environment ([a54379b](https://github.com/everyx/pi-extensions/commit/a54379b6b41b468fb91cdb0f371f3ea6c3e9ab0c))
+* **pi-web-tools:** tell walls from failures, and follow redirects honestly ([750c793](https://github.com/everyx/pi-extensions/commit/750c7930444a78d7388e62a13c759a4a6d6f6e84))
+
+
+### Bug Fixes
+
+* **pi-web-tools:** remove the bsk browser dependency entirely ([d001a50](https://github.com/everyx/pi-extensions/commit/d001a50301a3338a8e370d9825b35bd1babea05c))
+
 ## [1.2.5](https://github.com/everyx/pi-extensions/compare/pi-web-tools-v1.2.4...pi-web-tools-v1.2.5) (2026-10-20)
 
 
