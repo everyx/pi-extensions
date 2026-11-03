@@ -31,31 +31,24 @@ const ids = (cs: SearchChannel[]) => cs.map((c) => c.id);
 const bare: WebSearchParams = { query: "hello" };
 
 describe("channel registry", () => {
-	it("fuse order is api providers first, bsk last", () => {
+	it("fuse order is the declared one", () => {
 		assert.deepEqual(
 			CHANNELS.map((c) => c.id),
-			["tinyfish", "exa", "tavily", "firecrawl", "bsk"],
+			["tinyfish", "exa", "tavily", "firecrawl"],
 		);
 	});
 
 	it("firecrawl and exa are always available (keyless modes)", async () => {
 		await withEnv({ TINYFISH_API_KEY: undefined, EXA_API_KEY: undefined, TAVILY_API_KEY: undefined }, async () => {
 			const candidates = ids(await candidatesFor(bare, CHANNELS));
-			// bsk only joins when the CLI is installed — the CI/container case.
-			assert.deepEqual(
-				candidates.filter((c) => c !== "bsk"),
-				["exa", "firecrawl"],
-			);
+			assert.deepEqual(candidates, ["exa", "firecrawl"]);
 		});
 	});
 
 	it("keys unlock tinyfish and tavily in fuse order", async () => {
 		await withEnv({ TINYFISH_API_KEY: "k", EXA_API_KEY: undefined, TAVILY_API_KEY: "k" }, async () => {
 			const candidates = ids(await candidatesFor(bare, CHANNELS));
-			assert.deepEqual(
-				candidates.filter((c) => c !== "bsk"),
-				["tinyfish", "exa", "tavily", "firecrawl"],
-			);
+			assert.deepEqual(candidates, ["tinyfish", "exa", "tavily", "firecrawl"]);
 		});
 	});
 

@@ -37,7 +37,7 @@ locale 是唯一的 best-effort 成员——地区码 4/4 原生、语言码 2/4
 
 - **无 count / 无分页**：结果量由通道自然返回（内部常量）；无 `total`（通道不报告总数，不编造）。
 - **snippet 取通道自带描述**，不 AI 生成。
-- **通道回声**：实际通道（bsk 时含引擎）只进 `details`（UI 卡片可见），LLM 零感知。
+- **通道回声**：实际通道只进 `details`（UI 卡片可见），LLM 零感知。
 - **locale 双通道，工具不猜测**：结果语言天然跟随 query 语言（LLM 写 query 时已在表达 locale 意图）；`locale` 参数是显式覆盖（要"英文关键词 + 中文结果"这类 query 语言盖不住的需求时用）。工具不做语言推断、不改写请求——LLM 说什么发什么。
 
 ### `web_fetch`
@@ -62,7 +62,7 @@ web_fetch(url: string, raw?: boolean) → { title, content }
 
 ## 通道架构
 
-四条 HTTP 通道按**免费额度从大到小**排成保险丝链，bsk 是链尾的无 key 保险丝（非平级通道）。可用性 = 环境事实（key 有无 / bsk CLI），零配置、零系统语言探测：
+四条 HTTP 通道按**免费额度从大到小**排成保险丝链。可用性 = 环境事实（key 有无），零配置、零系统语言探测：
 
 | 通道 | 免费额度 | key 缺省时 |
 |---|---|---|
@@ -70,20 +70,19 @@ web_fetch(url: string, raw?: boolean) → { title, content }
 | **Exa** | MCP keyless（3 qps / 150 calls/day，仅裸 query） | keyless 运行 |
 | **Tavily** | 1,000 credits/月 | 不可用 |
 | **Firecrawl** | keyless（per-IP 每日上限，Google 后端） | keyless 运行 |
-| **bsk 保险丝** | 本地免费（无 key 概念） | 引擎按 locale 挑（zh→baidu，否则 google） |
 
 **免费层优先、key 升级**是全链统一模式：exa 无 key 走 MCP（`exaSupports` 把带过滤器的请求让给后续通道）、firecrawl keyless 429 才动 `FIRECRAWL_API_KEY`（该池与 pi-read-doc 的 OCR 共享，搜索尽量不碰）。
 
-**fallback 链**：tinyfish → exa → tavily → firecrawl → bsk。链上错误静默降级到下一通道；全灭才报错（failures 进 details）。bsk 是额度尽/无 key 环境的最终兜底——它的独特价值是不消耗任何 API 额度。
+**fallback 链**：tinyfish → exa → tavily → firecrawl。链上错误静默降级到下一通道；全灭才报错（failures 进 details）。
 
-**bsk 结果提取**：排除付费广告（adurl/data-text-ad/b_ad 等）与**引擎生成的 AI 总结**（Google AI Overview、Bing AI summary、百度 AI 搜索——ai-*/data-ai-* 标记）——结果列表只留真实来源条目。
+**无 key 时仍可用**：exa（MCP keyless）+ firecrawl（keyless）。真实浏览器通道曾作为链尾的无 key 保险丝，2026-10-31 整条移除——见「外部依赖」一节。
 
 ## 操作符（query 原样透传）
 
 LLM 对搜索操作符有先验知识（`site:` / `filetype:` / `-` / `OR` / 引号）。因此：
 
 - **不参数化操作符**（`filetype?: "pdf"` 是封装——把 LLM 已会的几十个操作符锁死成枚举）。
-- **不自动检测、不改写**：query 原样透传给通道。Google 后端通道（firecrawl、bsk）原生兑现操作符；语义通道（exa）把操作符当文本——这是通道间的真实差异，由 failover 与结构化参数（allowed/blocked_domains 即 `site:` 的结构化形态）兜住，不对 LLM 承诺。
+- **不自动检测、不改写**：query 原样透传给通道。Google 后端通道（firecrawl）原生兑现操作符；语义通道（exa）把操作符当文本——这是通道间的真实差异，由 failover 与结构化参数（allowed/blocked_domains 即 `site:` 的结构化形态）兜住，不对 LLM 承诺。
 - 结构化过滤（域名/时间/地区）走**参数**（跨通道可翻译、语义确定），操作符归 **query**（原生处生效）——各得其所。
 
 ## 本地化（locale）
@@ -97,17 +96,19 @@ LLM 对搜索操作符有先验知识（`site:` / `filetype:` / `-` / `OR` / 引
 | Exa（keyed） | `userLocation`（官方 Bing 迁移指南：mkt/cc 等价物）；keyless 无此参数 |
 | Tavily | `language`（boost 模式，不开硬过滤）+ `country`（ISO → 官方国家名枚举，CN→china） |
 | Firecrawl | `country`（ISO 码；不碰 `location` 字符串——官方文档对两者同设自相矛盾） |
-| bsk | 引擎挑选：zh → baidu，否则 google（google 再落 gl/hl/lr） |
 
-- **bsk 的 recency 仅 google（tbs）**：baidu 无时效参数——请求 recency 且 locale 指向 baidu 时**显式报错**而非静默丢弃（SPEC: 能力缺失不静默）。更换 locale 可绕过。
-- **bsk 的 domains 翻译为 `site:` / `-site:`**（追加进 query）：google 完整；baidu 基本支持（自家平台过滤不彻底属引擎限制）。
 - **俄语（yandex）已移除**：单一市场价值低、维护成本高；ru 语 query 走 google。
 
-## 人机验证（captcha）处理
+## 外部依赖
 
-真实浏览器通道的已知风险：引擎触发人机验证 → 检测到 captcha 特征（`captcha / not a robot / automated requests`）→ **如实报错**（含引擎名），无 human-in-loop（bsk 无此 API）。bsk 是链尾——报错即全链失败，由 LLM 决定下一步（改写 query / 传 locale 重试）。
+**只有 HTTP API，没有本机二进制依赖**（2026-10-31 移除 BrowserSkill/bsk）。真实浏览器通道曾用本地 Chromium 渲染反爬墙与 CSR 页面，代价是：需要用户单独安装一个 CLI、需要一台开着的浏览器、并让本扩展的可靠性绑在第三方 CLI 的参数契约上——它一改版，整条兜底就失效。搜索与抓取因此都退回纯 HTTP 通道：
 
-- **浏览器所有权**：bsk 需要一个已开的 Chromium（经其扩展连接）。请求时无已连浏览器则自动启动一个（平台候选序）；**我们启动的实例**在会话结束、队列排空后延迟关闭（5s 宽限——新请求来则重置，其他会话仍活跃则不关）；**用户自己开的浏览器绝不触碰**。取消（AbortSignal）透传到**请求路径**的在途 bsk CLI 调用（navigate/evaluate），取消即止（Node child_process 原生 `signal`）；连接/会话生命周期调用不透传——连接等待 15s 截止、各 CLI 调用自带 10–30s 超时，不无限占队列槽位。决策逻辑独立成 bsk-browser.ts（依赖注入，fake CLI 驱动测试）。
+| 场景 | 现在 |
+|---|---|
+| `web_fetch` 反爬/CSR 页 | tinyfish fetch（服务端渲染，无本机依赖） |
+| 搜索额度尽 | exa / firecrawl 的 keyless 模式 |
+
+需要登录或交互的页面不在本扩展范围内——交给 LLM 自己 bash curl。
 
 ## 错误处理与诊断
 
@@ -115,7 +116,7 @@ LLM 对搜索操作符有先验知识（`site:` / `filetype:` / `-` / `OR` / 引
 
 - **LLM**：收到简洁错误（如 "filetype 需要真实浏览器通道"），**不含安装/配置指引**（细节不进 LLM 上下文）。
 - **用户（TUI）**：看到完整诊断（原因 + 建议），展开可见全部细节（对齐统一视觉语法的折叠预览）。配置指引（如 `Set FIRECRAWL_API_KEY…`）经 `summarizeFailures` 拼进 `details.error`——那是卡片唯一渲染的文字通道；失败记录里的 `hint` 字段本身无渲染器读，单独放着等于没写。
-- **bsk 安装**：不归本扩展——bsk 的运行报错**透传到 TUI** 显示；安装由 bsk CLI 自己负责（用户自行处理）。
+- **无本机安装步骤**：本扩展只依赖 HTTP API，没有需要用户编译或安装的二进制。
 
 ### 错误计划结构
 
@@ -125,7 +126,7 @@ LLM 对搜索操作符有先验知识（`site:` / `filetype:` / `-` / `OR` / 引
 - `collapsed`：折叠预览行
 - `expandHint`："... (N more lines, ctrl+o to expand)" 提示
 
-内容包含：原因、实际通道、失败阶段（如 "bsk daemon not running / captcha blocked"）。
+内容包含：原因、实际通道、失败阶段（如 "HTTP 429 / empty extraction"）。
 
 ## 能力与路由
 
@@ -134,7 +135,7 @@ candidatesFor(params, channels): SearchChannel[]          // 链序 ∩ 可用�
 searchFuse(params, channels, { signal, onAttempt }): Outcome   // walk：failover · 错误累积 · 末错入 LLM
 ```
 
-- 每通道一个 `available()`（key 非空 / bsk CLI 懒探测并缓存）+ `supports(params)`（能力门控——keyless Exa 不能兑现过滤器/.locale 时**跳过该通道**而非静默丢参数：SPEC 能力缺失不静默）。
+- 每通道一个 `available()`（key 非空）+ `supports(params)`（能力门控——keyless Exa 不能兑现过滤器/.locale 时**跳过该通道**而非静默丢参数：SPEC 能力缺失不静默）。
 - 路由按链序 failover，错误累积进 details.failures；全灭才对 LLM 报错。
 - 注册表在 search/channels.ts（每通道一个自描述对象：available/supports/search/echo，纯组装）；walk 逻辑在 search/fuse.ts（fake 通道可单测）；HTTP 细节在各适配器。加通道 = 一个适配器文件 + 注册表一条 + `ChannelId` union 一个成员（类型系统强制）。
 
@@ -189,12 +190,13 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
   渲染（要源码就不是要渲染结果）；站点 URL 重写（如 GitHub blob→raw）仍
   保留——那是 URL 语义改写，非格式变换。raw 路径不解析 title（一律空——
   raw = 纯原文，不做任何解析；默认路径才会提取 frontmatter title）。
-- **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/429/5xx）：**远程真实渲染保险丝**
-  tinyfish fetch → bsk 真浏览器（LLM 拿真实内容不给占位）。本地 headless 已移除——
-  同能力一份实现，也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝
-  （页面确实不存在，渲染器无法复活）。渲染器自报输出类型（`RenderedContent`：
-  tinyfish 请求 markdown → `text/markdown`；bsk innerText → `text/plain`），
-  `contentType` 原样透传，不伪造（诚实规则）。
+- **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/429/5xx）：**远程渲染保险丝**
+  tinyfish fetch（LLM 拿真实内容不给占位）。本地 headless 已移除——同能力一份实现，
+  也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝（页面确实不存在，
+  渲染器无法复活）。渲染器自报输出类型（`RenderedContent`：tinyfish 请求 markdown
+  → `text/markdown`），`contentType` 原样透传，不伪造（诚实规则）。
+- **浏览器保险丝已从 web_fetch 移除**（2026-10-31）：它依赖 BrowserSkill 的 CLI
+  契约，上游一改版整条 fetch 兜底就失效。
 - **请求头 = 系统 curl 原生**（UA/Accept: */*/无 Accept-Language）；fallback
   用钉死 curl UA。动机史（openai/codex#18456：Cloudflare 按 UA 403 真实存在）
   留档——curl 是合法命令行身份，被拦的页面由保险丝链兜底（不丢能力，多一跳）。
@@ -204,8 +206,9 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
   （LLM 要文件而非界面）；raw 不可用回退原 URL。
 - **主路径零中转**：静态友好页始终直取（无 r.jina.ai 类常驻中转）；仅当直取
   失败（反爬/CSR）才走 tinyfish fetch——它本身就是转发渲染（诚实地位，非隐蔽）；
-  认证/交互页归 bsk（用户真实会话）或 LLM 自行 bash curl。（2026-08 加入
-  tinyfish fetch 前的既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订。）
+  需要登录/交互的页面归 LLM 自行 bash curl。（2026-08 加入 tinyfish fetch 前的
+  既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订；2026-10 撤掉
+  浏览器保险丝后，fetch 链只剩这一跳。）
 
 ## 配置
 
@@ -218,9 +221,7 @@ API key 环境变量（有则升级、无则降级，全部可选）：
 | `TAVILY_API_KEY` | 启用 Tavily |
 | `FIRECRAWL_API_KEY` | Firecrawl keyed 升档（与 pi-read-doc OCR 共享池，搜索尽量不碰） |
 | `PI_WEB_TOOLS_NO_CURL=1` | 跳过系统 curl 子进程（hermetic 测试 / 无 curl 环境强制 fallback；存在性探测一次并缓存） |
-| `PI_WEB_TOOLS_NO_BSK=1` | 禁用 bsk 真实浏览器通道（探测前短路——不弹窗、不起 daemon；默认测试套件强制） |
-| `PI_WEB_TOOLS_TEST_BSK=1` | opt-in：运行真浏览器测试（bsk 会打开本机 Chromium）；需同时清掉 NO_BSK |
-  （test/browser.test.ts 在 opt-in 时自行清除 NO_BSK） |
+（没有本机二进制相关配置：真实浏览器通道已移除。）
 
 无 `PI_WEB_TOOLS_ENGINES`、无系统语言探测——可用性就是环境事实，变更即时生效（每请求检测）。
 

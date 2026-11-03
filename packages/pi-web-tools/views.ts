@@ -8,13 +8,9 @@ import { durationMeta } from "@everyx/pi-ui/spinner.js";
 import { createToolView, expandHintText } from "@everyx/pi-ui/view.js";
 import type { FetchToolData, SearchToolData } from "./types.js";
 
-/** Meta label for the channel a search went through. The bsk fuse is labeled
- *  by the engine domain it navigated (via baidu.com); api channels by name
- *  (via exa). */
+/** Meta label for the channel a search went through (via exa). */
 function viaLabel(data: SearchToolData): string | undefined {
-	if (!data.channel) return undefined;
-	if (data.channel === "bsk" && data.engine) return `via ${data.engine}.com`;
-	return `via ${data.channel}`;
+	return data.channel ? `via ${data.channel}` : undefined;
 }
 
 export const searchView = createToolView<Record<string, unknown>, SearchToolData>({

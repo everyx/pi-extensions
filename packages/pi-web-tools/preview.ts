@@ -272,7 +272,7 @@ const pathB: LifecyclePath = {
 				{
 					kind: "search",
 					args: { query: "nonexistent query", locale: "zh-CN" },
-					details: { query: "nonexistent query", channel: "bsk", engine: "baidu" },
+					details: { query: "nonexistent query", channel: "firecrawl" },
 					isPartial: true,
 				},
 			],
@@ -286,10 +286,9 @@ const pathB: LifecyclePath = {
 					kind: "search",
 					args: { query: "nonexistent query", locale: "zh-CN" },
 					details: {
-						error: "baidu returned no usable results (captcha wall).",
+						error: "firecrawl returned no usable results.",
 						data: {
-							channel: "bsk",
-							engine: "baidu",
+							channel: "firecrawl",
 							count: 0,
 							startedAt: 1_752_000_000_000,
 							endedAt: 1_752_000_004_200,

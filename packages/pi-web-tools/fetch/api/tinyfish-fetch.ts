@@ -6,9 +6,9 @@
  * URLs/min); keyless first, TINYFISH_API_KEY (shared with the search
  * channel) as an optional upgrade.
  *
- * Sits in the web_fetch fuse (SPEC: GET → tinyfish fetch → bsk): pages plain
- * HTTP cannot deliver (anti-bot walls, CSR shells) render here instead of
- * locally — one renderer implementation instead of two.
+ * It is the only renderer in the web_fetch fuse (SPEC: GET → tinyfish fetch):
+ * pages plain HTTP cannot deliver (anti-bot walls, CSR shells) render here
+ * instead of locally — one renderer implementation instead of three.
  */
 
 import { fetchWithTimeout } from "../../http.js";

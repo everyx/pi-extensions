@@ -111,13 +111,6 @@ describe("search fuse walk", () => {
 		await searchFuse(bare, [a, b], { onAttempt: (id) => seen.push(id) });
 		assert.deepEqual(seen, ["tinyfish", "exa"]);
 	});
-
-	it("the answering channel's echo rides the outcome (bsk engine)", async () => {
-		const b = fake({ id: "bsk", echo: () => ({ engine: "baidu" as const }) });
-		const out = await searchFuse({ query: "你好", locale: "zh-CN" }, [b], {});
-		assert.equal(out.channel, "bsk");
-		assert.equal(out.echo?.engine, "baidu");
-	});
 });
 
 describe("candidatesFor", () => {
