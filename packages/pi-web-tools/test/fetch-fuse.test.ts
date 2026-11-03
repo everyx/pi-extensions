@@ -202,3 +202,21 @@ describe("fetchToolResult — the diagnostics reach the card, not just the calle
 		assert.equal(data.rendererFailures, undefined);
 	});
 });
+
+describe("web_fetch fuse — a renderer can be walled too", () => {
+	it("refuses a renderer's block page instead of passing it off as content", async () => {
+		// Firecrawl answering 200 with "Blocked by network security" as clean
+		// markdown is still a refusal; reporting it as the page is how a wall
+		// reaches the model wearing a success status.
+		stubRenderers({ firecrawl: { status: 200, markdown: "# Blocked by network security\n\nContact us." } });
+
+		const result = await webFetch(`${base}/wall`);
+
+		assert.ok(result.error, "the caller is told it failed");
+		assert.equal(result.content, "");
+		assert.ok(
+			(result.rendererFailures ?? []).some((f) => f.includes("network block page")),
+			`the wall is on the record (got ${JSON.stringify(result.rendererFailures)})`,
+		);
+	});
+});

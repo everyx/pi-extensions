@@ -166,6 +166,19 @@ Accept-Language: en-US,en;q=0.9
 - **`Accept` 把 markdown 排前面**：Cloudflare 的 Markdown for Agents 在边缘就转好（**实测同一页 16 KB vs 176 KB**），任何静态文档站也能直接给。**它不改变反爬结果**——实测未启用该特性的 zone 照样回挑战页——所以这是省 token，不是过墙。
 - **`Accept-Language` 是 curl 从不发、而我们补上的**：它是内容协商，不是伪装。实测里它正是那唯一一次「403 → 200」的决定性头部。
 
+### 失败分类与重试（2026-11 加入）
+
+失败不是一类，重试之前先分类：
+
+| 类型 | 例子 | 处理 |
+|---|---|---|
+| **JS 挑战** | `cf-mitigated: challenge`、`x-amzn-waf-action: challenge`、正文含 "Just a moment"/"Checking your browser" | **不重试** —— 实测跨多次、跨客户端配置完全一致；重试只烧时间与 IP 信誉。直接交给渲染保险丝，并告诉模型「被挑战挡住」而不是「页面坏了」 |
+| **软封锁** | 状态 **200** + 正文 "Blocked by network security" / "Access denied" / "unusual traffic" | 同上，按墙处理 |
+| **瞬时故障** | 429 / 502 / 503 / 504、连接重置、DNS 抖动 | 有界退避重试（最多 3 次，300ms 起 ×3 + ±20% 抖动），总时长受同一个 deadline 约束 |
+| **确定的拒绝** | 404 / 401 / 402 / 429 之外的 4xx | 不重试 |
+
+**渲染器同样会被墙**：Firecrawl 会把 "Blocked by network security" 当作干净的 markdown、配 200 交回来。所以同一套墙特征检测也作用在渲染结果上——否则一个礼貌的拒绝就会顶着成功状态抵达模型。
+
 ### 请求行为
 
 - **输出统一格式**（对齐 Markdown for Agents 布局）：frontmatter（

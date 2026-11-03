@@ -11,7 +11,7 @@ import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi
 import { stashOverflow } from "@everyx/pi-ui/context.js";
 import type { RenderOutcome, WebFetchResult } from "../types.js";
 import { fetchWithFirecrawl } from "./api/firecrawl-fetch.js";
-import { directFetch } from "./api/http-fetch.js";
+import { describeWall, directFetch } from "./api/http-fetch.js";
 import { fetchWithTinyfish, tinyfishFetchKey } from "./api/tinyfish-fetch.js";
 import { githubRawUrl } from "./github.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
@@ -149,6 +149,14 @@ async function fuseRender(
 		const outcome = await renderer.render(url, deadline, signal);
 		if (!outcome.content) {
 			failures.push(`${renderer.id}: ${outcome.reason ?? "no content"}`);
+			continue;
+		}
+		// A renderer can be walled too, and it will hand the refusal back as
+		// perfectly good markdown with a 200. Treating that as the page is how a
+		// "you have been blocked" notice ends up looking like fetched content.
+		const wall = describeWall(outcome.content.text.slice(0, 4096));
+		if (wall) {
+			failures.push(`${renderer.id}: ${wall} page`);
 			continue;
 		}
 		const rendered = outcome.content;

@@ -81,6 +81,13 @@ export interface DirectFetchResult {
 	bytes: Uint8Array | null;
 	tooLarge: boolean;
 	error?: string;
+	/** Set when the response is a JavaScript challenge (Cloudflare, AWS WAF,
+	 *  an interstitial). The page exists; only a real browser gets past it, so
+	 *  this tells the fuse *why* it is being invoked and tells the model the
+	 *  difference between "blocked" and "missing". */
+	challenge?: string;
+	/** How many requests were spent (1 unless a transient failure was retried). */
+	attempts?: number;
 }
 
 /** One proxy-aware agent for the process: undici clients are pools, so building
@@ -157,13 +164,56 @@ async function readBodyCapped(
 	return { bytes: out, tooLarge: false };
 }
 
-/** GET one URL. Never throws: every outcome is a normalized result. */
-export async function directFetch(url: string, options: DirectFetchOptions = {}): Promise<DirectFetchResult> {
-	const timeoutMs = options.timeoutMs ?? 15_000;
-	const maxBytes = options.maxBytes ?? 64 * 1024 * 1024;
+/** Statuses worth another attempt: rate limiting and transient upstream errors.
+ *  4xx other than 429 is the server saying "no", which a retry cannot change. */
+const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+/** Total attempts, including the first. Three is enough to ride out a blip
+ *  without spending the fuse budget on something that is not coming back. */
+const MAX_ATTEMPTS = 3;
+const BASE_DELAY_MS = 300;
 
-	// Compose the caller's cancellation with our own deadline: either one ends
-	// the request, and neither should mask the other.
+/** Signs that a short body is a wall rather than content.
+ *
+ *  The last patterns matter as much as the first: some sites answer **200** with
+ *  a "you have been blocked" page, which looks like a success to every layer
+ *  above and hands the model a polite refusal dressed as content. */
+const CHALLENGE_MARKERS: Array<[RegExp, string]> = [
+	[/just a moment|enable javascript and cookies|checking your browser|cf_chl_/i, "Cloudflare"],
+	[/captcha|are you a robot|automated requests/i, "bot check"],
+	[/blocked by network security|you have been blocked|access denied|request blocked|unusual traffic/i, "network block"],
+];
+
+/** Header signals, checked before the body: they are unambiguous. */
+function challengeFromHeaders(status: number, headers: Headers): string | undefined {
+	if (status !== 403 && status !== 202 && status !== 503) return undefined;
+	if (headers.get("cf-mitigated") === "challenge") return "Cloudflare";
+	const waf = headers.get("x-amzn-waf-action");
+	if (waf === "challenge" || waf === "captcha") return "AWS WAF";
+	return undefined;
+}
+
+/** A challenge page answers 200 sometimes; the body is the only tell left. */
+function challengeFromBody(text: string): string | undefined {
+	for (const [pattern, name] of CHALLENGE_MARKERS) if (pattern.test(text)) return name;
+	return undefined;
+}
+
+/**
+ * Is this text a wall rather than content?
+ *
+ * Exported because a *renderer* is subject to the same lie: Firecrawl happily
+ * returns "Blocked by network security" as clean markdown with a 200, and the
+ * fuse had no reason to doubt it. Checking the text where it arrives — whoever
+ * produced it — is what keeps a polite refusal from being reported as a page.
+ */
+export function describeWall(text: string): string | undefined {
+	return challengeFromBody(text);
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** One attempt. Separated so the retry loop stays readable. */
+async function attemptOnce(url: string, options: DirectFetchOptions, timeoutMs: number): Promise<DirectFetchResult> {
 	const signal = options.signal
 		? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
 		: AbortSignal.timeout(timeoutMs);
@@ -183,8 +233,44 @@ export async function directFetch(url: string, options: DirectFetchOptions = {})
 			},
 		});
 		const contentType = response.headers.get("content-type") ?? "";
-		const { bytes, tooLarge } = await readBodyCapped(response, maxBytes);
+
+		// Classify a wall before reading the body: a challenge is not a failure
+		// to retry, and the model deserves to know it was blocked rather than
+		// told the page is broken.
+		const headerChallenge = challengeFromHeaders(response.status, response.headers);
+		if (headerChallenge) {
+			await response.body?.cancel().catch(() => {});
+			return {
+				ok: false,
+				status: response.status,
+				contentType,
+				bytes: null,
+				tooLarge: false,
+				challenge: headerChallenge,
+				error: `blocked by a ${headerChallenge} challenge`,
+			};
+		}
+
+		const { bytes, tooLarge } = await readBodyCapped(response, maxBytesOf(options));
 		if (tooLarge) return { ok: true, status: response.status, contentType, bytes: null, tooLarge: true };
+
+		// Challenge pages answer 403, 503, and sometimes 200; the text is the only
+		// tell left. Only small bodies qualify — a real article is not one, and a
+		// long page that merely mentions captchas must not be mistaken for a wall.
+		const looksLikeWall = !response.ok || (bytes?.length ?? 0) <= 4 * 1024;
+		const bodyChallenge = looksLikeWall && bytes ? challengeFromBody(new TextDecoder().decode(bytes)) : undefined;
+		if (bodyChallenge) {
+			return {
+				ok: false,
+				status: response.status,
+				contentType,
+				bytes: null,
+				tooLarge: false,
+				challenge: bodyChallenge,
+				error: `blocked by a ${bodyChallenge} challenge`,
+			};
+		}
+
 		if (!response.ok) {
 			const reason = response.statusText ? `: ${response.statusText}` : "";
 			return {
@@ -202,14 +288,7 @@ export async function directFetch(url: string, options: DirectFetchOptions = {})
 			return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "fetch aborted" };
 		}
 		if (err instanceof Error && err.name === "TimeoutError") {
-			return {
-				ok: false,
-				status: 0,
-				contentType: "",
-				bytes: null,
-				tooLarge: false,
-				error: "request timed out",
-			};
+			return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "request timed out" };
 		}
 		return {
 			ok: false,
@@ -220,4 +299,46 @@ export async function directFetch(url: string, options: DirectFetchOptions = {})
 			error: describeNetworkError(err),
 		};
 	}
+}
+
+const maxBytesOf = (options: DirectFetchOptions) => options.maxBytes ?? 64 * 1024 * 1024;
+
+/**
+ * GET one URL, retrying only what a retry can fix.
+ *
+ * Two failure classes, deliberately treated differently:
+ *   - a JavaScript challenge (Cloudflare/WAF) is stable across attempts and
+ *     across client configs — retrying it burns the caller's time and our IP
+ *     reputation for a result that does not change;
+ *   - a rate limit or a transient upstream error (429/502/503/504, connection
+ *     reset, DNS hiccup) often clears on its own, and one extra attempt is
+ *     cheaper than falling back to a third-party renderer.
+ *
+ * Never throws: every outcome is a normalized result.
+ */
+export async function directFetch(url: string, options: DirectFetchOptions = {}): Promise<DirectFetchResult> {
+	const totalBudgetMs = options.timeoutMs ?? 15_000;
+	const deadline = Date.now() + totalBudgetMs;
+
+	let result = await attemptOnce(url, options, totalBudgetMs);
+	let attempts = 1;
+	while (attempts < MAX_ATTEMPTS && shouldRetry(result, options)) {
+		const remaining = deadline - Date.now();
+		if (remaining <= BASE_DELAY_MS) break;
+		// Exponential backoff with jitter: a burst of clients must not resynchronise.
+		const wait = Math.min(BASE_DELAY_MS * 3 ** (attempts - 1) * (0.8 + Math.random() * 0.4), remaining - 1);
+		await sleep(wait);
+		result = await attemptOnce(url, options, deadline - Date.now());
+		attempts++;
+	}
+	return { ...result, attempts };
+}
+
+/** Whether another attempt could plausibly answer differently. */
+function shouldRetry(result: DirectFetchResult, options: DirectFetchOptions): boolean {
+	if (options.signal?.aborted) return false;
+	if (result.challenge) return false;
+	if (result.tooLarge) return false;
+	if (result.status === 0) return isTransientError(result.error ?? "");
+	return RETRY_STATUSES.has(result.status);
 }

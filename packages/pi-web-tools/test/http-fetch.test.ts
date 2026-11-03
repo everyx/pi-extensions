@@ -23,6 +23,8 @@ interface Captured {
 }
 
 const seen: Captured[] = [];
+let flakyCalls = 0;
+let challengeCalls = 0;
 
 const listener = createServer((req, res) => {
 	if (req.url === "/page") {
@@ -52,6 +54,31 @@ const listener = createServer((req, res) => {
 		const chunk = "y".repeat(64 * 1024);
 		for (let i = 0; i < 8; i++) res.write(chunk);
 		res.end();
+		return;
+	}
+	if (req.url === "/flaky") {
+		// Fails twice, then answers: the retry budget should be enough.
+		flakyCalls++;
+		if (flakyCalls < 3) {
+			res.writeHead(503, { "Content-Type": "text/plain" });
+			res.end("upstream hiccup");
+			return;
+		}
+		res.writeHead(200, { "Content-Type": "text/plain" });
+		res.end("finally");
+		return;
+	}
+	if (req.url === "/challenge") {
+		// Cloudflare's unambiguous signal: do not retry it.
+		challengeCalls++;
+		res.writeHead(403, { "cf-mitigated": "challenge", "Content-Type": "text/html" });
+		res.end("<html><body>blocked</body></html>");
+		return;
+	}
+	if (req.url === "/challenge-body") {
+		// A wall that only the body gives away.
+		res.writeHead(200, { "Content-Type": "text/html" });
+		res.end("<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>");
 		return;
 	}
 	if (req.url === "/slow") {
@@ -138,5 +165,43 @@ describe("directFetch — every failure is a result, not a throw", () => {
 		const result = await directFetch("http://127.0.0.1:45999/", { timeoutMs: 3_000 });
 		assert.equal(result.ok, false);
 		assert.equal(result.error, "connection refused");
+	});
+});
+
+describe("directFetch — retry only what a retry can fix", () => {
+	it("rides out a transient 503 and reports how many attempts it took", async () => {
+		flakyCalls = 0;
+		const result = await directFetch(`${base}/flaky`, { timeoutMs: 8_000 });
+		assert.equal(result.ok, true);
+		assert.equal(new TextDecoder().decode(result.bytes ?? new Uint8Array()), "finally");
+		assert.equal(result.attempts, 3, "two failures then success");
+	});
+
+	it("does not retry a challenge — it is stable across attempts", async () => {
+		challengeCalls = 0;
+		const result = await directFetch(`${base}/challenge`, { timeoutMs: 8_000 });
+		assert.equal(result.ok, false);
+		assert.equal(result.challenge, "Cloudflare");
+		assert.match(String(result.error), /blocked by a Cloudflare challenge/);
+		assert.equal(result.attempts, 1, "one request, not three");
+		assert.equal(challengeCalls, 1);
+	});
+
+	it("recognises a challenge that only the body reveals", async () => {
+		const result = await directFetch(`${base}/challenge-body`, { timeoutMs: 5_000 });
+		assert.equal(result.ok, false);
+		assert.equal(result.challenge, "Cloudflare");
+		assert.equal(result.attempts, 1);
+	});
+
+	it("does not retry a plain 404 — the page is not there", async () => {
+		const result = await directFetch(`${base}/gone`, { timeoutMs: 5_000 });
+		assert.equal(result.status, 404);
+		assert.equal(result.attempts, 1);
+	});
+
+	it("spends one attempt when the first one works", async () => {
+		const result = await directFetch(`${base}/page`, { timeoutMs: 5_000 });
+		assert.equal(result.attempts, 1);
 	});
 });
