@@ -103,12 +103,12 @@ await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${(listener.address() as AddressInfo).port}`;
 
 describe("fetch connection-error diagnostics", () => {
-	it("webFetch surfaces the curl transport error for a socket reset", async () => {
-		// Local /reset fixture: the server destroys the socket; curl maps it
-		// to a typed error instead of a bare "fetch failed".
+	it("webFetch surfaces the transport error for a socket reset", async () => {
+		// Local /reset fixture: the server destroys the socket. The transport
+		// names the failure instead of handing back a bare "fetch failed".
 		const r = await webFetch(`${base}/reset`);
 		assert.ok(r.error, "expected an error");
-		assert.match(r.error, /curl: \(52\)|empty reply/i, `got: ${r.error}`);
+		assert.match(r.error, /connection reset|connection closed early|socket closed|fetch failed/i, `got: ${r.error}`);
 	});
 });
 

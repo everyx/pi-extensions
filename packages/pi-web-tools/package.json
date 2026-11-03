@@ -41,9 +41,11 @@
 		"exa-js": "^2.16.3",
 		"fromnow": "^3.0.1",
 		"linkedom": "^0.18.13",
-		"turndown": "^7.2.4"
+		"turndown": "^7.2.4",
+		"undici": "^7.16.0"
 	},
 	"devDependencies": {
 		"@types/turndown": "^5.0.6"
-	}
+	},
+	"homepage": "https://github.com/everyx/pi-extensions/tree/master/packages/pi-web-tools"
 }
