@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
+import { withEnvVars } from "./env.js";
 
 interface Capture {
 	url: string;
@@ -40,9 +41,7 @@ async function loadExa(): Promise<typeof import("../search/api/exa.js")> {
 }
 
 function withEnv(key: string | undefined, fn: () => Promise<void>): Promise<void> {
-	if (key === undefined) delete process.env.EXA_API_KEY;
-	else process.env.EXA_API_KEY = key;
-	return fn().finally(() => delete process.env.EXA_API_KEY);
+	return withEnvVars({ EXA_API_KEY: key }, fn);
 }
 
 function reset(step: (typeof script)[number] | (typeof script)[number][]): void {

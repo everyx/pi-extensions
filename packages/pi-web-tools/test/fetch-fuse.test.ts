@@ -18,6 +18,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 import { webFetch } from "../fetch/fetch.js";
 import { fetchToolResult } from "../index.js";
+import { withEnvVars } from "./env.js";
 
 const listener = createServer((req, res) => {
 	if (req.url === "/wall") {
@@ -43,12 +44,23 @@ const listener = createServer((req, res) => {
 	res.end("<html><head><title>Fine</title></head><body><p>direct body</p></body></html>");
 });
 
+// The shell may export TINYFISH_API_KEY; these tests assume which renderers are
+// configured, so start from absent and restore the real values afterwards.
+const originalTinyfishKey = process.env.TINYFISH_API_KEY;
+before(() => {
+	delete process.env.TINYFISH_API_KEY;
+});
+
 let base = "";
 before(async () => {
 	await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
 	base = `http://127.0.0.1:${(listener.address() as AddressInfo).port}`;
 });
-after(() => new Promise<void>((resolve) => listener.close(() => resolve())));
+after(() => {
+	if (originalTinyfishKey === undefined) delete process.env.TINYFISH_API_KEY;
+	else process.env.TINYFISH_API_KEY = originalTinyfishKey;
+	return new Promise<void>((resolve) => listener.close(() => resolve()));
+});
 
 interface RendererCall {
 	status: number;
@@ -89,8 +101,7 @@ describe("web_fetch fuse — the diagnosis survives to the caller", () => {
 	it("keeps the earlier failure when a later renderer succeeds", async () => {
 		// Firecrawl refuses (anonymous access withdrawn, quota, whatever): the
 		// chain must continue, and the refusal must not vanish on success.
-		process.env.TINYFISH_API_KEY = "test-key";
-		try {
+		await withEnvVars({ TINYFISH_API_KEY: "test-key" }, async () => {
 			stubRenderers({
 				firecrawl: { status: 401 },
 				tinyfish: { status: 200, markdown: "# Second\n\nbody" },
@@ -100,9 +111,7 @@ describe("web_fetch fuse — the diagnosis survives to the caller", () => {
 
 			assert.equal(result.renderer, "tinyfish", "the chain advanced past the refusal");
 			assert.deepEqual(result.rendererFailures, ["firecrawl: HTTP 401"], "the refusal is still on the record");
-		} finally {
-			delete process.env.TINYFISH_API_KEY;
-		}
+		});
 	});
 
 	it("reports every renderer's reason when none of them delivers", async () => {

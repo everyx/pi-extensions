@@ -8,20 +8,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fetchWithTinyfish } from "../fetch/api/tinyfish-fetch.js";
+import { withEnvVars, withoutEnvVars } from "./env.js";
 
 function withKey(fn: () => Promise<void>): Promise<void> {
-	process.env.TINYFISH_API_KEY = "test-key";
-	return fn().finally(() => delete process.env.TINYFISH_API_KEY);
+	return withEnvVars({ TINYFISH_API_KEY: "test-key" }, fn);
 }
 
 /** The keyless path must be tested with the variable *absent* — a developer
  *  shell may have it set, and env leaks break the assertion. */
 function withoutKey(fn: () => Promise<void>): Promise<void> {
-	const prev = process.env.TINYFISH_API_KEY;
-	delete process.env.TINYFISH_API_KEY;
-	return fn().finally(() => {
-		if (prev) process.env.TINYFISH_API_KEY = prev;
-	});
+	return withoutEnvVars(["TINYFISH_API_KEY"], fn);
 }
 
 function stubFetch(

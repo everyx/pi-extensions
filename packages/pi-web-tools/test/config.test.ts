@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 import { apiKey, readKeys, resetKeysCache } from "../config.js";
 
 const dir = mkdtempSync(join(tmpdir(), "pi-web-tools-keys-"));
@@ -20,12 +20,26 @@ const write = (name: string, body: string): string => {
 	return file;
 };
 
+const KEY_VARS = ["TINYFISH_API_KEY", "EXA_API_KEY", "TAVILY_API_KEY", "FIRECRAWL_API_KEY"];
+/** Whatever the shell already exported is put back afterwards — a test that
+ *  simply deleted these would quietly strip a developer's real keys. */
+const originalEnv = Object.fromEntries(KEY_VARS.map((name) => [name, process.env[name]]));
+
+before(() => {
+	// These tests are about presence and absence, so start from "absent" instead
+	// of inheriting whatever the shell happens to export.
+	for (const name of KEY_VARS) delete process.env[name];
+});
+after(() => {
+	for (const [name, value] of Object.entries(originalEnv)) {
+		if (value === undefined) delete process.env[name];
+		else process.env[name] = value;
+	}
+});
 afterEach(() => {
+	// Back to the file's baseline (absent) — individual tests set what they need.
 	resetKeysCache();
-	delete process.env.TINYFISH_API_KEY;
-	delete process.env.EXA_API_KEY;
-	delete process.env.TAVILY_API_KEY;
-	delete process.env.FIRECRAWL_API_KEY;
+	for (const name of KEY_VARS) delete process.env[name];
 });
 
 describe("readKeys — a broken file contributes nothing", () => {

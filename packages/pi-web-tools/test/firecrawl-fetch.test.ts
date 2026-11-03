@@ -12,22 +12,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fetchWithFirecrawl } from "../fetch/api/firecrawl-fetch.js";
 import { renderMayHelp } from "../fetch/fetch.js";
+import { withEnvVars, withoutEnvVars } from "./env.js";
 
 function withoutKey(fn: () => Promise<void>): Promise<void> {
-	const prev = process.env.FIRECRAWL_API_KEY;
-	delete process.env.FIRECRAWL_API_KEY;
-	return fn().finally(() => {
-		if (prev) process.env.FIRECRAWL_API_KEY = prev;
-	});
+	return withoutEnvVars(["FIRECRAWL_API_KEY"], fn);
 }
 
 function withKey(fn: () => Promise<void>): Promise<void> {
-	const prev = process.env.FIRECRAWL_API_KEY;
-	process.env.FIRECRAWL_API_KEY = "test-key";
-	return fn().finally(() => {
-		if (prev) process.env.FIRECRAWL_API_KEY = prev;
-		else delete process.env.FIRECRAWL_API_KEY;
-	});
+	return withEnvVars({ FIRECRAWL_API_KEY: "test-key" }, fn);
 }
 
 interface Capture {
