@@ -82,9 +82,11 @@ const listener = createServer((req, res) => {
 		return;
 	}
 	if (req.url === "/challenge-huge") {
-		// A wall that announces a big body: the prefix is what matters.
-		res.writeHead(403, { "Content-Length": String(1024 * 1024), "Content-Type": "text/html" });
-		res.end("<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>");
+		// A wall whose body is genuinely large: the prefix is what matters, and
+		// only the prefix is read.
+		const body = `<html><head><title>Just a moment...</title></head><body>Checking your browser${"x".repeat(200_000)}</body></html>`;
+		res.writeHead(403, { "Content-Length": String(body.length), "Content-Type": "text/html" });
+		res.end(body);
 		return;
 	}
 	if (req.url === "/challenge-body") {
@@ -113,6 +115,14 @@ const listener = createServer((req, res) => {
 		res.writeHead(200, { "Content-Type": "text/plain", "Content-Length": "1024" });
 		res.write("partial");
 		setTimeout(() => res.socket?.destroy(), 10);
+		return;
+	}
+	if (req.url === "/wall-hangs") {
+		// Headers (403) arrive, then the body never finishes: a wall check must
+		// not turn that into "HTTP 403".
+		res.writeHead(403, { "Content-Type": "text/html", "Content-Length": "1000" });
+		res.write("<html><head>");
+		// never end
 		return;
 	}
 	if (req.url === "/slow") {
@@ -349,5 +359,21 @@ describe("directFetch — a wall is recognised even when it claims to be big", (
 		assert.equal(result.ok, false);
 		assert.equal(result.challenge, "Cloudflare");
 		assert.equal(result.attempts, 1, "and it is not retried");
+	});
+});
+
+describe("directFetch — sniffing a wall must not swallow the clock", () => {
+	it("reports the timeout, not the 403, when the wall page never finishes", async () => {
+		const result = await directFetch(`${base}/wall-hangs`, { timeoutMs: 200 });
+		assert.equal(result.ok, false);
+		assert.match(String(result.error), /timed out/, `got: ${result.error}`);
+	});
+
+	it("reports cancellation, not the 403, when the caller gives up mid-body", async () => {
+		const controller = new AbortController();
+		const pending = directFetch(`${base}/wall-hangs`, { signal: controller.signal, timeoutMs: 5_000 });
+		setTimeout(() => controller.abort(), 50);
+		const result = await pending;
+		assert.equal(result.error, "fetch aborted");
 	});
 });

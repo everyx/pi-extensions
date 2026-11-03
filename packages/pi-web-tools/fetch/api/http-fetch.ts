@@ -147,7 +147,7 @@ export function isTransientError(message: string): boolean {
  *  "Just a moment" in its first line, and skipping the read would lose the
  *  classification (and with it the reason the caller is told).
  */
-async function readPrefix(response: Response, maxBytes: number): Promise<Uint8Array> {
+async function readPrefix(response: Response, maxBytes: number, options: DirectFetchOptions): Promise<Uint8Array> {
 	if (!response.body) return new Uint8Array(0);
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
@@ -159,8 +159,13 @@ async function readPrefix(response: Response, maxBytes: number): Promise<Uint8Ar
 			chunks.push(value);
 			size += value.length;
 		}
-	} catch {
-		// A connection that dies mid-sniff still leaves us the bytes we got.
+	} catch (err) {
+		// A connection that dies mid-sniff still leaves us the bytes we got — but
+		// a deadline or a cancellation is not that. Swallowing those would report
+		// "HTTP 403" for a request that actually timed out, or for one the caller
+		// had already cancelled.
+		if (options.signal?.aborted) throw err;
+		if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) throw err;
 	}
 	await reader.cancel().catch(() => {});
 	reader.releaseLock?.();
@@ -487,7 +492,7 @@ async function finishResponse(
 	if (!response.ok) {
 		// Sniff a prefix for the wall check; a big error page is not content, but
 		// its first line may still say "Just a moment".
-		const prefix = await readPrefix(response, Math.min(maxBytesOf(options), 64 * 1024));
+		const prefix = await readPrefix(response, Math.min(maxBytesOf(options), 64 * 1024), options);
 		const bodyChallenge = prefix.length ? challengeFromBody(new TextDecoder().decode(prefix)) : undefined;
 		if (bodyChallenge) {
 			return {
@@ -539,7 +544,10 @@ function networkFailure(err: unknown, options: DirectFetchOptions): DirectFetchR
 	if (options.signal?.aborted) {
 		return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "fetch aborted" };
 	}
-	if (err instanceof Error && err.name === "TimeoutError") {
+	// Our own deadline surfaces as a TimeoutError, or as an AbortError when the
+	// composed signal is the one that fired (the caller's signal is checked
+	// above, so an AbortError here is the deadline).
+	if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
 		return { ok: false, status: 0, contentType: "", bytes: null, tooLarge: false, error: "request timed out" };
 	}
 	return {
