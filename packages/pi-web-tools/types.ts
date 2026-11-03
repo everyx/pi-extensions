@@ -42,6 +42,15 @@ export interface RenderedContent {
 	contentType: string;
 }
 
+/** What a renderer managed to do, and why not when it failed. The reason is a
+ *  card diagnostic: a renderer that fails without saying why is how the last
+ *  one died unnoticed (TinyFish started answering 401 and read as "no content"). */
+export interface RenderOutcome {
+	content: RenderedContent | null;
+	/** Set when content is null — e.g. "HTTP 401", "empty markdown". */
+	reason?: string;
+}
+
 /** One search channel (fuse member) — composed by search/channels.ts into
  *  fuse order, walked by search/fuse.ts. */
 export interface SearchChannel {
@@ -76,6 +85,11 @@ export type FetchToolData = {
 	/** Set exactly when the fetch was truncated — full text stashed on disk
 	 *  (the expand view / read takes over). */
 	outputPath?: string;
+	/** Fuse renderer that delivered the content (absent on a direct fetch). */
+	renderer?: string;
+	/** Why the fuse ran, and what the renderers that did not answer said. */
+	renderReason?: string;
+	rendererFailures?: string[];
 	startedAt?: number;
 	endedAt?: number;
 };
@@ -96,5 +110,13 @@ export interface WebFetchResult {
 	/** Full fetched text before the LLM-side cap — feeds the UI expanded view
 	 *  (details channel, never the LLM context); set when the cap bit in. */
 	fullContent?: string;
+	/** Which fuse renderer produced this content, when one did (details only:
+	 *  the model gets the text, the card says where it came from). */
+	renderer?: string;
+	/** Why the fuse ran at all — direct HTTP refused it, or the shell was CSR. */
+	renderReason?: "http-failed" | "csr-shell";
+	/** What each renderer said, in fuse order — diagnostics for the card.
+	 *  A renderer that dies silently is how the last one went unnoticed. */
+	rendererFailures?: string[];
 	error?: string;
 }

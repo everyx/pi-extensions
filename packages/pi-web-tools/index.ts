@@ -13,7 +13,14 @@ import { webFetch } from "./fetch/fetch.js";
 import { buildWebSearchSchema, type WebFetchParams, WebFetchParamsSchema } from "./schema.js";
 import { CHANNELS } from "./search/channels.js";
 import { searchFuse, summarizeFailures } from "./search/fuse.js";
-import type { ChannelId, FetchToolData, SearchResultItem, SearchToolData, WebSearchParams } from "./types.js";
+import type {
+	ChannelId,
+	FetchToolData,
+	SearchResultItem,
+	SearchToolData,
+	WebFetchResult,
+	WebSearchParams,
+} from "./types.js";
 import { fetchView, searchView } from "./views.js";
 
 // ── Result formatting (LLM-facing, token friendly) ───────────────
@@ -107,21 +114,32 @@ async function executeSearch(
 
 // ── web_fetch ────────────────────────────────────────────────────
 
-async function executeFetch(
-	args: WebFetchParams,
-	signal: AbortSignal | undefined,
-): Promise<{
+/** Shape one fetch into the tool result pi renders.
+ *
+ *  Pure on purpose: the interesting diagnostics (which renderer answered, why
+ *  the fuse ran, what the others said) live only in `details`, and a test that
+ *  stops at `webFetch` cannot see whether they survived the trip. */
+export function fetchToolResult(
+	result: WebFetchResult,
+	url: string,
+	startedAt: number,
+): {
 	content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
 	details: Record<string, unknown>;
 	isError: boolean;
-}> {
-	const url = args.url;
-	const startedAt = Date.now();
-	const result = await webFetch(url, { raw: args.raw, signal });
+} {
 	if (result.error) {
 		return {
 			content: [{ type: "text", text: result.error }],
-			details: { error: result.error, url, startedAt, endedAt: Date.now() },
+			details: {
+				error: result.error,
+				url,
+				// Why each renderer declined — the case where every one of them
+				// failed is exactly when this matters.
+				rendererFailures: result.rendererFailures,
+				startedAt,
+				endedAt: Date.now(),
+			},
 			isError: true,
 		};
 	}
@@ -145,12 +163,23 @@ async function executeFetch(
 				content: result.fullContent ?? result.content,
 				outputPath: result.outputPath,
 				contentType: result.contentType,
+				// Which fuse renderer delivered it, why the fuse ran, and what the
+				// others said — card diagnostics; the model already has the text.
+				renderer: result.renderer,
+				renderReason: result.renderReason,
+				rendererFailures: result.rendererFailures,
 				startedAt,
 				endedAt: Date.now(),
 			} satisfies FetchToolData,
 		},
 		isError: false,
 	};
+}
+
+async function executeFetch(args: WebFetchParams, signal: AbortSignal | undefined) {
+	const startedAt = Date.now();
+	const result = await webFetch(args.url, { raw: args.raw, signal });
+	return fetchToolResult(result, args.url, startedAt);
 }
 
 // ── Extension registration ───────────────────────────────────────

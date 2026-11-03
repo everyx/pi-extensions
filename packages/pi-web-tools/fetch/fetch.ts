@@ -10,9 +10,10 @@
 
 import { formatDimensionNote, formatSize, resizeImage } from "@earendil-works/pi-coding-agent";
 import { stashOverflow } from "@everyx/pi-ui/context.js";
-import type { WebFetchResult } from "../types.js";
+import type { RenderOutcome, WebFetchResult } from "../types.js";
 import { curlFetch } from "./api/curl-fetch.js";
-import { fetchWithTinyfish } from "./api/tinyfish-fetch.js";
+import { fetchWithFirecrawl } from "./api/firecrawl-fetch.js";
+import { fetchWithTinyfish, tinyfishFetchKey } from "./api/tinyfish-fetch.js";
 import { githubRawUrl } from "./github.js";
 import { htmlToMarkdown, isLikelyJSRendered } from "./markdown.js";
 
@@ -80,28 +81,98 @@ async function finishPage(
  *    file, a lossy preview is only duplicate cost. On overflow the full text
  *    is stashed and the result points at it; the read tool's offset/limit
  *    paging takes over from there. Binaries never enter context as noise. */
-/** Fuse renderers for the web_fetch chain (SPEC: GET → tinyfish fetch).
- *  It renders server-side and returns clean text — results flow through the
- *  same stash/preview path as locally extracted markdown. Returns null when
- *  the renderer is unavailable or failed (caller shows its own error).
+/** The whole rendering fuse gets one deadline; each renderer takes what is
+ *  left of it. Without a shared budget three slow vendors in a row would turn
+ *  one failed fetch into minutes of waiting, and the caller cannot cancel
+ *  its way out of that. */
+const RENDER_BUDGET_MS = 45_000;
+/** Below this there is no point starting another renderer. */
+const RENDER_FLOOR_MS = 5_000;
+
+/** One rendering provider. Order is the fuse order: the cheaper, more
+ *  available one first. */
+interface Renderer {
+	id: string;
+	/** Rendering needs a key that is not configured — skip, do not try. */
+	available: () => boolean;
+	render: (url: string, deadline: number, signal?: AbortSignal) => Promise<RenderOutcome>;
+}
+
+const RENDERERS: Renderer[] = [
+	// Keyless (verified 2026-11-03): the only renderer that works with no key
+	// at all, so it goes first.
+	{ id: "firecrawl", available: () => true, render: fetchWithFirecrawl },
+	// Better rendering, but keyed since TinyFish started requiring a key.
+	{ id: "tinyfish", available: () => tinyfishFetchKey() !== null, render: fetchWithTinyfish },
+];
+
+/**
+ * Whether rendering can plausibly help with a failed direct fetch.
  *
- *  A local-browser tier is deliberately absent: it would pin the fallback —
- *  the path that exists for when everything else failed — to a third-party
- *  CLI's argument shape, and a fetch that only works while a browser daemon
- *  agrees is not a fallback. */
-async function fuseRender(url: string, signal?: AbortSignal): Promise<WebFetchResult | null> {
-	const rendered = await fetchWithTinyfish(url, signal);
-	if (!rendered) return null;
-	const { text: content, stashPath } = stashOverflow(rendered.text, url);
-	return {
-		title: firstLineAsTitle(rendered.text),
-		content: previewWithPointer(content, stashPath),
-		// The renderer self-reports its output type (tinyfish: the markdown it
-		// was asked for) — no fabrication.
-		contentType: rendered.contentType,
-		outputPath: stashPath,
-		fullContent: rendered.text,
-	};
+ * The fuse exists for pages plain HTTP cannot deliver: anti-bot walls (403),
+ * transient server failures, CSR shells. It cannot resurrect a page that does
+ * not exist (404/410), and it cannot pay for one (402), outrun a quota (429),
+ * or bypass a legal block (451). Firing the fuse there only spends time and
+ * someone else's bandwidth to arrive at the same answer.
+ */
+export function renderMayHelp(status: number): boolean {
+	if (status === 0) return true; // network failure / no status at all
+	if (status === 404 || status === 410) return false; // the page is not there
+	if (status === 401 || status === 402 || status === 407) return false; // payment / auth
+	if (status === 429) return false; // quota — a renderer only spends more
+	if (status === 451) return false; // unavailable for legal reasons
+	return true;
+}
+
+/** Render through the fuse, reporting which renderer produced the text and
+ *  what the others said. A renderer that fails silently is how the previous
+ *  one died unnoticed (TinyFish began answering 401 and we called it "no
+ *  content"), so every refusal is recorded for the card even though the model
+ *  only needs the text or the honest error. */
+async function fuseRender(
+	url: string,
+	signal?: AbortSignal,
+	reason: "http-failed" | "csr-shell" = "http-failed",
+): Promise<{ result: WebFetchResult | null; failures: string[] }> {
+	const deadline = Date.now() + RENDER_BUDGET_MS;
+	const failures: string[] = [];
+	for (const renderer of RENDERERS) {
+		if (!renderer.available()) {
+			failures.push(`${renderer.id}: no credentials`);
+			continue;
+		}
+		if (signal?.aborted) break;
+		const remaining = deadline - Date.now();
+		if (remaining < RENDER_FLOOR_MS) {
+			failures.push(`${renderer.id}: skipped, fuse budget spent`);
+			break;
+		}
+		const outcome = await renderer.render(url, deadline, signal);
+		if (!outcome.content) {
+			failures.push(`${renderer.id}: ${outcome.reason ?? "no content"}`);
+			continue;
+		}
+		const rendered = outcome.content;
+		const { text: content, stashPath } = stashOverflow(rendered.text, url);
+		return {
+			result: {
+				title: firstLineAsTitle(rendered.text),
+				content: previewWithPointer(content, stashPath),
+				// The renderer self-reports its output type — no fabrication.
+				contentType: rendered.contentType,
+				outputPath: stashPath,
+				fullContent: rendered.text,
+				renderer: renderer.id,
+				renderReason: reason,
+				// A provider that failed first is exactly the context someone
+				// debugging a slow or partial fetch wants; dropping it on success
+				// would keep the diagnosis for the case nobody investigates.
+				rendererFailures: failures,
+			},
+			failures,
+		};
+	}
+	return { result: null, failures };
 }
 
 function previewWithPointer(content: string, stashPath?: string): string {
@@ -161,18 +232,22 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 		page = await fetchPage(url, signal);
 	}
 
-	// Direct HTTP failure → normalized error. 404/410 mean the page genuinely
-	// does not exist — a renderer cannot resurrect it. Everything else
-	// (anti-bot walls, transient 5xx, network failure) advances the fuse.
+	// Direct HTTP failure → normalized error. The classifier decides whether a
+	// renderer could plausibly do better; when it cannot, spending the fuse's
+	// budget would only delay the same answer.
 	if (!page.ok) {
-		if (page.status !== 404 && page.status !== 410) {
-			const rendered = await fuseRender(url, signal);
-			if (rendered) return rendered;
+		// A cancelled call is not a page we failed to render. Entering the fuse
+		// here would queue behind a rate limiter for work the caller gave up on.
+		if (signal?.aborted) {
+			return { title: "", content: "", error: page.error || "fetch aborted" };
 		}
+		const fuse = renderMayHelp(page.status) ? await fuseRender(url, signal, "http-failed") : undefined;
+		if (fuse?.result) return fuse.result;
 		return {
 			title: "",
 			content: "",
 			error: page.error || `Failed to fetch ${url}`,
+			rendererFailures: fuse?.failures,
 		};
 	}
 
@@ -234,12 +309,18 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 	// Render it remotely so the LLM gets real content instead of a placeholder
 	// (tinyfish fetch). Local headless rendering was removed earlier: same
 	// capability, one implementation (SPEC).
+	// Keep what the fuse said when it could not render: both returns below are
+	// outcomes of that failure, and dropping the reasons here is what made the
+	// diagnosis reach only one of the fuse's two entry points.
+	let rendererFailures: string[] | undefined;
 	if (isLikelyJSRendered(page.text ?? "")) {
-		const rendered = await fuseRender(url, signal);
-		if (rendered) return rendered;
+		const fuse = await fuseRender(url, signal, "csr-shell");
+		if (fuse.result) return fuse.result;
+		rendererFailures = fuse.failures;
 	}
 
-	// Non-CSR partial extraction: return what we have (status quo).
+	// Partial extraction after a failed render: return what we have, plus what
+	// the fuse said about why it could not do better.
 	if (extracted.markdown) {
 		const { text: content, stashPath } = stashOverflow(extracted.markdown, url);
 		return {
@@ -248,6 +329,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 			contentType: page.contentType || undefined,
 			outputPath: stashPath,
 			fullContent: extracted.markdown,
+			rendererFailures,
 		};
 	}
 
@@ -256,6 +338,7 @@ export async function webFetch(url: string, options: WebFetchOptions = {}): Prom
 		title: "",
 		content: "",
 		error: jsRendered ? "(no readable content) — page appears to be JavaScript-rendered" : "(no readable content)",
+		rendererFailures,
 	};
 }
 

@@ -66,7 +66,7 @@ web_fetch(url: string, raw?: boolean) → { title, content }
 
 | 通道 | 免费额度 | key 缺省时 |
 |---|---|---|
-| **TinyFish** | 无限（30 req/min） | 不可用（key 必需，免费注册） |
+| **TinyFish** | 30 req/min（需 key） | 不可用 —— **2026-11 起服务端强制 key**（search 与 fetch 都是，无 key 返回 401 `MISSING_API_KEY`） |
 | **Exa** | MCP keyless（3 qps / 150 calls/day，仅裸 query） | keyless 运行 |
 | **Tavily** | 1,000 credits/月 | 不可用 |
 | **Firecrawl** | keyless（per-IP 每日上限，Google 后端） | keyless 运行 |
@@ -105,7 +105,7 @@ LLM 对搜索操作符有先验知识（`site:` / `filetype:` / `-` / `OR` / 引
 
 | 场景 | 现在 |
 |---|---|
-| `web_fetch` 反爬/CSR 页 | tinyfish fetch（服务端渲染，无本机依赖） |
+| `web_fetch` 反爬/CSR 页 | firecrawl scrape → tinyfish fetch（服务端渲染，无本机依赖） |
 | 搜索额度尽 | exa / firecrawl 的 keyless 模式 |
 
 需要登录或交互的页面不在本扩展范围内——交给 LLM 自己 bash curl。
@@ -190,11 +190,31 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
   渲染（要源码就不是要渲染结果）；站点 URL 重写（如 GitHub blob→raw）仍
   保留——那是 URL 语义改写，非格式变换。raw 路径不解析 title（一律空——
   raw = 纯原文，不做任何解析；默认路径才会提取 frontmatter title）。
-- **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/429/5xx）：**远程渲染保险丝**
-  tinyfish fetch（LLM 拿真实内容不给占位）。本地 headless 已移除——同能力一份实现，
-  也去掉「本机装了哪种 Chromium」的依赖。404/410 不发保险丝（页面确实不存在，
-  渲染器无法复活）。渲染器自报输出类型（`RenderedContent`：tinyfish 请求 markdown
-  → `text/markdown`），`contentType` 原样透传，不伪造（诚实规则）。
+- **CSR 页/反爬墙**（壳空 + JS 渲染 / HTTP 403/5xx）：**远程渲染保险丝**
+  `firecrawl scrape`（无 key 可用）→ `tinyfish fetch`（需 key）。本地 headless 与
+  浏览器 CLI 都已移除——渲染一律是 HTTP API。渲染器自报输出类型（都是 markdown），
+  `contentType` 原样透传，不伪造（诚实规则）；`details.renderer` 记下实际是谁给的。
+  - **进链前先判能不能救**（`renderMayHelp`）：404/410（页面不存在）、401/402/407
+    （要钱要授权）、429（额度）、451（法务）不渲染 —— 渲染器改变不了这些答案，
+    进去只是花时间和别人的带宽。网络失败（无状态码）、403、5xx 才进。
+  - **共享 45s 预算**：所有渲染器共用一个 deadline，每个拿剩余时间（单次上限 30s），
+    剩不足 5s 就不再起下一个。没有这一条，三个慢供应商串起来能把一次失败变成几分钟。
+  - **顺序 = 可用性**：无 key 的 firecrawl 在前，需 key 的 tinyfish 在后（后者
+    `available()` 为假就直接跳过，不浪费一次 401 往返）。
+  - **匿名访问 Firecrawl REST 是事实，不是承诺**（2026-11-03 复核）：官方文档只
+    写了 `Authorization: Bearer`，没声明 keyless 层。实测：无 Authorization → 200；
+    无效 key → 401 `Invalid token` —— 说明匿名与鉴权是两条真实不同的路径，而不是
+    「没带 key 就当无鉴权」。同一套 keyless 早就在搜索通道里跑着（`/v2/search`）。
+    但**接口没承诺**，所以：任何非 2xx（含 401/403）都只让这一跳失败、继续下一个
+    渲染器，并把原因记进 `details.rendererFailures`；万一匿名被关，卡上会写
+    `firecrawl: HTTP 401`，而不是又一次静默变成「没有内容」。
+  - **排队也算预算，而且排队能被取消**：限流器是串行队列，光在「拿到槽位后」看表
+    只保证不发过期请求，不保证等待本身有上界。所以 `runBefore(fn, {deadline, signal})`
+    让**队列中的**任务在超时或调用取消时立刻以 `null` 退出队列 —— 45s 是整条渲染链的
+    上界，不是「每次 HTTP 请求」的上界。
+    边界的精确说法：它约束的是**调用方等多久**，不是**工作何时停**。一旦 fn 已经开始
+    执行，到点只会让调用方拿到 `null`（结果丢弃），fn 照常跑完 —— 需要真正中止的工作
+    必须自带 deadline 或 signal，渲染器正是这么做的（把剩余时间交给 `fetchWithTimeout`）。
 - **浏览器保险丝已从 web_fetch 移除**（2026-10-31）：它依赖 BrowserSkill 的 CLI
   契约，上游一改版整条 fetch 兜底就失效。
 - **请求头 = 系统 curl 原生**（UA/Accept: */*/无 Accept-Language）；fallback
@@ -205,10 +225,13 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
 - **GitHub blob 直取文件**：`github.com/…/blob/<ref>/<path>` 重写为 raw 内容
   （LLM 要文件而非界面）；raw 不可用回退原 URL。
 - **主路径零中转**：静态友好页始终直取（无 r.jina.ai 类常驻中转）；仅当直取
-  失败（反爬/CSR）才走 tinyfish fetch——它本身就是转发渲染（诚实地位，非隐蔽）；
+  失败（反爬/CSR）才走渲染保险丝——它本身就是转发渲染（诚实地位，非隐蔽）；
   需要登录/交互的页面归 LLM 自行 bash curl。（2026-08 加入 tinyfish fetch 前的
   既有承诺是「无任何第三方 fallback」，现已按保险丝需求修订；2026-10 撤掉
-  浏览器保险丝后，fetch 链只剩这一跳。）
+  浏览器保险丝，2026-11 起渲染链为 firecrawl → tinyfish。）
+- **隐私：兜底默认会把目标 URL 发给渲染供应商**（2026-11-03 定为显式选择 A）。
+  主路径（curl 直取）零中转，但一旦进保险丝，URL 就离开本机——这比搜索发 query
+  更敏感，所以必须在 README 明说，而不是只写「主路径零中转」就完事。
 
 ## 配置
 
