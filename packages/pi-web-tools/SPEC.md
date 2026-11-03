@@ -62,7 +62,7 @@ web_fetch(url: string, raw?: boolean) → { title, content }
 
 ## 通道架构
 
-四条 HTTP 通道按**免费额度从大到小**排成保险丝链。可用性 = 环境事实（key 有无），零配置、零系统语言探测：
+四条 HTTP 通道按**免费额度从大到小**排成保险丝链。可用性 = key 是否解析得到（环境变量优先，其次 `<agent 目录>/web-tools.json`），零配置、零系统语言探测：
 
 | 通道 | 免费额度 | key 缺省时 |
 |---|---|---|
@@ -235,6 +235,16 @@ Accept: */*——身份一致即止，不投 h1/密套调优（该路径近乎�
 
 ## 配置
 
+**key 的两个来源**（2026-11-03 加入文件源）：
+
+1. 环境变量 `TINYFISH_API_KEY` / `EXA_API_KEY` / `TAVILY_API_KEY` / `FIRECRAWL_API_KEY`
+2. `<agent 目录>/web-tools.json`（`getAgentDir()`，默认 `~/.pi/agent/web-tools.json`），扁平 `{ "<provider>": "<key>" }`
+
+环境变量优先：它是更明确的、按次生效的选择，也是 CI 里唯一存在的来源。文件**按进程读一次并缓存**，从不写入；缺失/读不出/JSON 非法/类型不对，一律等于「没配」——与变量未设置完全等价，不产生错误。未知 provider 项被忽略而不是报错（文件比 provider 活得久时不该拖垮剩下的）。
+
+没有项目级文件：key 是用户级的，`.pi/web-tools.json` 只会招来提交进仓库的风险。pi 本身没有扩展密钥存储（`auth.json` 属于 LLM provider），「env 优先 + 自己的 JSON」是生态里同类扩展收敛的做法，我们沿用同一形状。
+
+
 API key 环境变量（有则升级、无则降级，全部可选）：
 
 | 变量 | 作用 |
@@ -246,7 +256,7 @@ API key 环境变量（有则升级、无则降级，全部可选）：
 | `PI_WEB_TOOLS_NO_CURL=1` | 跳过系统 curl 子进程（hermetic 测试 / 无 curl 环境强制 fallback；存在性探测一次并缓存） |
 （没有本机二进制相关配置：真实浏览器通道已移除。）
 
-无 `PI_WEB_TOOLS_ENGINES`、无系统语言探测——可用性就是环境事实，变更即时生效（每请求检测）。
+无 `PI_WEB_TOOLS_ENGINES`、无系统语言探测——可用性跟着 key 走：环境变量每请求实时读取，文件按路径读一次并缓存（`resetKeysCache()` 可清）。
 
 ## 不在此范围
 

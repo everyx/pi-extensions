@@ -2,7 +2,8 @@
  * pi-web-tools — channel registry (SPEC 通道架构).
  *
  * The fuse, in order — one self-describing channel object per adapter:
- * environment gate (key presence), capability gate, the search call, and the
+ * environment gate (a key resolves — env var, else the user's key file),
+ * capability gate, the search call, and the
  * card echo. Adding a channel = one adapter file + one entry here. The walk
  * itself (failover, failure capture, the no-candidate case) lives in
  * search/fuse.ts. TinyFish first (unlimited free tier), Firecrawl last (its

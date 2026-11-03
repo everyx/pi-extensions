@@ -12,6 +12,7 @@
  */
 
 import Exa from "exa-js";
+import { apiKey } from "../../config.js";
 import { isoToRelativeAge } from "../../date.js";
 import { fetchWithTimeout } from "../../http.js";
 import { createRateLimiter } from "../../rate-limit.js";
@@ -26,7 +27,7 @@ const DEFAULT_RESULTS = 5;
 const mcpLimiter = createRateLimiter(3);
 
 function exaApiKey(): string | null {
-	const key = process.env.EXA_API_KEY?.trim();
+	const key = apiKey("exa");
 	return key && key.length > 0 ? key : null;
 }
 

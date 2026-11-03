@@ -13,6 +13,7 @@
  * key exists (same policy as the search channel, which shares the vendor).
  */
 
+import { apiKey } from "../../config.js";
 import { fetchWithTimeout } from "../../http.js";
 import { createRateLimiter } from "../../rate-limit.js";
 import type { RenderOutcome } from "../../types.js";
@@ -91,6 +92,6 @@ export async function fetchWithFirecrawl(
 /** Whether a key is configured — mirrors the search channel's policy: the
  *  channel runs keyless regardless, the key only raises the ceiling. */
 export function firecrawlFetchKey(): string | null {
-	const key = process.env.FIRECRAWL_API_KEY?.trim();
+	const key = apiKey("firecrawl");
 	return key && key.length > 0 ? key : null;
 }

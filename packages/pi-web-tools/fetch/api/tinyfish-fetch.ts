@@ -7,6 +7,7 @@
  * trying anyway would spend a round trip to learn nothing.
  */
 
+import { apiKey } from "../../config.js";
 import { fetchWithTimeout } from "../../http.js";
 import { createRateLimiter } from "../../rate-limit.js";
 import type { RenderOutcome } from "../../types.js";
@@ -26,7 +27,7 @@ interface TinyfishFetchResponse {
  *  (verified 2026-11-03: 401 MISSING_API_KEY without one), so it is skipped
  *  rather than spending a round trip on a refusal. */
 export function tinyfishFetchKey(): string | null {
-	const key = process.env.TINYFISH_API_KEY?.trim();
+	const key = apiKey("tinyfish");
 	return key && key.length > 0 ? key : null;
 }
 
