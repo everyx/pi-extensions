@@ -227,13 +227,24 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("message_end", async (event) => {
+		// Only an assistant message ends a generation. pi also emits message_end
+		// for tool results and custom messages — and a tool result arrives *after*
+		// the tool ran, so taking the clock here would divide this turn's tokens
+		// by the tool's duration and leave that number on screen until the next
+		// delta. That is the difference between ~40 T/s and ~0.4 T/s.
+		const message = (event as { message?: { role?: string; usage?: { output?: number } } } | null)?.message;
+		if (message?.role !== "assistant") return;
+
 		// Exact provider output tokens when the finalized message carries usage;
 		// falls back to the chars estimate otherwise (some providers omit usage
 		// or exclude reasoning from output — the jump to exact is expected).
-		const usage = (event as { message?: { usage?: { output?: number } } } | null)?.message?.usage;
+		const usage = message.usage;
 		const exact = usage && typeof usage.output === "number" ? usage.output : undefined;
 		const avg = metrics.averageTps(Date.now(), exact);
 		if (avg !== null) lastTpsText = formatTps(avg);
+		// The generation is over: nothing after this may recompute against a
+		// stale first-token timestamp.
+		metrics.clear();
 		requestRender();
 	});
 
