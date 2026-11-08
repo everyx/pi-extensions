@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.6](https://github.com/everyx/pi-extensions/compare/pi-status-line-v1.0.5...pi-status-line-v1.0.6) (2026-11-08)
+
+
+### Bug Fixes
+
+* **pi-status-line:** do not divide a turn by the time its tools took ([de36945](https://github.com/everyx/pi-extensions/commit/de369451da6377119632e77fc2f4383a496ff0e8))
+
 ## [1.0.5](https://github.com/everyx/pi-extensions/compare/pi-status-line-v1.0.4...pi-status-line-v1.0.5) (2026-09-07)
 
 
