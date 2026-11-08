@@ -34,6 +34,11 @@ pi 的 footer（`Footer` 组件，`render(width): string[]`）内置拼
   “瞬时”在客户端不可观测；运行平均单调收敛到终值，仅一次估算→精确跳变。
 - **工具等待天然排除**：pi 的 `turn_start` 每次生成段都发一次（agent-core
   agent-loop 实证），工具执行落在 turn 之间，无需显式暂停计时。
+- **但 `message_end` 不止一种**：pi 对**工具结果**同样发 `message_start`/`message_end`
+  （`emitToolResultMessage`），而那一刻时钟已经在工具跑完之后。若不辨角色就用现在
+  的时间重算，本轮 token 会被工具时长除一遍——40 T/s 的数字瞬间变成 0.4 T/s，
+  而且一直挂在脚注上直到下一个 delta。所以只有 `role === "assistant"` 的
+  `message_end` 才结算，结算后立刻 `clear()` 本轮状态。
 - TTFT 单列（`turn_start → firstToken`，会话平均）。
 
 ## 行为
@@ -41,7 +46,7 @@ pi 的 footer（`Footer` 组件，`render(width): string[]`）内置拼
 ```
 turn_start ──► 记录 t0（TTFT 起点）；显示值保持到新一轮第一个 token 到来才覆盖
 message_update (text/thinking delta) ──► 只累计字符（不逐 delta 估算）；冻结直播 TPS = 运行平均（估算分子 / 首token→now 全程墙钟），requestRender
-message_end ──► 终值冻结：provider 精确 usage.output（无则回退估算） / 首token→末token 墙钟
+message_end (仅 role=assistant) ──► 终值冻结：provider 精确 usage.output（无则回退估算） / 首token→末token 墙钟；随后 clear() 本轮状态（工具结果的 message_end 一律忽略）
 footer render 只读缓存文本，永不以渲染时刻 Date.now() 重算——输入触发的重渲染会让 total/elapsed 分母膨胀、数字边打字边掉
 turn_end 之后持久化保留（等下一轮第一个 token 再覆盖），仅 session_shutdown 清空
 ```
